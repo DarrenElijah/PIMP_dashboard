@@ -21,10 +21,7 @@
       <h1>Pro Insulation MP Hub</h1>
       <p class="muted">Sign in to manage jobs, cost trackers, invoices, timesheets, employees, and assignments.</p>
 
-      <div class="setup-warning" id="setupWarning">
-        <strong>Connect Supabase first.</strong>
-        <span>Supabase connection is locked by the administrator. Contact the office admin if the connection fails.</span>
-      </div>
+      <div class="setup-warning hidden" id="setupWarning" aria-hidden="true"></div>
 
       <form id="loginForm" class="stack">
         <label>
@@ -40,7 +37,7 @@
         <button class="btn primary" type="submit">Sign In</button>
       </form>
 
-      <p class="tiny">Use your Supabase anon/publishable key here. Never use the service role key in this browser dashboard.</p>
+      <p class="tiny">Authorized users can sign in with their Supabase email and password. No setup information is required on this screen.</p>
     </div>
   </section>
 

@@ -2,22 +2,34 @@
 /* ==========================================================================
    PRO INSULATION MP - SUPABASE DASHBOARD
    --------------------------------------------------------------------------
-   1. Open Settings in the app.
-   2. Paste your Supabase project URL.
-   3. Paste your Supabase anon/publishable key.
-   4. Sign in with a Supabase Auth user.
+   Supabase is locked into the website code for GitHub Pages deployment.
+
+   BEFORE DEPLOYING:
+   1. Replace LOCKED_SUPABASE_PROJECT_URL with your Supabase Project URL.
+   2. Replace LOCKED_SUPABASE_ANON_KEY with your Supabase anon / publishable key.
+   3. Do NOT use the service_role key in this browser app.
+   4. Users will only see the email/password login form.
    ========================================================================== */
 
 const CONFIG_STORAGE_KEY = "pimp_dashboard_supabase_config_v1";
 
-// Locked Supabase connection. Set these once before deploying.
-// Use the Supabase Project URL and anon/publishable key only; never use a service role key in this browser app.
-const LOCKED_SUPABASE_PROJECT_URL = "PASTE_SUPABASE_PROJECT_URL_HERE";
-const LOCKED_SUPABASE_ANON_KEY = "PASTE_SUPABASE_ANON_OR_PUBLISHABLE_KEY_HERE";
+// Locked Supabase connection for GitHub Pages.
+// Paste your real Supabase Project URL and anon/publishable key below.
+// Example URL format: https://abcdefghijklmnopqrst.supabase.co
+// IMPORTANT: never paste a service_role key into frontend website code.
+const LOCKED_SUPABASE_PROJECT_URL = "https://tqiidpwjrzteansymqoc.supabase.co";
+const LOCKED_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxaWlkcHdqcnp0ZWFuc3ltcW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgxODEzNDQsImV4cCI6MjA5Mzc1NzM0NH0.__U7r7ZlsEj0FWpdjoQRLWgtBxtsiJuz0wRGPzuBroE";
 
 function getLockedSupabaseConfigValue(value) {
   const text = String(value || "").trim();
-  return text && !text.includes("PASTE_SUPABASE") ? text : "";
+  const isPlaceholder =
+    !text ||
+    text.includes("YOUR_PROJECT_REF") ||
+    text.includes("YOUR_SUPABASE") ||
+    text.includes("PASTE_SUPABASE") ||
+    text.includes("PASTE_");
+
+  return isPlaceholder ? "" : text;
 }
 
 const state = {
@@ -54,19 +66,25 @@ function init() {
   }
 }
 
+function bindIfExists(selector, eventName, handler) {
+  const element = $(selector);
+  if (element) element.addEventListener(eventName, handler);
+}
+
 function bindEvents() {
-  $("#loginForm").addEventListener("submit", handleLogin);
-  $("#signOutBtn").addEventListener("click", handleSignOut);
-  $("#refreshBtn").addEventListener("click", loadAllData);
-  $("#quickCreateJobBtn").addEventListener("click", () => showView("jobs"));
+  bindIfExists("#loginForm", "submit", handleLogin);
+  bindIfExists("#signOutBtn", "click", handleSignOut);
+  bindIfExists("#refreshBtn", "click", loadAllData);
+  bindIfExists("#quickCreateJobBtn", "click", () => showView("jobs"));
 
-  $("#openSettingsBtn").addEventListener("click", openSettings);
-  $("#openSettingsFromLogin").addEventListener("click", openSettings);
-  $("#saveSettingsBtn").addEventListener("click", saveSettings);
-  $("#clearSettingsBtn").addEventListener("click", clearSettings);
-
+  // Supabase settings are intentionally locked in code for GitHub Pages.
+  // There is no visible settings button for users.
   const globalSearch = $("#globalSearch");
   if (globalSearch) globalSearch.addEventListener("input", renderAll);
+
+  $$(".table-search").forEach((input) => {
+    input.addEventListener("input", renderAll);
+  });
 
   $$(".nav-btn").forEach((button) => {
     button.addEventListener("click", () => showView(button.dataset.view));
@@ -76,40 +94,31 @@ function bindEvents() {
     button.addEventListener("click", () => showView(button.dataset.viewJump));
   });
 
-  $("#jobForm").addEventListener("submit", handleCreateJob);
-  $("#costTrackerForm").addEventListener("submit", handleSaveCostTracker);
-  $("#invoiceForm").addEventListener("submit", handleCreateInvoice);
-  $("#employeeForm").addEventListener("submit", handleCreateEmployee);
-  $("#assignmentForm").addEventListener("submit", handleCreateAssignment);
-  $("#timesheetForm").addEventListener("submit", handleCreateTimesheet);
+  bindIfExists("#jobForm", "submit", handleCreateJob);
+  bindIfExists("#costTrackerForm", "submit", handleSaveCostTracker);
+  bindIfExists("#invoiceForm", "submit", handleCreateInvoice);
+  bindIfExists("#employeeForm", "submit", handleCreateEmployee);
+  bindIfExists("#assignmentForm", "submit", handleCreateAssignment);
+  bindIfExists("#timesheetForm", "submit", handleCreateTimesheet);
 }
 
 function getConfig() {
-  try {
-    return JSON.parse(localStorage.getItem(CONFIG_STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
+  // Kept only for compatibility with older saved browsers.
+  // The active Supabase connection now comes from locked constants below.
+  return {};
 }
 
-function saveConfig(config) {
-  localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+function saveConfig(_config) {
+  // Settings are locked in code; users cannot change Supabase connection values.
 }
 
 function loadConfigIntoSettings() {
-  const config = getConfig();
-  const settingsUrl = $("#settingsUrl");
-  const settingsAnonKey = $("#settingsAnonKey");
-  if (settingsUrl) settingsUrl.value = config.url || getLockedSupabaseConfigValue(LOCKED_SUPABASE_PROJECT_URL);
-  if (settingsAnonKey) settingsAnonKey.value = config.anonKey || getLockedSupabaseConfigValue(LOCKED_SUPABASE_ANON_KEY);
+  // Settings UI was removed intentionally.
 }
 
 function initSupabase() {
-  const savedConfig = getConfig();
-  const lockedUrl = getLockedSupabaseConfigValue(LOCKED_SUPABASE_PROJECT_URL);
-  const lockedAnonKey = getLockedSupabaseConfigValue(LOCKED_SUPABASE_ANON_KEY);
-  const url = lockedUrl || savedConfig.url || "";
-  const anonKey = lockedAnonKey || savedConfig.anonKey || "";
+  const url = getLockedSupabaseConfigValue(LOCKED_SUPABASE_PROJECT_URL);
+  const anonKey = getLockedSupabaseConfigValue(LOCKED_SUPABASE_ANON_KEY);
 
   if (!url || !anonKey) {
     state.supabase = null;
@@ -122,51 +131,32 @@ function initSupabase() {
     return;
   }
 
-  state.supabase = window.supabase.createClient(url, anonKey);
+  state.supabase = window.supabase.createClient(url, anonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
 }
 
 function updateConnectionWarning() {
+  // Keep the login screen clean. Connection details are locked in app.js,
+  // so users should only see the email/password form.
   const warning = $("#setupWarning");
-  if (!warning) return;
-  const hasClient = Boolean(state.supabase);
-  warning.classList.toggle("hidden", hasClient);
+  if (warning) warning.classList.add("hidden");
 }
 
 function openSettings() {
-  const dialog = $("#settingsDialog");
-  if (!dialog) {
-    showToast("Supabase settings are locked by the administrator.", true);
-    return;
-  }
-  loadConfigIntoSettings();
-  dialog.showModal();
+  showToast("Supabase connection settings are locked in the website code.", true);
 }
 
 function saveSettings() {
-  const url = $("#settingsUrl").value.trim();
-  const anonKey = $("#settingsAnonKey").value.trim();
-
-  if (!url || !anonKey) {
-    showToast("Please enter both Supabase URL and anon/publishable key.", true);
-    return;
-  }
-
-  saveConfig({ url, anonKey });
-  initSupabase();
-  updateConnectionWarning();
-  $("#settingsDialog").close();
-  showToast("Supabase settings saved.");
-
-  checkSession();
+  showToast("Supabase connection settings are locked in the website code.", true);
 }
 
 function clearSettings() {
-  localStorage.removeItem(CONFIG_STORAGE_KEY);
-  $("#settingsUrl").value = "";
-  $("#settingsAnonKey").value = "";
-  state.supabase = null;
-  updateConnectionWarning();
-  showToast("Supabase settings cleared.");
+  showToast("Supabase connection settings are locked in the website code.", true);
 }
 
 async function checkSession() {
@@ -205,8 +195,8 @@ async function handleLogin(event) {
   event.preventDefault();
 
   if (!state.supabase) {
-    openSettings();
-    showToast("Add Supabase settings first.", true);
+    updateConnectionWarning();
+    showToast("Unable to connect right now. Refresh the page and try again.", true);
     return;
   }
 
