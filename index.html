@@ -11,6 +11,7 @@
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
 <body>
   <div id="toast" class="toast hidden"></div>
@@ -61,7 +62,6 @@
         <button class="nav-btn" data-view="invoices">Invoices</button>
         <button class="nav-btn" data-view="timesheets">Timesheets</button>
         <button class="nav-btn" data-view="employees">Employees</button>
-        <button class="nav-btn" data-view="documents">Documents</button>
       </nav>
 
       <div class="sidebar-actions sidebar-footer-note">
@@ -76,6 +76,7 @@
           <h2 id="viewTitle">Dashboard</h2>
         </div>
         <div class="topbar-actions global-actions">
+          <button class="btn ghost sidebar-toggle-btn" id="sidebarToggleBtn" type="button" aria-pressed="false">Hide Menu</button>
           <button class="btn primary" id="quickCreateJobBtn" type="button">+ New Job</button>
           <button class="btn ghost" id="refreshBtn" type="button">Refresh Data</button>
           <button class="btn danger" id="signOutBtn" type="button">Sign Out</button>
@@ -110,6 +111,38 @@
             <strong id="statOpenInvoices">$0.00</strong>
           </article>
         </div>
+
+
+
+        <section class="beginner-start-panel" id="beginnerStartPanel">
+          <div class="beginner-start-copy">
+            <p class="eyebrow">Beginner Guide</p>
+            <h3>Start here if you are not sure what to do next</h3>
+            <p>Use these steps from left to right. The website saves everything to Supabase so files and job documents can be found later.</p>
+          </div>
+          <div class="beginner-steps-grid">
+            <button class="beginner-step-card" data-view-jump="jobs" type="button">
+              <span>1</span>
+              <strong>Create a Job</strong>
+              <small>Add the customer, job number, dates, and basic job information.</small>
+            </button>
+            <button class="beginner-step-card" data-view-jump="costTrackers" type="button">
+              <span>2</span>
+              <strong>Cost Tracker</strong>
+              <small>Fill out the bid sheet. After a job is saved, open the job row to attach an existing Excel cost tracker.</small>
+            </button>
+            <button class="beginner-step-card" data-view-jump="invoices" type="button">
+              <span>3</span>
+              <strong>Invoice / Timesheet</strong>
+              <small>Create invoices and daily timesheets from the saved job information.</small>
+            </button>
+            <button class="beginner-step-card" data-view-jump="jobs" type="button">
+              <span>4</span>
+              <strong>Job Details</strong>
+              <small>Open a job row to view and attach cost trackers, invoices, timesheets, and job files.</small>
+            </button>
+          </div>
+        </section>
 
         <div class="grid-2">
           <section class="panel">
@@ -151,10 +184,10 @@
               </label>
               <label>Start Date<input name="start_date" type="date" /></label>
               <label>End Date<input name="end_date" type="date" /></label>
-              <label class="wide">Job File URL<input name="google_drive_url" placeholder="Optional Google Sheet link" /></label>
             </div>
             <div class="form-actions">
               <button class="btn ghost hidden" id="cancelJobEditBtn" type="button">Cancel Edit</button>
+              <button class="btn ghost" id="clearJobFormBtn" type="button">Clear All</button>
               <button class="btn primary" id="jobSubmitBtn" type="submit">Create Job</button>
             </div>
           </form>
@@ -195,11 +228,12 @@
             <div class="panel-header compact sheet-page-header">
               <div>
                 <h3>Bid / Cost Tracking Sheet</h3>
-                <p class="tiny">This view is laid out like the Google Sheets Bid Sheet. Personnel regular hours auto-calculate from Total Days × 8 × Qty for rows with Qty 1 or more, but the Hours field can be manually overridden.</p>
+                <p class="tiny">This view is laid out like the Google Sheets Bid Sheet. Labor hours are entered manually; Total Days will not auto-fill the Hours cells.</p>
               </div>
               <div class="sheet-header-actions">
                 <label class="sheet-job-picker">Job / AFE <select name="job_id" class="job-select"></select></label>
-                <button class="btn ghost" id="resetCostTrackerBtn" type="button">Reset</button>
+                <button class="btn ghost" id="clearCostTrackerJobBtn" type="button">Clear Job Info</button>
+                <button class="btn ghost" id="resetCostTrackerBtn" type="button">Clear</button>
                 <button class="btn ghost" id="downloadCostTrackerDraftBtn" type="button">Download Excel</button>
                 <button class="btn primary" type="submit">Save Cost Tracker</button>
               </div>
@@ -311,7 +345,10 @@
                       <div class="summary-margin-label">Gross Margin</div><div class="summary-margin" id="marginPreview">0.00%</div>
                     </div>
 
-                    <label class="quoted-override-cell">Quoted Price Override<input name="quoted_price_override" type="number" step="0.01" placeholder="Leave blank to use rate total" /></label>
+                    <div class="sheet-manual-total-overrides" aria-label="Manual final total overrides">
+                      <label class="total-override-cell rate-override-cell">Rate Total Override<input name="quoted_price_override" type="number" step="0.01" placeholder="Leave blank to use calculated rate total" /></label>
+                      <label class="total-override-cell cost-override-cell">Cost Total Override<input name="cost_total_override" type="number" step="0.01" placeholder="Leave blank to use calculated cost total" /></label>
+                    </div>
                   </div>
                 </div>
 
@@ -321,7 +358,12 @@
                 </div>
               </div>
             </div>
-          </form>
+                      <div class="form-actions sticky-actions builder-save-strip cost-tracker-save-strip">
+              <button class="btn ghost" id="costTrackerBottomClearBtn" type="button">Clear</button>
+              <button class="btn primary builder-save-btn" type="submit">Save Cost Tracker</button>
+            </div>
+
+</form>
 
           <section class="panel table-panel cost-list-panel">
             <div class="panel-header table-panel-header">
@@ -364,25 +406,27 @@
             <div class="panel-header compact invoice-builder-header">
               <div>
                 <h3>Invoice Template</h3>
-                <p class="tiny">This invoice is formatted like the spreadsheet Invoice_Template. Select a saved cost tracker and the invoice fills automatically from that tracker’s Rate Total. Review it, then save and download the PDF.</p>
+                <p class="tiny">This invoice is formatted like the spreadsheet Invoice_Template. Select a saved cost tracker to autofill the invoice from that tracker’s Rate Total, or leave it blank to create a standalone invoice. Review it, then save and download the PDF.</p>
               </div>
               <div class="invoice-toolbar-actions">
-                <button class="btn ghost" id="generateInvoiceNumberBtn" type="button">Generate #</button>
                 <button class="btn ghost" id="previewInvoiceBtn" type="button">Preview</button>
                 <button class="btn ghost" id="downloadInvoicePdfBtn" type="button">Download PDF</button>
+                <button class="btn ghost" id="clearInvoiceFormBtn" type="button">Clear Invoice</button>
                 <button class="btn primary" type="submit">Save Invoice</button>
               </div>
             </div>
 
             <div class="invoice-source-panel">
-              <label>Source Cost Tracker <span class="field-hint">auto-fills invoice subtotal from Rate Total</span>
+              <label>Source Cost Tracker <span class="field-hint">optional — auto-fills subtotal from Rate Total</span>
                 <select id="invoiceSourceCostTracker" name="cost_tracker_id" class="cost-tracker-select">
                   <option value="">Select a saved cost tracker...</option>
                 </select>
               </label>
-              <label>Job / AFE
-                <select name="job_id" class="job-select"></select>
-              </label>
+              <input type="hidden" name="job_id" />
+              <div class="invoice-source-note">
+                <strong>Job / AFE is optional.</strong>
+                <span>Selecting a cost tracker can connect the invoice to that tracker’s job automatically. You can also save an invoice without any job connected.</span>
+              </div>
               <label>Status
                 <select name="status">
                   <option value="unsent">Unsent</option>
@@ -395,7 +439,6 @@
                 <input name="due_date" type="date" />
               </label>
             </div>
-
             <div class="invoice-template-scroll">
               <article id="invoiceTemplateEditor" class="invoice-template-document invoice-template-editor">
                 <div class="invoice-template-logo"><img src="NEW_logo.png" alt="PIMP" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span>PIMP</span></div>
@@ -415,7 +458,7 @@ EIN # __________</textarea>
                 </div>
                 <div class="invoice-template-number-label">Invoice #</div>
                 <div class="invoice-template-number-value">
-                  <input name="invoice_number" placeholder="Enter #" required />
+                  <input name="invoice_number" placeholder="Required — enter invoice #" autocomplete="off" required />
                 </div>
 
                 <div class="invoice-template-bill-label">Bill To</div>
@@ -461,14 +504,39 @@ Pro Insulation MP
 Account # __________</textarea>
                 </div>
 
-                <div class="invoice-template-totals">
-                  <div class="invoice-total-row"><span>Subtotal</span><strong id="invoiceSubtotalPreview">$0.00</strong></div>
-                  <div class="invoice-total-row tax-row"><span>Sales Tax</span><label><input name="tax_rate" type="number" step="0.001" value="0" />%</label><strong id="invoiceTaxPreview">$0.00</strong></div>
-                  <div class="invoice-total-row"><span>Total</span><strong id="invoiceTotalPreview">$0.00</strong></div>
-                  <div class="invoice-total-row"><span>Payments/Credits</span><label><input name="payments" type="number" step="0.01" value="0" /></label></div>
-                  <div class="invoice-total-row balance"><span>Balance Due</span><strong id="invoiceBalancePreview">$0.00</strong></div>
+                <div class="invoice-template-totals invoice-template-totals-editable">
+                  <div class="invoice-total-row editable-total-row">
+                    <span>Subtotal</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Subtotal"><input id="invoiceSubtotalPreview" class="invoice-total-input" name="subtotal" type="number" step="0.01" data-invoice-total-field="subtotal" /></label>
+                  </div>
+                  <div class="invoice-total-row tax-row editable-total-row">
+                    <span>Sales Tax</span>
+                    <label class="invoice-tax-rate-field" aria-label="Sales tax rate"><input name="tax_rate" type="number" step="0.001" value="0" />%</label>
+                    <label class="invoice-total-field" aria-label="Sales tax amount"><input id="invoiceTaxPreview" class="invoice-total-input" name="tax" type="number" step="0.01" data-invoice-total-field="tax" /></label>
+                  </div>
+                  <div class="invoice-total-row editable-total-row">
+                    <span>Total</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Total"><input id="invoiceTotalPreview" class="invoice-total-input" name="total" type="number" step="0.01" data-invoice-total-field="total" /></label>
+                  </div>
+                  <div class="invoice-total-row editable-total-row">
+                    <span>Payments/Credits</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Payments and credits"><input id="invoicePaymentsPreview" class="invoice-total-input" name="payments" type="number" step="0.01" value="0" data-invoice-total-field="payments" /></label>
+                  </div>
+                  <div class="invoice-total-row balance editable-total-row">
+                    <span>Balance Due</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Balance due"><input id="invoiceBalancePreview" class="invoice-total-input" name="balance_due" type="number" step="0.01" data-invoice-total-field="balance_due" /></label>
+                  </div>
                 </div>
               </article>
+            </div>
+
+            <div class="form-actions sticky-actions builder-save-strip invoice-save-strip">
+              <button class="btn ghost" id="clearInvoiceFormBottomBtn" type="button">Clear Invoice</button>
+              <button class="btn primary builder-save-btn" type="submit">Save Invoice</button>
             </div>
 
             <div id="invoiceItems" class="hidden"></div>
@@ -719,41 +787,21 @@ Account # __________</textarea>
           </section>
         </div>
       </section>
-
-      <section id="documentsView" class="view">
-        <section class="panel documents-hub-panel">
-          <div class="panel-header documents-hub-header table-panel-header">
+      <section id="documentsView" class="view hidden" aria-hidden="true">
+        <section class="panel documents-moved-panel">
+          <div class="panel-header">
             <div>
-              <h3>Job Document Hub</h3>
-              <p class="tiny">View, download, and track documents connected to each job. If something has not been made yet, use the guide buttons to jump to the correct page.</p>
+              <h3>Job Documents moved to Jobs</h3>
+              <p class="tiny">Open the Jobs page and click a job row to view its cost tracker, invoices, timesheets, uploaded files, and missing-document guide.</p>
             </div>
-            <div class="table-toolbar-inline documents-toolbar-inline">
-              <input id="documentsSearch" class="table-search" type="search" placeholder="Search documents..." />
-              <span id="documentsCount" class="pill">0</span>
-            </div>
+            <button class="btn primary" data-view-jump="jobs" type="button">Go to Jobs</button>
           </div>
-
-          <div id="documentsHubSummary" class="documents-summary-grid"></div>
-          <div id="documentsJobHub" class="documents-job-hub"></div>
-
-          <details class="documents-legacy-details">
-            <summary>Legacy document records</summary>
-            <div class="table-wrap">
-              <table class="data-table documents-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>File Name</th>
-                    <th>Job</th>
-                    <th>Status</th>
-                    <th>Open</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="documentsTable"></tbody>
-              </table>
-            </div>
-          </details>
+          <input id="documentsSearch" class="hidden table-search" type="search" aria-hidden="true" />
+          <span id="documentsCount" class="hidden">0</span>
+          <div id="documentsHubSummary" class="hidden"></div>
+          <div id="documentsJobHub" class="hidden"></div>
+          <div id="uploadedJobFilesPanel" class="hidden"></div>
+          <table class="hidden"><tbody id="documentsTable"></tbody></table>
         </section>
       </section>
     </main>

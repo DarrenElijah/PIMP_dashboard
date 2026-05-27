@@ -5949,3 +5949,1398 @@ label {
     min-width: 0;
   }
 }
+
+/* ========================================================================
+   BEGINNER NAVIGATION + JOB FILE UPLOAD UI
+   ======================================================================== */
+.beginner-start-panel,
+.form-upload-guide,
+.job-file-upload-panel,
+.uploaded-files-section {
+  border: 1px solid rgba(29, 78, 216, 0.14);
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border-radius: 24px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.07);
+}
+
+.beginner-start-panel {
+  margin: 18px 0;
+  padding: 22px;
+  display: grid;
+  gap: 18px;
+}
+
+.beginner-start-copy h3,
+.job-file-upload-copy h4,
+.upload-guide-copy h4,
+.uploaded-files-header h4 {
+  margin: 4px 0 6px;
+  letter-spacing: -0.03em;
+}
+
+.beginner-start-copy p,
+.job-file-upload-copy p,
+.upload-guide-copy p,
+.uploaded-files-header p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.beginner-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.beginner-step-card {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  border-radius: 18px;
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  color: var(--ink);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.beginner-step-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(29, 78, 216, 0.35);
+  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.09);
+}
+
+.beginner-step-card span {
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: #eff6ff;
+  color: var(--brand-dark);
+  font-weight: 900;
+}
+
+.beginner-step-card strong {
+  font-size: 1rem;
+}
+
+.beginner-step-card small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.form-upload-guide {
+  margin: 10px 0 16px;
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.upload-guide-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.upload-field input[type="file"],
+.document-upload-form input[type="file"] {
+  padding: 10px;
+  border-style: dashed;
+  background: #f8fafc;
+}
+
+.job-file-upload-panel {
+  padding: 18px;
+  margin-bottom: 18px;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.document-upload-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.document-upload-form .wide {
+  grid-column: 1 / -1;
+}
+
+.document-upload-form button {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+
+.uploaded-job-files-panel {
+  margin-bottom: 18px;
+}
+
+.uploaded-files-section {
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.uploaded-files-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.uploaded-file-job-group {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.uploaded-file-job-title {
+  padding: 14px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+
+.uploaded-file-job-title span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.uploaded-file-list {
+  display: grid;
+}
+
+.uploaded-file-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.uploaded-file-row:last-child {
+  border-bottom: 0;
+}
+
+.uploaded-file-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: #eff6ff;
+  font-size: 1.25rem;
+}
+
+.uploaded-file-info {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.uploaded-file-info strong,
+.uploaded-file-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploaded-file-info span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.uploaded-file-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.uploaded-files-empty {
+  border: 1px dashed var(--line);
+  border-radius: 18px;
+  padding: 18px;
+  background: #f8fafc;
+}
+
+@media (max-width: 1150px) {
+  .beginner-steps-grid,
+  .job-file-upload-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .beginner-steps-grid,
+  .job-file-upload-panel,
+  .document-upload-form {
+    grid-template-columns: 1fr;
+  }
+
+  .document-upload-form .wide,
+  .document-upload-form button {
+    grid-column: auto;
+    justify-self: stretch;
+  }
+
+  .uploaded-files-header,
+  .uploaded-file-job-title,
+  .uploaded-file-row {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .uploaded-file-actions {
+    justify-content: flex-start;
+  }
+}
+
+
+
+/************************************************************
+ * JOB PAGE DOCUMENT DETAILS UPDATE
+ ************************************************************/
+.documents-moved-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.job-main-row {
+  cursor: pointer;
+}
+
+.job-main-row.expanded td {
+  background: #eef6ff;
+  border-bottom-color: #bfdbfe;
+}
+
+.job-row-open-btn {
+  margin-top: 4px;
+  font-size: 0.78rem;
+}
+
+.job-document-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.job-doc-chip {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.job-doc-chip.made {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.job-doc-chip.missing {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.job-details-row td {
+  padding: 0;
+  background: #f8fbff;
+}
+
+.job-details-panel {
+  margin: 0;
+  padding: 22px;
+  border: 1px solid #bfdbfe;
+  border-radius: 0 0 22px 22px;
+  background: linear-gradient(180deg, #f8fbff, #ffffff);
+  display: grid;
+  gap: 18px;
+}
+
+.job-details-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 14px;
+}
+
+.job-details-header h4,
+.job-detail-upload-card h5,
+.job-detail-section h5 {
+  margin: 3px 0 4px;
+  letter-spacing: -0.03em;
+}
+
+.job-details-header p,
+.job-detail-upload-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.job-details-counts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.job-details-counts span {
+  background: #eff6ff;
+  color: #1e3a8a;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.job-documents-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.job-document-status-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+  background: #fff;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.job-document-status-card.ready {
+  border-color: #bbf7d0;
+  background: #f7fff9;
+}
+
+.job-document-status-card.missing {
+  border-color: #e2e8f0;
+  background: #f8fafc;
+}
+
+.job-document-status-card strong,
+.job-detail-file-info strong,
+.job-detail-mini-row strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.job-document-status-card span,
+.job-detail-file-info span,
+.job-detail-mini-row span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.job-document-status-actions {
+  display: grid;
+  gap: 8px;
+  align-content: end;
+}
+
+.job-document-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status.job-doc-ready {
+  background: #dcfce7;
+  color: #166534;
+  width: max-content;
+}
+
+.status.job-doc-missing {
+  background: #f1f5f9;
+  color: #64748b;
+  width: max-content;
+}
+
+.job-details-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.job-detail-section,
+.job-detail-upload-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.job-detail-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.job-detail-section-header h5 {
+  margin: 0;
+}
+
+.job-detail-mini-list,
+.job-detail-file-list {
+  display: grid;
+  gap: 9px;
+}
+
+.job-detail-mini-row,
+.job-detail-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.job-detail-file-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.job-detail-file-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.job-detail-empty {
+  margin: 0;
+  padding: 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.job-detail-upload-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+  align-items: start;
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.job-detail-upload-form {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.job-detail-upload-form .wide {
+  grid-column: auto;
+}
+
+@media (max-width: 1100px) {
+  .job-documents-status-grid,
+  .job-details-split-grid,
+  .job-detail-upload-card,
+  .job-detail-upload-form {
+    grid-template-columns: 1fr;
+  }
+
+  .job-details-header {
+    display: grid;
+  }
+
+  .job-details-counts {
+    justify-content: flex-start;
+  }
+}
+
+
+
+/* Final invoice optional-job cleanup */
+.invoice-source-panel .invoice-source-note {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  min-height: 70px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #eff6ff;
+  color: #1e3a8a;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+.invoice-source-panel .invoice-source-note strong {
+  font-size: 0.86rem;
+}
+.invoice-source-panel .invoice-source-note span {
+  color: #475569;
+  font-weight: 650;
+}
+@media (max-width: 900px) {
+  .invoice-source-panel .invoice-source-note {
+    min-height: auto;
+  }
+}
+
+
+/* ========================================================================
+   FINAL JOB TABLE + BID SHEET PREVIEW VISUAL PATCH
+   ======================================================================== */
+.job-upload-guide {
+  display: none !important;
+}
+
+.jobs-table tbody tr.job-main-row {
+  border-left: 7px solid #1d4ed8;
+  background: #ffffff;
+  box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.06);
+}
+
+.jobs-table tbody tr.job-main-row:nth-of-type(4n + 1) {
+  border-left-color: #0ea5e9;
+}
+
+.jobs-table tbody tr.job-main-row:nth-of-type(4n + 3) {
+  border-left-color: #16a34a;
+}
+
+.jobs-table tbody tr.job-main-row:hover td {
+  background: #eef6ff;
+}
+
+.jobs-table tbody tr.job-main-row.expanded td {
+  background: #eff6ff;
+  border-bottom-color: #bfdbfe;
+}
+
+.job-main-row td:first-child strong {
+  font-size: 1.02rem;
+  color: #0f172a;
+}
+
+.job-row-open-btn {
+  margin-top: 6px;
+  padding: 4px 0;
+}
+
+.job-details-row td {
+  background: #f8fbff !important;
+  padding: 0 0 18px 0;
+}
+
+.job-details-panel {
+  margin: 0 12px 14px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 22px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
+
+.job-detail-upload-card {
+  border: 1px dashed #93c5fd;
+  background: #eff6ff;
+}
+
+.job-detail-upload-card h5::after {
+  content: " — Cost Tracker, Invoice, Timesheet, or Job File";
+  color: #64748b;
+  font-weight: 700;
+}
+
+.job-detail-upload-form select,
+.job-detail-upload-form input[type="file"] {
+  background: #ffffff;
+}
+
+.exact-bid-preview-shell {
+  width: 100%;
+  background: #ffffff;
+}
+
+.exact-bid-scroll {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid #111827;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 0;
+}
+
+.exact-bid-sheet-table {
+  width: 100%;
+  min-width: 1050px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  color: #111827;
+}
+
+.exact-bid-sheet-table td {
+  border: 1px solid #111827;
+  padding: 5px 6px;
+  height: 25px;
+  vertical-align: middle;
+  background: #ffffff;
+  overflow-wrap: anywhere;
+}
+
+.exact-bid-sheet-table .exact-title-row td {
+  background: #111827;
+  color: #ffffff;
+  font-weight: 900;
+  text-align: center;
+  font-size: 18px;
+  letter-spacing: 0.04em;
+}
+
+.exact-bid-sheet-table .exact-title-row td:not(:first-child) {
+  color: transparent;
+}
+
+.exact-bid-sheet-table .exact-section-row td {
+  background: #111827;
+  color: #ffffff;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.exact-bid-sheet-table tr:nth-child(8) td,
+.exact-bid-sheet-table tr:nth-child(14) td,
+.exact-bid-sheet-table tr:nth-child(19) td,
+.exact-bid-sheet-table tr:nth-child(24) td,
+.exact-bid-sheet-table tr:nth-child(29) td {
+  background: #f3f4f6;
+  font-weight: 900;
+  text-align: center;
+}
+
+.exact-bid-sheet-table .editable-cell {
+  background: #d9eaf7;
+}
+
+.exact-bid-sheet-table .money-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.exact-bid-sheet-table .exact-total-row td {
+  background: #e5e7eb;
+  font-weight: 900;
+}
+
+.exact-bid-sheet-table .exact-summary-row td:first-child,
+.exact-bid-sheet-table .exact-summary-row td:nth-child(2) {
+  font-weight: 900;
+}
+
+.exact-bid-sheet-table .exact-summary-row:nth-last-child(4) td:first-child,
+.exact-bid-sheet-table .exact-summary-row:nth-last-child(4) td:nth-child(2) {
+  background: #f4b183;
+}
+
+.exact-bid-sheet-table .first-col {
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .jobs-table tbody tr.job-main-row {
+    border-left-width: 5px;
+  }
+
+  .job-details-panel {
+    margin: 0 4px 12px 4px;
+  }
+}
+
+/* ========================================================================
+   FINAL EXISTING DOCUMENT UPLOAD + ORIGINAL COST TRACKER PREVIEW FIX
+   ======================================================================== */
+#costTrackerPreviewContent .original-cost-template-preview .input-red,
+#costTrackerPreviewContent .original-cost-template-preview .red-head {
+  background: #ff0d0d !important;
+  color: #000 !important;
+  border-color: #111 !important;
+  font-weight: 700;
+  text-align: center;
+}
+
+#costTrackerPreviewContent .original-cost-template-preview .input-blue {
+  background: #b7cde3 !important;
+  color: #000 !important;
+  border-color: #111 !important;
+  text-align: center;
+}
+
+#costTrackerPreviewContent .original-cost-template-preview .summary-value.orange {
+  background: #ff9933 !important;
+}
+
+#costTrackerPreviewContent .original-cost-template-preview .summary-value.blue {
+  background: #00a2ff !important;
+}
+
+#costTrackerPreviewContent .original-cost-template-preview .summary-profit.yellow {
+  background: #ffff99 !important;
+}
+
+#costTrackerPreviewContent .original-cost-template-preview .sheet-grid-layout {
+  grid-template-columns: 790px 450px;
+}
+
+#costTrackerPreviewContent .original-cost-template-preview .sheet-table {
+  margin-bottom: 0;
+}
+
+.job-detail-upload-form input[type="file"] {
+  cursor: pointer;
+}
+
+
+/* Existing document upload fix / clearer job upload UI */
+.job-detail-upload-card {
+  border: 1px solid rgba(29, 78, 216, 0.18);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.job-detail-upload-form {
+  align-items: end;
+}
+
+.job-detail-upload-form input[type="file"] {
+  border: 1.5px dashed #93c5fd;
+  background: #eff6ff;
+  cursor: pointer;
+}
+
+.job-main-row {
+  border-left: 5px solid transparent;
+}
+
+.job-main-row:nth-child(4n + 1) {
+  border-left-color: #1d4ed8;
+}
+
+.job-main-row:nth-child(4n + 3) {
+  border-left-color: #16a34a;
+}
+
+.job-main-row.expanded td,
+.job-detail-row td {
+  background: #f8fbff;
+}
+
+.job-row-open-btn {
+  margin-top: 6px;
+  white-space: nowrap;
+}
+
+.job-detail-upload-card h5 {
+  margin: 4px 0;
+}
+
+.job-detail-upload-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+
+/* Final upload/invoice-flow repair polish */
+.job-detail-upload-form[data-final-upload-repair-ui="true"] {
+  grid-template-columns: minmax(190px, 260px) minmax(260px, 1fr) auto;
+  align-items: end;
+}
+.job-detail-upload-form[data-final-upload-repair-ui="true"] input[type="file"] {
+  border-style: dashed;
+  background: #f8fafc;
+}
+.job-detail-upload-card {
+  border: 1px solid rgba(29, 78, 216, 0.18);
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+.job-document-status-card.ready {
+  border-left: 5px solid var(--success);
+}
+.job-document-status-card.missing {
+  border-left: 5px solid var(--warning);
+}
+.job-main-row.expanded td,
+.job-main-row:hover td {
+  background: #f8fbff;
+}
+.job-main-row td:first-child {
+  border-left: 4px solid rgba(29, 78, 216, 0.18);
+}
+.job-main-row.expanded td:first-child {
+  border-left-color: var(--brand);
+}
+@media (max-width: 900px) {
+  .job-detail-upload-form[data-final-upload-repair-ui="true"] {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/************************************************************
+ * COLLAPSIBLE SIDEBAR FINAL PATCH
+ ************************************************************/
+
+.sidebar-toggle-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.app-shell {
+  transition: grid-template-columns 0.22s ease;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed .sidebar {
+  width: 0;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-shell.sidebar-collapsed .main {
+  width: 100%;
+  max-width: 100%;
+}
+
+.app-shell.sidebar-collapsed .sheet-workspace,
+.app-shell.sidebar-collapsed .sheet-panel,
+.app-shell.sidebar-collapsed .table-panel,
+.app-shell.sidebar-collapsed .panel {
+  max-width: 100%;
+}
+
+@media (max-width: 820px) {
+  .sidebar-toggle-btn {
+    order: -1;
+  }
+
+  .app-shell.sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ========================================================================
+   MANUAL TOTAL OVERRIDE FIELDS
+   ------------------------------------------------------------------------
+   Lets users adjust final cost tracker and invoice totals without changing
+   every line item.
+   ======================================================================== */
+.sheet-manual-total-overrides {
+  margin: 16px 0 0 64px;
+  max-width: 438px;
+  display: grid;
+  gap: 8px;
+}
+
+.total-override-cell,
+.quoted-override-cell {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 238px);
+  align-items: center;
+  gap: 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.total-override-cell input,
+.quoted-override-cell input {
+  border: 2px solid #111;
+  border-radius: 0;
+  padding: 5px 6px;
+  text-align: right;
+  font-weight: 800;
+}
+
+.rate-override-cell input,
+.quoted-override-cell input {
+  background: #ff9933;
+}
+
+.cost-override-cell input {
+  background: #00a2ff;
+}
+
+.invoice-manual-adjustments {
+  margin: 14px 20px 0;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background: #eff6ff;
+  display: grid;
+  grid-template-columns: minmax(230px, 1.5fr) repeat(5, minmax(130px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.invoice-manual-adjustments .manual-adjustment-copy {
+  display: grid;
+  gap: 4px;
+  color: #1e3a8a;
+  line-height: 1.35;
+}
+
+.invoice-manual-adjustments .manual-adjustment-copy strong {
+  font-size: 0.95rem;
+}
+
+.invoice-manual-adjustments .manual-adjustment-copy span {
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.invoice-manual-adjustments label {
+  font-size: 0.78rem;
+}
+
+.invoice-manual-adjustments input {
+  min-height: 38px;
+  text-align: right;
+  font-weight: 800;
+  background: #ffffff;
+}
+
+.invoice-template-totals #invoicePaymentsPreview {
+  color: #111;
+}
+
+@media (max-width: 1300px) {
+  .invoice-manual-adjustments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .invoice-manual-adjustments .manual-adjustment-copy {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .sheet-manual-total-overrides,
+  .total-override-cell,
+  .quoted-override-cell {
+    margin-left: 0;
+    max-width: none;
+    grid-template-columns: 1fr;
+  }
+
+  .invoice-manual-adjustments {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ========================================================================
+   DIRECTLY EDITABLE INVOICE TOTALS
+   ------------------------------------------------------------------------
+   Invoice override boxes were removed. Totals are edited directly in the
+   invoice template so autofilled invoices can be adjusted in place.
+   ======================================================================== */
+.invoice-manual-adjustments {
+  display: none !important;
+}
+
+.invoice-template-totals-editable .invoice-total-row,
+.invoice-template-totals .invoice-total-row.editable-total-row {
+  grid-template-columns: 1.45fr 0.72fr 1.05fr !important;
+}
+
+.invoice-template-totals .invoice-total-field,
+.invoice-template-totals .invoice-tax-rate-field {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 1mm !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: #111 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+
+.invoice-template-totals .invoice-total-input,
+.invoice-template-totals .invoice-tax-rate-field input {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  padding: 1mm 2mm !important;
+  color: #111 !important;
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  text-align: right !important;
+  line-height: 1 !important;
+  -moz-appearance: textfield;
+}
+
+.invoice-template-totals .invoice-tax-rate-field input {
+  max-width: 15mm !important;
+  padding-right: 0.5mm !important;
+}
+
+.invoice-template-totals .invoice-total-input::-webkit-outer-spin-button,
+.invoice-template-totals .invoice-total-input::-webkit-inner-spin-button,
+.invoice-template-totals .invoice-tax-rate-field input::-webkit-outer-spin-button,
+.invoice-template-totals .invoice-tax-rate-field input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.invoice-template-totals .invoice-total-input:focus,
+.invoice-template-totals .invoice-tax-rate-field input:focus {
+  background: #fff7cc !important;
+  box-shadow: inset 0 0 0 1px #d97706 !important;
+}
+
+.invoice-template-totals .invoice-total-input[data-invoice-manual="true"] {
+  background: #fff7cc !important;
+}
+
+.invoice-template-totals .balance .invoice-total-input {
+  font-size: 13px !important;
+  font-weight: 800 !important;
+}
+
+.invoice-template-print .invoice-total-input,
+.invoice-template-print .invoice-tax-rate-field input {
+  display: none !important;
+}
+
+
+/* ========================================================================
+   FINAL INVOICE EDITING POLISH
+   ------------------------------------------------------------------------
+   Make every editable invoice-template control fill its printed box/cell.
+   ======================================================================== */
+#generateInvoiceNumberBtn {
+  display: none !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document input,
+#invoiceTemplateEditor.invoice-template-document textarea,
+.invoice-template-document.invoice-template-print input,
+.invoice-template-document.invoice-template-print textarea {
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+  resize: none !important;
+  display: block !important;
+}
+
+#invoiceTemplateEditor .invoice-template-company,
+#invoiceTemplateEditor .invoice-template-bill-value,
+#invoiceTemplateEditor .invoice-template-description,
+#invoiceTemplateEditor .invoice-template-wire,
+#invoiceTemplateEditor .invoice-template-date-value,
+#invoiceTemplateEditor .invoice-template-number-value,
+#invoiceTemplateEditor .invoice-template-po-value,
+#invoiceTemplateEditor .invoice-template-terms-value,
+#invoiceTemplateEditor .invoice-template-project-value {
+  padding: 0 !important;
+}
+
+#invoiceTemplateEditor .invoice-template-company textarea,
+#invoiceTemplateEditor .invoice-template-bill-value textarea,
+#invoiceTemplateEditor .invoice-template-description textarea,
+#invoiceTemplateEditor .invoice-template-wire textarea {
+  padding: 2mm !important;
+  line-height: 1.18 !important;
+  white-space: pre-wrap !important;
+}
+
+#invoiceTemplateEditor .invoice-template-date-value input,
+#invoiceTemplateEditor .invoice-template-number-value input,
+#invoiceTemplateEditor .invoice-template-po-value input,
+#invoiceTemplateEditor .invoice-template-terms-value input,
+#invoiceTemplateEditor .invoice-template-project-value input {
+  padding: 1mm 2mm !important;
+  text-align: center !important;
+}
+
+#invoiceTemplateEditor .invoice-template-lines th,
+#invoiceTemplateEditor .invoice-template-lines td {
+  padding: 0 !important;
+}
+
+#invoiceTemplateEditor .invoice-template-lines th {
+  padding: 1mm !important;
+}
+
+#invoiceTemplateEditor .invoice-template-line input,
+#invoiceTemplateEditor .invoice-template-line textarea {
+  padding: 1mm !important;
+  line-height: 1.15 !important;
+  text-align: inherit !important;
+}
+
+#invoiceTemplateEditor .invoice-template-line .line-description {
+  max-height: none !important;
+  height: 100% !important;
+  min-height: 100% !important;
+}
+
+/************************************************************
+ * INVOICE MAIN SECTION ROW CLIPPING FIX
+ * Gives the invoice line-item area enough room for the generated rows
+ * and prevents the bottom borders/text from being hidden.
+ ************************************************************/
+.invoice-template-document.invoice-template-editor .invoice-template-lines,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines {
+  top: 4.12in !important;
+  height: 2.58in !important;
+  overflow: visible !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-lines table,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines table {
+  height: 100% !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-lines th,
+.invoice-template-document.invoice-template-editor .invoice-template-lines td,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines th,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines td {
+  padding-top: 3px !important;
+  padding-bottom: 3px !important;
+  line-height: 1.18 !important;
+  overflow: visible !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-lines tbody tr,
+.invoice-template-document.invoice-template-editor .invoice-empty-row td,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines tbody tr,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-empty-row td {
+  height: 0.292in !important;
+  min-height: 0.292in !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-line input,
+.invoice-template-document.invoice-template-editor .invoice-template-line textarea,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-line input,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-line textarea {
+  height: 100% !important;
+  min-height: 0.255in !important;
+  line-height: 1.18 !important;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+  overflow: hidden !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-line .line-description,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-line .line-description {
+  height: 100% !important;
+  min-height: 0.255in !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-payee,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-payee {
+  top: 6.84in !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-wire-title,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-wire-title {
+  top: 7.16in !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-wire,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-wire {
+  top: 7.38in !important;
+  height: 0.84in !important;
+}
+
+.invoice-template-document.invoice-template-editor .invoice-template-totals,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-totals {
+  top: 6.84in !important;
+}
+
+.invoice-template-document.a4-invoice-page .invoice-template-lines {
+  height: 86mm !important;
+  overflow: visible !important;
+}
+
+.invoice-template-document.a4-invoice-page .invoice-template-lines table {
+  height: 100% !important;
+  min-height: 100% !important;
+  overflow: visible !important;
+}
+
+.invoice-template-document.a4-invoice-page .invoice-template-lines th,
+.invoice-template-document.a4-invoice-page .invoice-template-lines td {
+  padding-top: 1.2mm !important;
+  padding-bottom: 1.2mm !important;
+  line-height: 1.18 !important;
+}
+
+.invoice-template-document.a4-invoice-page .invoice-template-lines tbody tr,
+.invoice-template-document.a4-invoice-page .invoice-empty-row td {
+  height: 9.875mm !important;
+  min-height: 9.875mm !important;
+}
+
+.invoice-template-document.a4-invoice-page .invoice-template-lines .static-multiline {
+  line-height: 1.18 !important;
+  max-height: 18mm !important;
+  overflow: hidden !important;
+}
+
+
+/************************************************************
+ * EASY SAVE / CLEAR ACTIONS
+ ************************************************************/
+.builder-save-strip {
+  position: sticky;
+  bottom: 14px;
+  z-index: 16;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 20px 20px;
+  padding: 12px;
+  border: 1px solid rgba(191, 219, 254, 0.95);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(8px);
+}
+
+.builder-save-strip .btn {
+  min-width: 150px;
+}
+
+.builder-save-strip .builder-save-btn {
+  min-width: 190px;
+  font-size: 0.95rem;
+}
+
+.invoice-save-strip {
+  margin-top: 10px;
+}
+
+.cost-tracker-save-strip {
+  margin-top: 14px;
+}
+
+@media (max-width: 720px) {
+  .builder-save-strip {
+    left: 12px;
+    right: 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .builder-save-strip .btn {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+
+/************************************************************
+ * FINAL INVOICE P.O. / TERMS / PROJECT VISIBILITY FIX
+ * Keeps the main line table from covering the P.O. No., Terms,
+ * and Project boxes in the editable invoice template.
+ ************************************************************/
+#invoiceTemplateEditor .invoice-template-po-label,
+#invoiceTemplateEditor .invoice-template-terms-label,
+#invoiceTemplateEditor .invoice-template-project-label {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  z-index: 40 !important;
+  background: #ffffff !important;
+}
+
+#invoiceTemplateEditor .invoice-template-po-value,
+#invoiceTemplateEditor .invoice-template-terms-value,
+#invoiceTemplateEditor .invoice-template-project-value {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  z-index: 40 !important;
+  background: #ffffff !important;
+}
+
+#invoiceTemplateEditor .invoice-template-po-value input,
+#invoiceTemplateEditor .invoice-template-terms-value input,
+#invoiceTemplateEditor .invoice-template-project-value input {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  background: transparent !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines {
+  top: 4.62in !important;
+  height: 2.08in !important;
+  z-index: 5 !important;
+}
+
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-po-label,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-terms-label,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-project-label,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-po-value,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-terms-value,
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-project-value {
+  visibility: visible !important;
+  opacity: 1 !important;
+  z-index: 40 !important;
+  background: #ffffff !important;
+}
+
+.invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines {
+  top: 4.24in !important;
+  height: 2.46in !important;
+  z-index: 5 !important;
+}

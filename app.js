@@ -1246,9 +1246,9 @@ function extractCostTrackerLineItems() {
   return items;
 }
 
-function getLaborDayHoursMultiplier(totalJobDays = null) {
-  const days = totalJobDays === null || totalJobDays === undefined ? getCostTrackerTotalDaysValue() : number(totalJobDays);
-  return days && days > 0 ? days * 8 : 1;
+function getLaborDayHoursMultiplier(_totalJobDays = null) {
+  // Labor hours are now always entered manually by the user.
+  return 1;
 }
 
 function hasNumericInput(fields, field) {
@@ -1258,19 +1258,19 @@ function hasNumericInput(fields, field) {
   return value !== undefined && value !== null && String(value).trim() !== "";
 }
 
-function effectiveLaborRegularHours(fields, totalJobDays = null) {
+function effectiveLaborRegularHours(fields, _totalJobDays = null) {
   const qty = number(fields?.qty);
   if (qty < 1) return 0;
 
-  // Manual hours override the auto calculation. When the Hours field is left blank,
-  // the sheet uses Total Days × 8 × Qty.
-  if (hasNumericInput(fields, "hours")) return number(fields.hours);
+  // Hours are intentionally manual only. Leaving Hours blank means 0 regular hours;
+  // Total Days should not fill or change the Hours cell.
+  return hasNumericInput(fields, "hours") ? number(fields.hours) : 0;
+}
 
-  const days = totalJobDays === null || totalJobDays === undefined
-    ? getCostTrackerTotalDaysValue()
-    : number(totalJobDays);
-
-  return days > 0 ? days * 8 * qty : 0;
+function calculateLaborPersonnelHours(fields, totalJobDays = null) {
+  const qty = hasNumericInput(fields, "qty") ? number(fields.qty) : 0;
+  const regularHours = effectiveLaborRegularHours(fields, totalJobDays);
+  return qty > 0 ? qty * regularHours : 0;
 }
 
 function calculateCostLine(category, fields, options = {}) {
@@ -1281,11 +1281,16 @@ function calculateCostLine(category, fields, options = {}) {
 
   if (category === "labor") {
     const regularHours = effectiveLaborRegularHours(fields, options.totalJobDays);
+    const personnelHours = calculateLaborPersonnelHours(fields, options.totalJobDays);
     const otHours = hasNumericInput(fields, "ot_hours") ? number(fields.ot_hours) : 0;
-    const costTotal = regularHours * number(fields.cost_rate) + qty * otHours * number(fields.ot_cost_rate);
-    const quotedTotal = regularHours * number(fields.bill_rate) + qty * otHours * number(fields.ot_bill_rate);
+    const otPersonnelHours = qty > 0 ? qty * otHours : 0;
+    // Personnel hours = QTY x regular hours. Example: Qty 2 x 8 regular hours = 16 personnel hours.
+    const costTotal = personnelHours * number(fields.cost_rate) + otPersonnelHours * number(fields.ot_cost_rate);
+    const quotedTotal = personnelHours * number(fields.bill_rate) + otPersonnelHours * number(fields.ot_bill_rate);
     return {
-      effective_hours: roundMoney(regularHours),
+      regular_hours: roundMoney(regularHours),
+      effective_hours: roundMoney(personnelHours),
+      personnel_hours: roundMoney(personnelHours),
       cost_total: roundMoney(costTotal),
       quoted_total: roundMoney(quotedTotal)
     };
@@ -1357,7 +1362,7 @@ function recomputeCostTrackerTotals() {
   syncRegularLaborHoursFromTotalDays();
 
   const values = formToObject(form);
-  const items = extractCostTrackerLineItems();
+  const items = extractCostTrackerLineItems({ includeBlank: true });
   const summary = summarizeCostItems(items, number(values.quoted_price_override));
 
   setText("#costTotalPreview", money(summary.totalCost));
@@ -2150,6 +2155,7 @@ function initializeCostInvoiceBuilders() {
   });
 
   on("#resetCostTrackerBtn", "click", () => resetCostTrackerForm());
+  on("#clearCostTrackerJobBtn", "click", () => clearCostTrackerJobInfo());
 
   on("#generateInvoiceNumberBtn", "click", () => {
     const input = $('#invoiceForm [name="invoice_number"]');
@@ -2438,6 +2444,17 @@ async function createInitialCostTrackerAndInvoiceForJob(job, sourceValues = {}) 
   const invoice = await upsertAutoInvoiceFromCostTracker(tracker, job, "draft");
 
   return { tracker, invoice };
+}
+
+function clearCostTrackerJobInfo() {
+  const form = $("#costTrackerForm");
+  if (!form) return;
+
+  setFormValue(form, "job_id", "");
+  setFormValue(form, "total_job_days", "");
+  updateCostSheetHeaderFromSelectedJob();
+  recomputeCostTrackerTotals();
+  showToast("Job information cleared from this cost tracker. The tracker rows were not changed.");
 }
 
 function buildCostTrackerPayload(job, items, summary, notes = null, formValues = {}) {
@@ -3154,6 +3171,7 @@ function initializeCostInvoiceBuilders() {
   });
 
   on("#resetCostTrackerBtn", "click", () => resetCostTrackerForm());
+  on("#clearCostTrackerJobBtn", "click", () => clearCostTrackerJobInfo());
 
   on("#generateInvoiceNumberBtn", "click", () => {
     const input = $('#invoiceForm [name="invoice_number"]');
@@ -3213,57 +3231,30 @@ function getCostTrackerTotalDaysValue() {
   return number(input.value);
 }
 
-function regularHoursFromTotalDays(totalDays) {
-  const days = number(totalDays);
-  return days > 0 ? days * 8 : null;
+function regularHoursFromTotalDays(_totalDays) {
+  // Kept for compatibility with older code paths; labor hours are manual only.
+  return null;
 }
 
 function handleCostTrackerManualHoursInput(event) {
   const input = event?.target?.closest?.('#costTrackerForm .sheet-cost-row[data-category="labor"] [data-field="hours"]');
   if (!input) return;
 
-  const value = String(input.value || "").trim();
-  const currentAutoValue = String(input.dataset.autoHoursValue || "").trim();
-
-  // Empty Hours means "go back to auto."
-  // A value matching the current auto calculation is still considered auto.
-  // Any other typed value becomes a manual override and will not be overwritten
-  // when Total Days or Qty changes.
-  input.dataset.manualHoursOverride = value !== "" && value !== currentAutoValue ? "true" : "false";
+  // Hours are manual only. Track whether the user typed a value, but never
+  // compare against or restore an automatic Total Days value.
+  input.dataset.manualHoursOverride = String(input.value || "").trim() !== "" ? "true" : "false";
+  input.dataset.autoHoursValue = "";
 }
 
 function syncRegularLaborHoursFromTotalDays() {
-  const totalDays = getCostTrackerTotalDaysValue();
-
   document.querySelectorAll('#costTrackerForm .sheet-cost-row[data-category="labor"]').forEach((row) => {
-    const qtyInput = row.querySelector('[data-field="qty"]');
     const hoursInput = row.querySelector('[data-field="hours"]');
-    if (!qtyInput || !hoursInput) return;
-
-    const qty = number(qtyInput.value);
-    const currentValue = String(hoursInput.value || "").trim();
-    const previousAuto = String(hoursInput.dataset.autoHoursValue || "").trim();
-    const isManualOverride = hoursInput.dataset.manualHoursOverride === "true" && currentValue !== "";
+    if (!hoursInput) return;
 
     hoursInput.readOnly = false;
-    hoursInput.classList.add("auto-calculated-hours");
-    hoursInput.title = "Auto-filled from Total Days × 8 × Qty when blank. Type your own hours to override; clear the cell to return to auto.";
-
-    if (qty >= 1 && totalDays > 0) {
-      const autoValue = cleanNumberDisplay(totalDays * 8 * qty);
-      hoursInput.dataset.autoHoursValue = autoValue;
-
-      if (!isManualOverride && (currentValue === "" || currentValue === previousAuto)) {
-        hoursInput.value = autoValue;
-        hoursInput.dataset.manualHoursOverride = "false";
-      }
-    } else {
-      hoursInput.dataset.autoHoursValue = "";
-      if (!isManualOverride) {
-        hoursInput.value = "";
-        hoursInput.dataset.manualHoursOverride = "false";
-      }
-    }
+    hoursInput.classList.remove("auto-calculated-hours");
+    hoursInput.dataset.autoHoursValue = "";
+    hoursInput.title = "Enter regular hours manually. Total Days no longer fills this field.";
   });
 }
 
@@ -3342,7 +3333,7 @@ function addSheetCostRow(category, defaults = {}) {
       <td>${sheetInput("description", defaults.description || "", "text")}</td>
       <td>${sheetInput("qty", miscQty, "number", "1", "input-blue")}</td>
       <td>${sheetInput("cost", valueOr(defaults.cost, ""), "number", "0.01", "money-input")}</td>
-      <td><span class="rate-output" data-total="quoted_total">$0.00</span><span class="money-output hidden" data-total="cost_total">$0.00</span></td>
+      <td><span class="rate-output" data-total="quoted_total">$0.00</span><span class="money-output hidden" data-total="cost_total">$0.00</span><input data-field="quoted_override" type="hidden" value="${escapeAttr(valueOr(defaults.quoted_override, ""))}" /></td>
       <td><button class="sheet-remove-btn" data-remove-sheet-row type="button">×</button></td>`;
   } else {
     const markup = defaults.markup_percent ?? defaultMarkup(category);
@@ -3415,7 +3406,7 @@ function recomputeCostTrackerTotals() {
   syncRegularLaborHoursFromTotalDays();
 
   const values = formToObject(form);
-  const items = extractCostTrackerLineItems();
+  const items = extractCostTrackerLineItems({ includeBlank: true });
   const overrideValue = values.quoted_price_override === "" ? null : number(values.quoted_price_override);
   const summary = summarizeCostItems(items, overrideValue);
 
@@ -5871,7 +5862,6 @@ function renderJobs() {
         <td data-label="Files">${fileLinks(job.google_drive_url, job.invoice_pdf_url)}</td>
         <td data-label="Actions" class="table-actions">
           <button class="link-btn" data-edit-job="${escapeAttr(job.id)}" type="button">Edit</button>
-          <button class="link-btn" data-open-cost-for-job="${escapeAttr(job.id)}" type="button">Cost tracker</button>
           <button class="link-btn" data-open-invoice-for-job="${escapeAttr(job.id)}" type="button">Invoice</button>
           <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${escapeAttr(job.id)}" type="button">Delete</button>
         </td>
@@ -6229,6 +6219,7 @@ function initializeCostInvoiceBuilders() {
   });
 
   on("#resetCostTrackerBtn", "click", () => resetCostTrackerForm());
+  on("#clearCostTrackerJobBtn", "click", () => clearCostTrackerJobInfo());
 
   on("#generateInvoiceNumberBtn", "click", () => {
     const form = $("#invoiceForm");
@@ -10528,7 +10519,7 @@ function printDocumentCss() {
 
   function currentCostTrackerItemsAndTotals() {
     let items = [];
-    try { if (typeof extractCostTrackerLineItems === "function") items = extractCostTrackerLineItems(); } catch {}
+    try { if (typeof extractCostTrackerLineItems === "function") items = extractCostTrackerLineItems({ includeBlank: true }); } catch {}
     const totals = totalsFromItems(items);
     return { items, totals };
   }
@@ -12092,7 +12083,7 @@ document.addEventListener("click", (event) => {
       location: ""
     };
 
-    const items = totals?.items || (typeof extractCostTrackerLineItems === "function" ? extractCostTrackerLineItems() : []);
+    const items = totals?.items || (typeof extractCostTrackerLineItems === "function" ? extractCostTrackerLineItems({ includeBlank: true }) : []);
     const summary = {
       ...(totals?.summary || {}),
       totalJobDays: values.total_job_days || totals?.summary?.totalJobDays || "",
@@ -12374,4 +12365,5793 @@ document.addEventListener("click", (event) => {
     // still works, and locked constants at the top of app.js can be used for deployment.
     document.querySelectorAll("#openSettingsBtn, #openSettingsFromLogin, #settingsDialog").forEach((node) => node.remove());
   });
+})();
+
+
+/* ========================================================================
+   FINAL SAFE DELETE OVERRIDE FOR GITHUB PAGES / SUPABASE
+   ------------------------------------------------------------------------
+   Fixes FK errors when deleting Jobs by unlinking dependent records before
+   deleting the job. Invoices, cost trackers, timesheets, and documents are
+   preserved and become unassigned instead of blocking the delete.
+   ======================================================================== */
+(function finalSafeDeleteOverride() {
+  const IGNORABLE_DB_CODES = new Set(["42P01", "42703", "PGRST204"]);
+
+  function shouldIgnoreDependencyError(error) {
+    if (!error) return true;
+    return IGNORABLE_DB_CODES.has(error.code);
+  }
+
+  function isNotNullConstraintError(error) {
+    const message = String(error?.message || error?.details || "").toLowerCase();
+    return error?.code === "23502"
+      || message.includes("not-null constraint")
+      || message.includes("violates not-null")
+      || message.includes("null value in column");
+  }
+
+  async function runDependencyUpdate(table, values, column, id) {
+    const { error } = await state.supabase
+      .from(table)
+      .update(values)
+      .eq(column, id);
+
+    if (error && !shouldIgnoreDependencyError(error)) throw error;
+    return "updated";
+  }
+
+  async function runDependencyDelete(table, column, id) {
+    const { error } = await state.supabase
+      .from(table)
+      .delete()
+      .eq(column, id);
+
+    if (error && !shouldIgnoreDependencyError(error)) throw error;
+    return "deleted";
+  }
+
+  async function runDependencyUpdateOrDelete(table, values, column, id) {
+    const { error } = await state.supabase
+      .from(table)
+      .update(values)
+      .eq(column, id);
+
+    if (!error || shouldIgnoreDependencyError(error)) return "updated";
+
+    // Some existing Supabase databases still have job_id / employee_id marked
+    // NOT NULL. In that case, unassigning records is impossible until the SQL
+    // migration is run, so delete the dependent rows first so the parent job can
+    // still be deleted without showing a database error to the user.
+    if (isNotNullConstraintError(error)) {
+      await runDependencyDelete(table, column, id);
+      return "deleted";
+    }
+
+    throw error;
+  }
+
+  let lastDependencyCleanupResult = {};
+
+  async function detachJobDependencies(jobId) {
+    // Prefer to keep business documents/records by marking them unassigned. If
+    // the live database still blocks NULL job_id values, fall back to deleting
+    // those dependent rows before deleting the job. Run the supplied SQL file to
+    // preserve them as unassigned records in the future.
+    lastDependencyCleanupResult = { jobs: {} };
+    lastDependencyCleanupResult.jobs.costTrackers = await runDependencyUpdateOrDelete("cost_trackers", { job_id: null, last_synced_at: new Date().toISOString() }, "job_id", jobId);
+    lastDependencyCleanupResult.jobs.invoices = await runDependencyUpdateOrDelete("invoices", { job_id: null, last_synced_at: new Date().toISOString() }, "job_id", jobId);
+    lastDependencyCleanupResult.jobs.timesheets = await runDependencyUpdateOrDelete("timesheets", { job_id: null }, "job_id", jobId);
+    lastDependencyCleanupResult.jobs.documents = await runDependencyUpdateOrDelete("documents", { job_id: null, last_synced_at: new Date().toISOString() }, "job_id", jobId);
+
+    // Job assignments only exist because of the job, so remove them.
+    await runDependencyDelete("job_assignments", "job_id", jobId);
+  }
+
+  async function detachEmployeeDependencies(employeeId) {
+    lastDependencyCleanupResult = { employees: {} };
+    await runDependencyDelete("job_assignments", "employee_id", employeeId);
+    lastDependencyCleanupResult.employees.timesheets = await runDependencyUpdateOrDelete("timesheets", { employee_id: null }, "employee_id", employeeId);
+  }
+
+  function removeDeletedRecordFromLocalState(type, id) {
+    const config = getDeleteConfig(type);
+    if (config?.stateKey && Array.isArray(state.data[config.stateKey])) {
+      state.data[config.stateKey] = state.data[config.stateKey].filter((row) => row.id !== id);
+    }
+
+    if (type === "jobs") {
+      const cleanup = lastDependencyCleanupResult.jobs || {};
+      state.data.costTrackers = cleanup.costTrackers === "deleted"
+        ? state.data.costTrackers.filter((tracker) => tracker.job_id !== id)
+        : state.data.costTrackers.map((tracker) => tracker.job_id === id ? { ...tracker, job_id: null } : tracker);
+      state.data.invoices = cleanup.invoices === "deleted"
+        ? state.data.invoices.filter((invoice) => invoice.job_id !== id)
+        : state.data.invoices.map((invoice) => invoice.job_id === id ? { ...invoice, job_id: null } : invoice);
+      state.data.timesheets = cleanup.timesheets === "deleted"
+        ? state.data.timesheets.filter((entry) => entry.job_id !== id)
+        : state.data.timesheets.map((entry) => entry.job_id === id ? { ...entry, job_id: null } : entry);
+      state.data.documents = cleanup.documents === "deleted"
+        ? state.data.documents.filter((doc) => doc.job_id !== id)
+        : state.data.documents.map((doc) => doc.job_id === id ? { ...doc, job_id: null } : doc);
+      state.data.assignments = state.data.assignments.filter((assignment) => assignment.job_id !== id);
+    }
+
+    if (type === "employees") {
+      const cleanup = lastDependencyCleanupResult.employees || {};
+      state.data.assignments = state.data.assignments.filter((assignment) => assignment.employee_id !== id);
+      state.data.timesheets = cleanup.timesheets === "deleted"
+        ? state.data.timesheets.filter((entry) => entry.employee_id !== id)
+        : state.data.timesheets.map((entry) => entry.employee_id === id ? { ...entry, employee_id: null } : entry);
+    }
+  }
+
+  async function safeDeleteDashboardRecord(type, id) {
+    const config = getDeleteConfig(type);
+
+    if (!config || !id) {
+      showToast("Could not identify the record to delete.", true);
+      return;
+    }
+
+    if (!state.supabase || !state.session) {
+      showToast("Sign in before deleting records.", true);
+      return;
+    }
+
+    const row = findStateRowByDeleteType(type, id);
+    const name = row ? config.getName(row) : config.label;
+
+    let confirmMessage = `Delete this ${config.label}${name ? `: ${name}` : ""}?\n\nThis cannot be undone.`;
+    if (type === "jobs") {
+      confirmMessage = `Delete this job${name ? `: ${name}` : ""}?\n\nLinked invoices, cost trackers, timesheets, and documents will be kept and marked unassigned so the delete is not blocked.`;
+    }
+
+    if (!window.confirm(confirmMessage)) return;
+
+    try {
+      if (type === "jobs") await detachJobDependencies(id);
+      if (type === "employees") await detachEmployeeDependencies(id);
+
+      const { error } = await state.supabase
+        .from(config.table)
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+
+      removeDeletedRecordFromLocalState(type, id);
+      hydrateSelects();
+      refreshWebsiteLists();
+      await loadAllData();
+      refreshWebsiteLists();
+      showToast(`${capitalize(config.label)} deleted.`);
+    } catch (error) {
+      const message = error?.message || String(error);
+      if (message.toLowerCase().includes("foreign key") || message.toLowerCase().includes("violates foreign key constraint")) {
+        showToast("Delete is still blocked by a database relationship. Run supabase_delete_job_foreign_key_fix.sql in Supabase, then try again.", true);
+        return;
+      }
+      if (message.toLowerCase().includes("not-null") || message.toLowerCase().includes("null value in column")) {
+        showToast("Delete was blocked by a required linked field. Run supabase_delete_job_foreign_key_fix.sql in Supabase, then try again.", true);
+        return;
+      }
+      showToast(message, true);
+    }
+  }
+
+  window.deleteDashboardRecord = safeDeleteDashboardRecord;
+  try { deleteDashboardRecord = safeDeleteDashboardRecord; } catch {}
+})();
+
+/* ========================================================================
+   FINAL JOB FILE UPLOAD + BEGINNER NAVIGATION PATCH
+   ------------------------------------------------------------------------
+   - Lets users upload an existing Excel cost tracker when creating a job.
+   - Lets users upload any file type to a job from the Documents page.
+   - Saves uploaded files to Supabase Storage and records them in documents.
+   - Keeps the website easier for non-technical users with visible guide panels.
+   ======================================================================== */
+(function finalJobFileUploadBeginnerPatch() {
+  const JOB_DOCUMENT_BUCKET = "job-documents";
+
+  function textSafe(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;"
+    }[char]));
+  }
+
+  function attrSafeUpload(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return textSafe(value);
+  }
+
+  function cleanFileName(fileName) {
+    const base = String(fileName || "uploaded-file").trim() || "uploaded-file";
+    return base
+      .replace(/[^a-zA-Z0-9._ -]/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 150);
+  }
+
+  function fileExtension(fileName) {
+    const match = String(fileName || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+    return match ? match[1] : "";
+  }
+
+  function isSpreadsheetFile(file) {
+    const ext = fileExtension(file?.name);
+    return ["xlsx", "xls", "xlsm", "csv"].includes(ext)
+      || String(file?.type || "").toLowerCase().includes("spreadsheet")
+      || String(file?.type || "").toLowerCase().includes("excel");
+  }
+
+  function displayFileSize(bytes) {
+    const size = Number(bytes || 0);
+    if (!size) return "0 KB";
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function documentTypeIcon(type, name) {
+    const text = `${type || ""} ${name || ""}`.toLowerCase();
+    if (text.includes("cost") || text.includes("xls") || text.includes("excel")) return "📊";
+    if (text.includes("invoice") || text.includes("pdf")) return "📄";
+    if (text.includes("timesheet")) return "🕘";
+    if (text.includes("picture") || text.includes("photo") || text.includes("image") || text.match(/\.(png|jpe?g|webp|gif)$/)) return "🖼️";
+    return "📎";
+  }
+
+  function normalizeDocumentTypeForDatabase(type, file) {
+    const value = String(type || "").trim();
+    const name = String(file?.name || "").toLowerCase();
+    const lower = value.toLowerCase();
+
+    // Some existing Supabase projects still have document_type as an enum.
+    // Keep upload types compatible with the older enum names used by the dashboard.
+    if (lower.includes("cost tracker") || lower.includes("cost") || lower.includes("spreadsheet") || name.match(/\.(xlsx|xls|xlsm)$/)) {
+      return "Cost Tracker";
+    }
+    if (lower.includes("invoice")) return "Invoice";
+    if (lower.includes("timesheet")) return "Timesheet";
+    return "Job File";
+  }
+
+  function getJobLabel(job) {
+    if (!job) return "Unassigned";
+    return `${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}`;
+  }
+
+  function mergeDocumentIntoState(doc) {
+    if (!doc) return;
+    state.data.documents = Array.isArray(state.data.documents) ? state.data.documents : [];
+    const index = state.data.documents.findIndex((row) => row.id === doc.id || (row.external_id && row.external_id === doc.external_id));
+    if (index >= 0) state.data.documents[index] = { ...state.data.documents[index], ...doc };
+    else state.data.documents = [doc, ...state.data.documents];
+  }
+
+  function mergeCostTrackerIntoState(row) {
+    if (!row) return;
+    state.data.costTrackers = Array.isArray(state.data.costTrackers) ? state.data.costTrackers : [];
+    const index = state.data.costTrackers.findIndex((tracker) => tracker.id === row.id || (tracker.external_id && tracker.external_id === row.external_id));
+    if (index >= 0) state.data.costTrackers[index] = { ...state.data.costTrackers[index], ...row };
+    else state.data.costTrackers = [row, ...state.data.costTrackers];
+  }
+
+function documentTypeVariants(type, fileName = "") {
+    const raw = String(type || "Job File").trim() || "Job File";
+    const combined = `${raw} ${fileName || ""}`.toLowerCase();
+    let title = "Job File";
+    let snake = "job_file";
+    if (/cost|tracker|spreadsheet|excel|xlsx|xlsm|xls/.test(combined)) { title = "Cost Tracker"; snake = "cost_tracker"; }
+    else if (/invoice/.test(combined)) { title = "Invoice"; snake = "invoice"; }
+    else if (/timesheet|time sheet/.test(combined)) { title = "Timesheet"; snake = "timesheet"; }
+    const lower = title.toLowerCase();
+    return Array.from(new Set([raw, title, snake, lower, "Job File", "job_file"].filter(Boolean)));
+  }
+
+  async function saveDocumentRecord(payload) {
+    const now = payload.last_synced_at || new Date().toISOString();
+    const normalized = normalizeDocumentTypeForDatabase(payload.document_type || "Job File", {
+      name: payload.file_name || payload.original_file_name || ""
+    });
+    const userId = state?.session?.user?.id || null;
+    const externalId = payload.external_id || `upload:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const fileName = payload.file_name || payload.original_file_name || "Uploaded file";
+
+    const fullBase = {
+      ...payload,
+      job_id: payload.job_id || null,
+      document_type: normalized,
+      file_name: fileName,
+      original_file_name: payload.original_file_name || fileName,
+      file_status: payload.file_status || "uploaded",
+      external_source: payload.external_source || "dashboard-upload",
+      external_id: externalId,
+      last_synced_at: now,
+      uploaded_by: userId
+    };
+
+    const storageBase = {
+      job_id: fullBase.job_id || null,
+      document_type: fullBase.document_type,
+      file_name: fullBase.file_name,
+      original_file_name: fullBase.original_file_name,
+      file_status: fullBase.file_status,
+      google_drive_url: fullBase.google_drive_url || null,
+      pdf_url: fullBase.pdf_url || null,
+      external_source: fullBase.external_source,
+      external_id: fullBase.external_id,
+      last_synced_at: fullBase.last_synced_at,
+      storage_bucket: fullBase.storage_bucket || null,
+      storage_path: fullBase.storage_path || null,
+      mime_type: fullBase.mime_type || null,
+      file_size: fullBase.file_size || null,
+      uploaded_by: userId
+    };
+
+    const inlineBase = {
+      ...storageBase,
+      file_data_base64: fullBase.file_data_base64 || null,
+      file_data_mime_type: fullBase.file_data_mime_type || fullBase.mime_type || null,
+      file_data_size: fullBase.file_data_size || fullBase.file_size || null,
+      storage_error_message: fullBase.storage_error_message || null
+    };
+
+    const compactBase = {
+      job_id: fullBase.job_id || null,
+      document_type: fullBase.document_type,
+      file_name: fullBase.file_name,
+      file_status: fullBase.file_status,
+      google_drive_url: fullBase.google_drive_url || null,
+      pdf_url: fullBase.pdf_url || null,
+      external_source: fullBase.external_source,
+      external_id: fullBase.external_id,
+      last_synced_at: fullBase.last_synced_at
+    };
+
+    function withoutEmptyUndefined(row) {
+      return Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+    }
+
+    function uploadedByVariants(base) {
+      const cleanBase = withoutEmptyUndefined(base);
+      const rows = [cleanBase];
+      if ("uploaded_by" in cleanBase) {
+        rows.push(withoutEmptyUndefined({ ...cleanBase, uploaded_by: null }));
+        const { uploaded_by, ...withoutUploadedBy } = cleanBase;
+        rows.push(withoutEmptyUndefined(withoutUploadedBy));
+      }
+      return rows;
+    }
+
+    async function attemptSave(row) {
+      const cleanRow = withoutEmptyUndefined(row);
+      if (typeof manualUpsert === "function") return manualUpsert("documents", cleanRow, "external_id");
+      const { data, error } = await state.supabase.from("documents").insert(cleanRow).select().single();
+      if (error) throw error;
+      return data;
+    }
+
+    const variants = documentTypeVariants(fullBase.document_type, fullBase.file_name || fullBase.original_file_name);
+    const baseRows = [fullBase, storageBase, inlineBase, compactBase];
+    const attempts = [];
+
+    variants.forEach((documentType) => {
+      baseRows.forEach((base) => {
+        uploadedByVariants({ ...base, document_type: documentType }).forEach((row) => attempts.push(row));
+      });
+    });
+
+    let lastError = null;
+    const seen = new Set();
+    for (const row of attempts) {
+      const key = JSON.stringify(Object.keys(row).sort().map((name) => [name, row[name]]));
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      try {
+        const saved = await attemptSave(row);
+        const merged = { ...fullBase, ...row, ...(saved || {}) };
+        mergeDocumentIntoState(merged);
+        return merged;
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        const retryable = /documents_uploaded_by_fkey|uploaded_by.*foreign key|foreign key constraint.*uploaded_by|uploaded_by.*not-null|null value in column "uploaded_by"|invalid input value for enum|document_type|violates check constraint|column|schema cache|Could not find|does not exist|storage_path|file_data_base64|mime_type|file_size|file_data|storage_bucket|original_file_name|pdf_url|google_drive_url/i.test(message);
+        if (!retryable) throw error;
+      }
+    }
+
+    const detail = lastError?.message || lastError || "Unknown database error";
+    throw new Error(`File uploaded, but the Documents table could not save the file record. Run supabase_existing_document_upload_fix.sql in Supabase SQL Editor, then try again. Details: ${detail}`);
+  }
+
+  function storageSetupErrorMessage(error) {
+    const message = String(error?.message || error || "");
+    if (/bucket|not found|row-level security|policy|permission|violates row-level security|Unauthorized|jwt|signature/i.test(message)) {
+      return `Supabase file storage is not ready: ${message}. Run supabase_file_upload_setup.sql in Supabase SQL Editor, then refresh the website.`;
+    }
+    return message || "File upload failed.";
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Could not read selected file."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function saveInlineFileFallback(file, jobId, documentType, storageError) {
+    const maxInlineBytes = 8 * 1024 * 1024;
+    if ((file.size || 0) > maxInlineBytes) {
+      throw new Error(`${storageSetupErrorMessage(storageError)} This file is too large for the emergency database fallback (${displayFileSize(file.size)}). Run the SQL setup so files save to Supabase Storage.`);
+    }
+
+    const dataUrl = await readFileAsDataUrl(file);
+    const base64 = dataUrl.includes(",") ? dataUrl.split(",").pop() : dataUrl;
+    const safeName = cleanFileName(file.name);
+    const externalId = `inline-upload:${jobId || "unassigned"}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}:${safeName}`;
+
+    const payload = {
+      job_id: jobId || null,
+      document_type: normalizeDocumentTypeForDatabase(documentType || "Job File", file),
+      file_name: file.name,
+      file_status: "uploaded",
+      external_source: "dashboard-inline-upload",
+      external_id: externalId,
+      last_synced_at: new Date().toISOString(),
+      storage_bucket: null,
+      storage_path: null,
+      mime_type: file.type || "application/octet-stream",
+      file_size: file.size || 0,
+      original_file_name: file.name,
+      file_data_base64: base64,
+      file_data_mime_type: file.type || "application/octet-stream",
+      file_data_size: file.size || 0,
+      storage_error_message: String(storageError?.message || storageError || "Storage upload failed")
+    };
+
+    return saveDocumentRecord(payload);
+  }
+
+  async function uploadFileToSupabaseStorage(file, jobId, documentType) {
+    if (!state.supabase || !state.session) throw new Error("Sign in before uploading files.");
+    if (!file) throw new Error("Choose a file to upload.");
+
+    const safeName = cleanFileName(file.name);
+    const jobFolder = jobId || "unassigned";
+    const path = `${jobFolder}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+
+    try {
+      const { error: uploadError } = await state.supabase.storage
+        .from(JOB_DOCUMENT_BUCKET)
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type || "application/octet-stream"
+        });
+
+      if (uploadError) throw uploadError;
+
+      const payload = {
+        job_id: jobId || null,
+        document_type: normalizeDocumentTypeForDatabase(documentType || "Job File", file),
+        file_name: file.name,
+        file_status: "uploaded",
+        external_source: "dashboard-upload",
+        external_id: `upload:${path}`,
+        last_synced_at: new Date().toISOString(),
+        storage_path: path,
+        storage_bucket: JOB_DOCUMENT_BUCKET,
+        mime_type: file.type || "application/octet-stream",
+        file_size: file.size || 0,
+        original_file_name: file.name
+      };
+
+      return saveDocumentRecord(payload);
+    } catch (storageError) {
+      console.warn("Supabase Storage upload failed. Trying small-file fallback:", storageError?.message || storageError);
+      return saveInlineFileFallback(file, jobId, documentType, storageError);
+    }
+  }
+
+  function cellText(rows, row, col) {
+    const value = rows?.[row - 1]?.[col - 1];
+    return value === null || value === undefined ? "" : String(value).trim();
+  }
+
+  function cellNum(rows, row, col) {
+    const value = rows?.[row - 1]?.[col - 1];
+    if (value === null || value === undefined || value === "") return 0;
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const cleaned = String(value).replace(/[$,%]/g, "").replace(/,/g, "").trim();
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function firstNumber(...values) {
+    for (const value of values) {
+      const numeric = Number(value || 0);
+      if (Number.isFinite(numeric) && numeric !== 0) return numeric;
+    }
+    return 0;
+  }
+
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer || []);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+
+  async function parseUploadedCostTrackerWorkbook(file) {
+    if (!window.XLSX || !file || !isSpreadsheetFile(file)) return null;
+
+    const buffer = await file.arrayBuffer();
+    const originalWorkbookBase64 = arrayBufferToBase64(buffer);
+    const workbook = XLSX.read(buffer, { type: "array", cellDates: false, cellFormula: false });
+    const sheetName = workbook.SheetNames.find((name) => /bid|cost|tracker/i.test(name)) || workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return null;
+
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
+    const trackerName = String(file.name || "Uploaded Cost Tracker").replace(/\.[^.]+$/, "");
+
+    const zText = (r, c) => {
+      const value = rows?.[r]?.[c];
+      return value === null || value === undefined ? "" : String(value).trim();
+    };
+
+    const zNum = (r, c) => {
+      const value = rows?.[r]?.[c];
+      if (value === null || value === undefined || value === "") return 0;
+      if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+      const cleaned = String(value).replace(/[,$]/g, "").replace(/%/g, "").trim();
+      const parsed = Number(cleaned);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const rowText = (r) => (rows?.[r] || []).map((value) => String(value ?? "").trim()).join(" ");
+    const isNonZeroNumber = (value) => Number.isFinite(Number(value)) && Number(value) !== 0;
+    const clean = (value) => String(value || "").replace(/[_:]+/g, " ").replace(/\s+/g, " ").trim();
+
+    const excelDateToText = (value) => {
+      if (value === null || value === undefined || value === "") return "";
+      if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
+      if (typeof value === "number" && value > 25000 && value < 80000 && window.XLSX?.SSF?.format) {
+        try { return window.XLSX.SSF.format("m/d/yyyy", value); } catch {}
+      }
+      return String(value).trim();
+    };
+
+    const findCell = (pattern, startRow = 0, endRow = rows.length) => {
+      for (let r = startRow; r < Math.min(rows.length, endRow); r += 1) {
+        const row = rows[r] || [];
+        for (let c = 0; c < row.length; c += 1) {
+          if (pattern.test(String(row[c] ?? "").trim())) return { r, c };
+        }
+      }
+      return null;
+    };
+
+    const valueRightOfLabel = (pattern, maxRight = 5) => {
+      const found = findCell(pattern, 0, 12);
+      if (!found) return "";
+      for (let c = found.c + 1; c <= found.c + maxRight; c += 1) {
+        const value = zText(found.r, c);
+        if (value && !pattern.test(value)) return value;
+      }
+      return "";
+    };
+
+    const rawRightOfLabel = (pattern, maxRight = 5) => {
+      const found = findCell(pattern, 0, 12);
+      if (!found) return null;
+      for (let c = found.c + 1; c <= found.c + maxRight; c += 1) {
+        const value = rows?.[found.r]?.[c];
+        if (value !== null && value !== undefined && String(value).trim() !== "" && !pattern.test(String(value))) return value;
+      }
+      return null;
+    };
+
+    const valueBelowLabel = (pattern, maxDown = 8) => {
+      const found = findCell(pattern, 0, rows.length);
+      if (!found) return "";
+      for (let r = found.r + 1; r <= found.r + maxDown && r < rows.length; r += 1) {
+        const value = zText(r, found.c);
+        if (value && !pattern.test(value)) return value;
+      }
+      return "";
+    };
+
+    const totalDaysRaw = rawRightOfLabel(/total\s*days/i, 4);
+    const meta = {
+      trackerName,
+      costTrackerDate: excelDateToText(rawRightOfLabel(/^date\s*:?$/i, 4)) || valueRightOfLabel(/^date\s*:?$/i, 4),
+      jobNumber: valueRightOfLabel(/job\s*\/\s*afe|afe\s*#/i, 4),
+      client: valueRightOfLabel(/client/i, 5),
+      jobName: valueRightOfLabel(/job\s*name/i, 5) || trackerName,
+      totalJobDays: Number(totalDaysRaw || 0) || zNum(findCell(/total\s*days/i, 0, 12)?.r ?? -1, (findCell(/total\s*days/i, 0, 12)?.c ?? -1) + 1) || 0,
+      location: valueRightOfLabel(/location/i, 5).replace(/^_+$/, ""),
+      comments: (typeof window.__pimpExtractCostTrackerComments === "function" ? window.__pimpExtractCostTrackerComments(rows) : "") || valueBelowLabel(/comments/i, 12),
+      byWhom: (typeof window.__pimpExtractCostTrackerByWhom === "function" ? window.__pimpExtractCostTrackerByWhom(rows) : "") || valueRightOfLabel(/by\s*whom/i, 6),
+      importedSheetName: sheetName,
+      uploadedFileName: file.name,
+      uploadType: "existing_xlsx_cost_tracker",
+      originalWorkbookBase64,
+      originalWorkbookFileName: file.name,
+      originalWorkbookMimeType: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      originalWorkbookSheetName: sheetName
+    };
+
+    const items = [];
+
+    const findHeaderRow = (...patterns) => rows.findIndex((_, r) => {
+      const text = rowText(r).toLowerCase();
+      return patterns.every((pattern) => pattern.test(text));
+    });
+
+    const findEndRow = (startRow, pattern, fallbackCount = 20) => {
+      for (let r = Math.max(0, startRow); r < rows.length; r += 1) {
+        if (pattern.test(rowText(r))) return r;
+      }
+      return Math.min(rows.length, startRow + fallbackCount);
+    };
+
+    const laborHeader = findHeaderRow(/personnel/i, /qty/i, /hours/i, /cost total/i);
+    if (laborHeader >= 0) {
+      const laborEnd = findEndRow(laborHeader + 1, /personnel\s+total/i, 12);
+      for (let r = laborHeader + 1; r < laborEnd; r += 1) {
+        const description = clean(zText(r, 0));
+        if (!description || /total|personnel/i.test(description)) continue;
+        const qty = zNum(r, 2);
+        const hours = zNum(r, 3);
+        const costRate = zNum(r, 4);
+        const otHours = zNum(r, 5);
+        const otCost = zNum(r, 6);
+        const costTotal = firstNumber(zNum(r, 7), qty * hours * costRate + qty * otHours * otCost);
+        const billRate = zNum(r, 8);
+        const otBill = zNum(r, 9);
+        const quotedTotal = firstNumber(zNum(r, 10), qty * hours * billRate + qty * otHours * otBill);
+        if (description) {
+          items.push({
+            category: "labor",
+            description,
+            qty,
+            hours,
+            cost_rate: costRate,
+            ot_hours: otHours,
+            ot_cost_rate: otCost,
+            bill_rate: billRate,
+            ot_bill_rate: otBill,
+            effective_hours: hours,
+            cost_total: costTotal,
+            quoted_total: quotedTotal
+          });
+        }
+      }
+    }
+
+    const equipmentHeader = findHeaderRow(/equipment/i, /qty/i, /cost total/i, /rate total/i);
+    if (equipmentHeader >= 0) {
+      const equipmentEnd = findEndRow(equipmentHeader + 1, /equipment\s+total/i, 16);
+      for (let r = equipmentHeader + 1; r < equipmentEnd; r += 1) {
+        const description = clean(zText(r, 0));
+        if (!description || /total|equipment/i.test(description)) continue;
+        const qty = zNum(r, 2);
+        const hours = zNum(r, 3);
+        const costRate = zNum(r, 4);
+        const days = zNum(r, 5);
+        const dayCost = zNum(r, 6);
+        const costTotal = firstNumber(zNum(r, 7), qty * hours * costRate + qty * days * dayCost);
+        const billRate = zNum(r, 8);
+        const dayRate = zNum(r, 9);
+        const quotedTotal = firstNumber(zNum(r, 10), qty * hours * billRate + qty * days * dayRate);
+        if (description) {
+          items.push({
+            category: "equipment",
+            description,
+            qty,
+            hours,
+            cost_rate: costRate,
+            days,
+            day_cost: dayCost,
+            bill_rate: billRate,
+            day_rate: dayRate,
+            cost_total: costTotal,
+            quoted_total: quotedTotal
+          });
+        }
+      }
+    }
+
+    const percentFromDecimalOrWhole = (value) => {
+      const numeric = Number(value || 0);
+      if (!Number.isFinite(numeric) || numeric === 0) return 0;
+      return Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
+    };
+
+    const addFlatCostSection = (category, headerPattern, totalPattern, defaultMarkup) => {
+      const headerCell = findCell(headerPattern, 0, rows.length);
+      if (!headerCell) return;
+      const descCol = headerCell.c;
+      const costCol = descCol + 3;
+      const markupCol = descCol + 4;
+      const totalCol = descCol + 5;
+      const sectionMarkup = percentFromDecimalOrWhole(zNum(headerCell.r, markupCol)) || defaultMarkup;
+      const endRow = findEndRow(headerCell.r + 1, totalPattern, 14);
+
+      for (let r = headerCell.r + 1; r < endRow; r += 1) {
+        const description = clean(zText(r, descCol));
+        if (!description || /description|items|total|subcontractor|miscellaneous/i.test(description)) continue;
+        const cost = zNum(r, costCol);
+        const quoted = firstNumber(zNum(r, totalCol), cost ? cost * (1 + sectionMarkup / 100) : 0);
+        const markup = cost && quoted ? ((quoted / cost) - 1) * 100 : sectionMarkup;
+        if (cost || quoted || description) {
+          items.push({
+            category,
+            description,
+            qty: 1,
+            cost,
+            markup_percent: roundMoney(markup),
+            cost_total: cost,
+            quoted_total: quoted
+          });
+        }
+      }
+    };
+
+    addFlatCostSection("materials", /description\s+of\s+items/i, /materials\s+total/i, 25);
+    addFlatCostSection("subcontractors", /^subcontractors?$/i, /subcontractor\s+total/i, 10);
+
+    const miscHeader = findCell(/miscellaneous/i, 0, rows.length);
+    if (miscHeader) {
+      const descCol = miscHeader.c;
+      const qtyCol = descCol + 2;
+      const costCol = descCol + 3;
+      const costTotalCol = descCol + 4;
+      const quotedCol = descCol + 5;
+      const miscEnd = findEndRow(miscHeader.r + 1, /miscellaneous\s+total/i, 12);
+
+      for (let r = miscHeader.r + 1; r < miscEnd; r += 1) {
+        const description = clean(zText(r, descCol));
+        if (!description || /total|miscellaneous/i.test(description)) continue;
+        const qty = zNum(r, qtyCol);
+        const cost = zNum(r, costCol);
+        const costTotal = firstNumber(zNum(r, costTotalCol), qty * cost);
+        const quotedTotal = firstNumber(zNum(r, quotedCol), costTotal);
+        if (description) {
+          items.push({
+            category: "misc",
+            description,
+            qty,
+            cost,
+            markup_percent: 0,
+            quoted_override: quotedTotal && quotedTotal !== costTotal ? quotedTotal : "",
+            cost_total: costTotal,
+            quoted_total: quotedTotal
+          });
+        }
+      }
+    }
+
+    if (typeof window.__pimpPreserveCostTrackerRows === "function") {
+      const preservedItems = window.__pimpPreserveCostTrackerRows(items);
+      items.length = 0;
+      items.push(...preservedItems);
+    }
+
+    const byCategory = (category, totalField) => items
+      .filter((item) => item.category === category)
+      .reduce((sum, item) => sum + Number(item[totalField] || 0), 0);
+
+    const findValueNearLabel = (labelPattern, preferCol = null, maxRowsAfter = 2) => {
+      const found = findCell(labelPattern, 0, rows.length);
+      if (!found) return 0;
+      if (preferCol !== null) {
+        for (let r = found.r; r <= found.r + maxRowsAfter && r < rows.length; r += 1) {
+          const direct = zNum(r, preferCol);
+          if (direct) return direct;
+        }
+      }
+      for (let r = found.r; r <= found.r + maxRowsAfter && r < rows.length; r += 1) {
+        const row = rows[r] || [];
+        for (let c = found.c + 1; c < row.length; c += 1) {
+          const numeric = zNum(r, c);
+          if (numeric) return numeric;
+        }
+      }
+      return 0;
+    };
+
+    const summary = {
+      ...meta,
+      laborCost: firstNumber(findValueNearLabel(/personnel\s+total/i, 7, 0), byCategory("labor", "cost_total")),
+      laborQuoted: firstNumber(findValueNearLabel(/personnel\s+total/i, 10, 0), byCategory("labor", "quoted_total")),
+      equipmentCost: firstNumber(findValueNearLabel(/equipment\s+total/i, 7, 0), byCategory("equipment", "cost_total")),
+      equipmentQuoted: firstNumber(findValueNearLabel(/equipment\s+total/i, 10, 0), byCategory("equipment", "quoted_total")),
+      materialCost: byCategory("materials", "cost_total"),
+      materialQuoted: byCategory("materials", "quoted_total"),
+      subcontractorCost: byCategory("subcontractors", "cost_total"),
+      subcontractorQuoted: byCategory("subcontractors", "quoted_total"),
+      otherCost: byCategory("misc", "cost_total"),
+      otherQuoted: byCategory("misc", "quoted_total"),
+      costTotal: 0,
+      quotedPrice: 0,
+      profit: 0,
+      margin: 0,
+      layout: "uploaded_google_sheet_bid_sheet",
+      uploadedParserVersion: 2,
+      importedAt: new Date().toISOString()
+    };
+
+    summary.costTotal = firstNumber(findValueNearLabel(/cost\s+total/i, 16, 3), summary.laborCost + summary.equipmentCost + summary.materialCost + summary.subcontractorCost + summary.otherCost);
+    summary.quotedPrice = firstNumber(findValueNearLabel(/rate\s+total/i, 16, 3), summary.laborQuoted + summary.equipmentQuoted + summary.materialQuoted + summary.subcontractorQuoted + summary.otherQuoted);
+    summary.profit = firstNumber(findValueNearLabel(/bid\s+profit/i, 19, 2), summary.quotedPrice - summary.costTotal);
+    summary.margin = firstNumber(findValueNearLabel(/gross\s+margin/i, 19, 1), summary.quotedPrice > 0 ? summary.profit / summary.quotedPrice : 0);
+
+    // Keep the final RATE TOTAL from the uploaded spreadsheet as the top-level
+    // quote override. This preserves the original workbook total even when a
+    // section such as Misc/Per Diem uses hidden formulas or markup that the
+    // on-page editable sheet does not show as a visible column.
+    summary.quotedPriceOverride = summary.quotedPrice || null;
+
+    return { items, summary };
+  }
+
+  async function createCostTrackerFromUploadedExcel(file, job, documentRecord) {
+    if (!file || !job || !isSpreadsheetFile(file)) return null;
+
+    const parsed = await parseUploadedCostTrackerWorkbook(file).catch((error) => {
+      console.warn("Could not parse uploaded Excel cost tracker:", error?.message || error);
+      return null;
+    });
+
+    const now = new Date().toISOString();
+    const trackerName = parsed?.summary?.trackerName || String(file.name || "Uploaded Cost Tracker").replace(/\.[^.]+$/, "");
+    const summary = {
+      ...(parsed?.summary || {}),
+      trackerName,
+      uploadedFileName: file.name,
+      uploadedDocumentId: documentRecord?.id || null,
+      storagePath: documentRecord?.storage_path || null,
+      uploadType: "existing_xlsx_cost_tracker",
+      assignmentStatus: job?.id ? "assigned" : "unassigned"
+    };
+    const items = Array.isArray(parsed?.items) ? parsed.items : [];
+    const htmlJob = {
+      ...job,
+      job_number: job.job_number || summary.jobNumber || "",
+      job_name: job.job_name || summary.jobName || trackerName,
+      company_name: job.company_name || summary.client || "",
+      location: job.location || summary.location || "",
+      total_job_days: job.total_job_days || summary.totalJobDays || null
+    };
+    const html = typeof renderCostTrackerHtml === "function"
+      ? renderCostTrackerHtml({ job: htmlJob, items, summary, notes: summary.comments || `Uploaded existing Excel cost tracker: ${file.name}` })
+      : "";
+
+    const basePayload = {
+      tracker_name: trackerName,
+      cost_tracker_name: trackerName,
+      job_id: job.id,
+      labor_cost: number(summary.laborCost || 0),
+      material_cost: number(summary.materialCost || 0),
+      equipment_cost: number(summary.equipmentCost || 0),
+      subcontractor_cost: number(summary.subcontractorCost || 0),
+      other_cost: number(summary.otherCost || 0),
+      quoted_price: number(summary.quotedPrice || 0),
+      notes: summary.comments || `Uploaded existing Excel cost tracker: ${file.name}`,
+      external_source: "dashboard-upload",
+      external_id: `uploaded-cost-tracker:${documentRecord?.external_id || job.id + ":" + file.name}`,
+      last_synced_at: now
+    };
+
+    // Do not insert generated/calculated DB columns such as total_cost, profit,
+    // or margin. Some Supabase setups define those as generated columns, and
+    // inserting into them is what made existing document uploads fail.
+    const richPayload = {
+      ...basePayload,
+      line_items: items,
+      summary,
+      html_snapshot: html,
+      download_filename: file.name
+    };
+    const fallbackPayloads = [
+      richPayload,
+      { ...basePayload, line_items: items, summary, download_filename: file.name },
+      { ...basePayload, summary },
+      basePayload
+    ];
+
+    let saved = null;
+    let lastError = null;
+    for (const attemptPayload of fallbackPayloads) {
+      try {
+        if (typeof manualUpsert === "function") saved = await manualUpsert("cost_trackers", attemptPayload, "external_id");
+        else {
+          const { data, error } = await state.supabase.from("cost_trackers").insert(attemptPayload).select().single();
+          if (error) throw error;
+          saved = data;
+        }
+        mergeCostTrackerIntoState(saved || attemptPayload);
+        return saved || attemptPayload;
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        const canRetryWithSmallerPayload = /column|schema cache|Could not find|does not exist|generated|non-DEFAULT|total_cost|profit|margin|html_snapshot|line_items|summary|download_filename|cost_tracker_name|tracker_name/i.test(message);
+        if (!canRetryWithSmallerPayload) break;
+      }
+    }
+
+    console.warn("Uploaded Excel document was saved, but cost tracker record could not be created:", lastError?.message || lastError);
+    showToast("The file uploaded to the job. I could not create the linked cost tracker record because the cost_trackers table is missing one of the dashboard columns. The upload is still listed under Attached Files.", true);
+    return null;
+  }
+
+    async function uploadJobFormFiles(job, form) {
+    const uploaded = [];
+    const costTrackerInput = form.querySelector('#jobCostTrackerUpload, [name="cost_tracker_upload"]');
+    const filesInput = form.querySelector('#jobFilesUpload, [name="job_files_upload"]');
+    const costFile = costTrackerInput?.files?.[0] || null;
+    const otherFiles = Array.from(filesInput?.files || []);
+
+    if (costFile) {
+      if (!isSpreadsheetFile(costFile)) {
+        throw new Error("The existing cost tracker upload must be an Excel file such as .xlsx or .xls.");
+      }
+      const doc = await uploadFileToSupabaseStorage(costFile, job.id, "Cost Tracker");
+      uploaded.push(doc);
+      await createCostTrackerFromUploadedExcel(costFile, job, doc);
+    }
+
+    for (const file of otherFiles) {
+      const docType = isSpreadsheetFile(file) ? "Cost Tracker" : "Job File";
+      uploaded.push(await uploadFileToSupabaseStorage(file, job.id, docType));
+    }
+
+    return uploaded;
+  }
+
+  const previousHandleCreateJob = typeof handleCreateJob === "function" ? handleCreateJob : null;
+  window.handleCreateJob = async function handleCreateJobWithFileUploads(event) {
+    event.preventDefault();
+
+    if (!state.supabase || !state.session) {
+      showToast("Sign in before creating jobs.", true);
+      return;
+    }
+
+    const form = event.currentTarget;
+    try { if (typeof syncJobTotalDaysField === "function") syncJobTotalDaysField(); } catch {}
+    const values = typeof formToObject === "function" ? formToObject(form) : Object.fromEntries(new FormData(form).entries());
+    const editingId = values.record_id || "";
+    const pendingTrackerId = values.pending_cost_tracker_id || "";
+
+    try {
+      const client = await upsertClient(values.company_name, values.contact_name);
+      const payload = typeof buildJobPayload === "function"
+        ? buildJobPayload(values, client)
+        : {
+            job_number: values.job_number,
+            job_name: values.job_name,
+            client_id: client?.id || null,
+            company_name: values.company_name,
+            contact_name: values.contact_name || null,
+            location: values.location || null,
+            status: values.status || "active",
+            start_date: values.start_date || null,
+            end_date: values.end_date || values.start_date || null,
+            google_drive_url: values.google_drive_url || null,
+            external_source: "dashboard",
+            external_id: `job:${String(values.job_number || "").trim()}`,
+            last_synced_at: new Date().toISOString()
+          };
+
+      const job = typeof saveJobToSupabase === "function"
+        ? await saveJobToSupabase(payload, editingId)
+        : (editingId ? await updateRow("jobs", editingId, payload) : await insertRow("jobs", payload));
+
+      if (typeof mergeStateRow === "function") mergeStateRow("jobs", job);
+      else state.data.jobs = [job, ...(state.data.jobs || []).filter((row) => row.id !== job.id)];
+
+      let uploadedDocs = [];
+      try {
+        uploadedDocs = await uploadJobFormFiles(job, form);
+      } catch (uploadError) {
+        showToast(`Job saved, but file upload failed: ${uploadError.message || uploadError}`, true);
+      }
+
+      if (pendingTrackerId && !editingId) {
+        const tracker = (state.data.costTrackers || []).find((row) => row.id === pendingTrackerId);
+        if (tracker) {
+          const snapshot = typeof buildTrackerAssignmentSnapshot === "function"
+            ? buildTrackerAssignmentSnapshot(tracker, job.id)
+            : { summary: costTrackerSummary(tracker), html: tracker.html_snapshot || "" };
+          const updatedTracker = await updateRow("cost_trackers", tracker.id, {
+            job_id: job.id,
+            summary: snapshot.summary,
+            html_snapshot: snapshot.html,
+            last_synced_at: new Date().toISOString()
+          });
+          if (typeof mergeStateRow === "function") mergeStateRow("costTrackers", updatedTracker);
+        }
+      }
+
+      try { hydrateSelects(); } catch {}
+      try { refreshWebsiteLists(); } catch {}
+
+      form.reset();
+      try { if (typeof resetJobFormMode === "function") resetJobFormMode(); } catch {}
+      await loadAllData({ silent: true });
+      try { refreshWebsiteLists(); } catch {}
+      try { renderUploadedFilesPanel(); } catch {}
+
+      const uploadedText = uploadedDocs.length ? ` ${uploadedDocs.length} file${uploadedDocs.length === 1 ? "" : "s"} uploaded to Documents.` : "";
+      if (pendingTrackerId && !editingId) showToast(`Job saved and the unassigned cost tracker was assigned.${uploadedText}`);
+      else showToast(`${editingId ? "Job updated" : "Job saved"}.${uploadedText}`);
+    } catch (error) {
+      // If this patch ever runs before the later dashboard helpers are available,
+      // fall back to the prior job save handler instead of blocking job creation.
+      if (previousHandleCreateJob && !(typeof buildJobPayload === "function")) return previousHandleCreateJob(event);
+      showToast(error.message || String(error), true);
+    }
+  };
+  try { handleCreateJob = window.handleCreateJob; } catch {}
+
+  async function handleDocumentUploadFormSubmit(event) {
+    event.preventDefault();
+
+    if (!state.supabase || !state.session) {
+      showToast("Sign in before uploading files.", true);
+      return;
+    }
+
+    const form = event.currentTarget;
+    const values = typeof formToObject === "function"
+      ? formToObject(form)
+      : Object.fromEntries(new FormData(form).entries());
+    const jobId = values.job_id || form.querySelector('[name="job_id"]')?.value || "";
+    const fileInput = form.querySelector('input[type="file"]');
+    const files = Array.from(fileInput?.files || []);
+    const submit = form.querySelector('button[type="submit"]');
+
+    if (!jobId) {
+      showToast("Choose the job these files belong to.", true);
+      return;
+    }
+
+    if (!files.length) {
+      showToast("Choose at least one file to upload.", true);
+      return;
+    }
+
+    const job = (state.data.jobs || []).find((row) => row.id === jobId);
+    if (!job) {
+      showToast("I could not find that job. Refresh the page, open the job, and try again.", true);
+      return;
+    }
+
+    const selectedType = values.document_type || form.querySelector('[name="document_type"]')?.value || "Job File";
+    const oldText = submit ? submit.textContent : "";
+
+    if (submit) {
+      submit.disabled = true;
+      submit.textContent = "Uploading...";
+    }
+
+    try {
+      const uploaded = [];
+      const trackerImports = [];
+      const failedImports = [];
+
+      for (const file of files) {
+        const normalizedType = normalizeDocumentTypeForDatabase(selectedType, file);
+
+        if (normalizedType === "Cost Tracker" && !isSpreadsheetFile(file)) {
+          throw new Error("Cost Tracker uploads must be an Excel file such as .xlsx, .xls, or .xlsm.");
+        }
+
+        const doc = await uploadFileToSupabaseStorage(file, jobId, normalizedType);
+        uploaded.push(doc);
+
+        if (normalizedType === "Cost Tracker" && isSpreadsheetFile(file)) {
+          try {
+            const tracker = await createCostTrackerFromUploadedExcel(file, job, doc);
+            if (tracker) trackerImports.push(tracker);
+          } catch (importError) {
+            console.warn("The file uploaded, but the cost tracker record could not be imported:", importError?.message || importError);
+            failedImports.push(file.name);
+          }
+        }
+      }
+
+      form.reset();
+      window.__pimpExpandedJobId = jobId;
+
+      await loadAllData({ silent: true });
+      try { hydrateSelects(); } catch {}
+      try { refreshWebsiteLists(); } catch {}
+      try { renderUploadedFilesPanel(); } catch {}
+      try { renderJobs(); } catch {}
+
+      let message = `${uploaded.length} document${uploaded.length === 1 ? "" : "s"} added to this job.`;
+      if (trackerImports.length) {
+        message += ` ${trackerImports.length} cost tracker${trackerImports.length === 1 ? "" : "s"} imported.`;
+      }
+      if (failedImports.length) {
+        message += ` The Excel file is attached, but one cost tracker import needs the SQL fix.`;
+      }
+      showToast(message, Boolean(failedImports.length));
+    } catch (error) {
+      showToast(error.message || String(error), true);
+    } finally {
+      if (submit) {
+        submit.disabled = false;
+        submit.textContent = oldText || "Add to Job";
+      }
+    }
+  }
+
+  function uploadedDocumentsForPanel() {
+    const docs = Array.isArray(state?.data?.documents) ? state.data.documents : [];
+    return docs.filter((doc) => {
+      const source = String(doc.external_source || "").toLowerCase();
+      const externalId = String(doc.external_id || "").toLowerCase();
+      const status = String(doc.file_status || "").toLowerCase();
+      return source.includes("upload") || externalId.startsWith("upload:") || doc.storage_path || status.includes("uploaded");
+    });
+  }
+
+  function groupUploadedDocuments(docs) {
+    const groups = new Map();
+    docs.forEach((doc) => {
+      const job = (state.data.jobs || []).find((row) => row.id === doc.job_id);
+      const key = doc.job_id || "unassigned";
+      if (!groups.has(key)) groups.set(key, { key, job, docs: [] });
+      groups.get(key).docs.push(doc);
+    });
+    return Array.from(groups.values()).sort((a, b) => getJobLabel(a.job).localeCompare(getJobLabel(b.job)));
+  }
+
+  function documentMatchesTerm(doc, job, term) {
+    if (!term) return true;
+    return [
+      doc.document_type,
+      doc.file_name,
+      doc.original_file_name,
+      doc.file_status,
+      job?.job_number,
+      job?.job_name,
+      job?.company_name,
+      job?.location
+    ].join(" ").toLowerCase().includes(term);
+  }
+
+  function renderUploadedFilesPanel() {
+    const target = document.getElementById("uploadedJobFilesPanel");
+    if (!target) return;
+    const term = String(document.getElementById("documentsSearch")?.value || "").toLowerCase().trim();
+    const docs = uploadedDocumentsForPanel().filter((doc) => {
+      const job = (state.data.jobs || []).find((row) => row.id === doc.job_id);
+      return documentMatchesTerm(doc, job, term);
+    });
+    const groups = groupUploadedDocuments(docs);
+
+    target.innerHTML = `
+      <section class="uploaded-files-section">
+        <div class="uploaded-files-header">
+          <div>
+            <span class="setup-eyebrow">Uploaded job files</span>
+            <h4>Files connected to jobs</h4>
+            <p>Open PDFs, Excel cost trackers, photos, and other uploaded files without leaving the dashboard.</p>
+          </div>
+          <span class="pill">${docs.length} file${docs.length === 1 ? "" : "s"}</span>
+        </div>
+        ${groups.length ? groups.map((group) => `
+          <article class="uploaded-file-job-group">
+            <div class="uploaded-file-job-title">
+              <strong>${textSafe(getJobLabel(group.job))}</strong>
+              <span>${textSafe(group.job?.company_name || group.job?.location || (group.key === "unassigned" ? "Unassigned files" : "Job files"))}</span>
+            </div>
+            <div class="uploaded-file-list">
+              ${group.docs.map((doc) => `
+                <article class="uploaded-file-row">
+                  <div class="uploaded-file-icon">${documentTypeIcon(doc.document_type, doc.file_name)}</div>
+                  <div class="uploaded-file-info">
+                    <strong>${textSafe(doc.file_name || "Uploaded file")}</strong>
+                    <span>${textSafe(doc.document_type || "Job File")} • ${displayFileSize(doc.file_size)} • ${textSafe(doc.file_status || "uploaded")}</span>
+                  </div>
+                  <div class="uploaded-file-actions">
+                    <button class="link-btn" data-open-uploaded-doc="${attrSafeUpload(doc.id || doc.external_id)}" type="button">Open</button>
+                    <button class="link-btn" data-download-uploaded-doc="${attrSafeUpload(doc.id || doc.external_id)}" type="button">Download</button>
+                    <button class="link-btn danger-text" data-delete-type="documents" data-delete-id="${attrSafeUpload(doc.id || doc.external_id)}" type="button">Delete</button>
+                  </div>
+                </article>
+              `).join("")}
+            </div>
+          </article>
+        `).join("") : `
+          <div class="documents-empty uploaded-files-empty">
+            <strong>No uploaded files yet.</strong>
+            <p class="muted">Use the upload box above, or attach files while creating a job.</p>
+          </div>
+        `}
+      </section>
+    `;
+  }
+
+async function openUploadedDocument(docId, download = false) {
+    const doc = (state.data.documents || []).find((row) => row.id === docId || row.external_id === docId);
+    if (!doc) {
+      showToast("File record not found. Refresh and try again.", true);
+      return;
+    }
+
+    if (doc.file_data_base64) {
+      const mime = doc.file_data_mime_type || doc.mime_type || "application/octet-stream";
+      const byteString = atob(String(doc.file_data_base64));
+      const chunks = [];
+      for (let offset = 0; offset < byteString.length; offset += 1024) {
+        const slice = byteString.slice(offset, offset + 1024);
+        const bytes = new Uint8Array(slice.length);
+        for (let i = 0; i < slice.length; i += 1) bytes[i] = slice.charCodeAt(i);
+        chunks.push(bytes);
+      }
+      const blobUrl = URL.createObjectURL(new Blob(chunks, { type: mime }));
+      if (download) {
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = doc.file_name || doc.original_file_name || "uploaded-file";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      } else {
+        window.open(blobUrl, "_blank", "noopener,noreferrer");
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      }
+      return;
+    }
+
+    let url = doc.google_drive_url || doc.pdf_url || "";
+    if (!url && doc.storage_path) {
+      const { data, error } = await state.supabase.storage
+        .from(doc.storage_bucket || JOB_DOCUMENT_BUCKET)
+        .createSignedUrl(doc.storage_path, 60 * 60, {
+          download: download ? (doc.file_name || true) : false
+        });
+      if (error) throw new Error(`Could not open this uploaded file. Run the file-upload SQL setup and try again. Details: ${error.message || error}`);
+      url = data?.signedUrl || "";
+    }
+
+    if (!url) {
+      showToast("This file does not have an openable link. Re-upload it from the Documents page.", true);
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+    const previousRenderDocuments = typeof renderDocuments === "function" ? renderDocuments : null;
+  window.renderDocuments = function renderDocumentsWithUploadedFiles() {
+    if (previousRenderDocuments) previousRenderDocuments();
+    renderUploadedFilesPanel();
+  };
+  try { renderDocuments = window.renderDocuments; } catch {}
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.matches?.("[data-job-document-upload], #documentUploadForm")) handleDocumentUploadFormSubmit(event);
+  }, true);
+
+  document.addEventListener("click", async (event) => {
+    const openId = event.target.closest?.("[data-open-uploaded-doc]")?.dataset.openUploadedDoc;
+    const downloadId = event.target.closest?.("[data-download-uploaded-doc]")?.dataset.downloadUploadedDoc;
+    if (!openId && !downloadId) return;
+    event.preventDefault();
+    try {
+      await openUploadedDocument(openId || downloadId, Boolean(downloadId));
+    } catch (error) {
+      showToast(error.message || String(error), true);
+    }
+  });
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.id === "documentsSearch") {
+      setTimeout(renderUploadedFilesPanel, 0);
+    }
+  }, true);
+
+  document.addEventListener("DOMContentLoaded", () => {
+    try { hydrateSelects(); } catch {}
+    renderUploadedFilesPanel();
+  });
+})();
+
+
+
+/* ========================================================================
+   FINAL JOB PAGE DOCUMENT DETAILS PATCH
+   ------------------------------------------------------------------------
+   - Removes the Documents tab from the user-facing navigation.
+   - Moves document hub information into expandable rows on the Jobs page.
+   - Keeps file upload available inside each expanded job row.
+   - Keeps the Documents page clean with no upload panel or uploaded-files list.
+   ======================================================================== */
+(function finalJobPageDocumentDetailsPatch() {
+  window.__pimpExpandedJobId = window.__pimpExpandedJobId || null;
+
+  function html(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;"
+    }[char]));
+  }
+
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return html(value);
+  }
+
+  function moneyText(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    const numeric = Number(value || 0);
+    return `$${Number.isFinite(numeric) ? numeric.toFixed(2) : "0.00"}`;
+  }
+
+  function dateText(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    return value || "-";
+  }
+
+  function parseJsonSafe(value, fallback = {}) {
+    if (!value) return fallback;
+    if (typeof value === "object") return value;
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+
+  function jobLabel(job) {
+    if (!job) return "Unassigned Job";
+    return `${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}`;
+  }
+
+  function getTrackerNameForJob(row) {
+    try { if (typeof getTrackerName === "function") return getTrackerName(row); } catch {}
+    const summary = parseJsonSafe(row?.summary, {});
+    return row?.tracker_name || row?.cost_tracker_name || row?.name || summary.trackerName || summary.tracker_name || "Cost Tracker";
+  }
+
+  function trackerQuoted(row) {
+    try { if (typeof costTrackerQuoted === "function") return costTrackerQuoted(row); } catch {}
+    const summary = parseJsonSafe(row?.summary, {});
+    return Number(row?.quoted_price ?? summary.quotedPrice ?? summary.quoted_price ?? 0) || 0;
+  }
+
+  function trackerCost(row) {
+    try { if (typeof costTrackerTotal === "function") return costTrackerTotal(row); } catch {}
+    const summary = parseJsonSafe(row?.summary, {});
+    return Number(row?.total_cost ?? summary.totalCost ?? summary.total_cost ?? 0) || 0;
+  }
+
+  function invoiceAmount(row) {
+    try { if (typeof invoiceTotal === "function") return invoiceTotal(row); } catch {}
+    const summary = parseJsonSafe(row?.summary, {});
+    return Number(summary.total ?? row?.total ?? 0) || (Number(row?.subtotal || 0) + Number(row?.tax || 0));
+  }
+
+  function groupTimesheetsForJob(jobId) {
+    const map = new Map();
+    (state?.data?.timesheets || []).filter((entry) => entry.job_id === jobId).forEach((entry) => {
+      const id = entry.timesheet_group_id || `${entry.job_id || "job"}_${entry.work_date || entry.date || entry.id}`;
+      if (!map.has(id)) {
+        map.set(id, {
+          id,
+          date: entry.work_date || entry.date || "",
+          employeeCount: 0,
+          totalHours: 0,
+          entries: []
+        });
+      }
+      const group = map.get(id);
+      group.employeeCount += 1;
+      group.totalHours += Number(entry.hours || 0);
+      group.entries.push(entry);
+    });
+    return Array.from(map.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }
+
+  function docsForJob(jobId) {
+    return (state?.data?.documents || []).filter((doc) => doc.job_id === jobId);
+  }
+
+  function uploadedDocsForJob(jobId) {
+    return docsForJob(jobId).filter((doc) => {
+      const source = String(doc.external_source || "").toLowerCase();
+      const externalId = String(doc.external_id || "").toLowerCase();
+      const status = String(doc.file_status || "").toLowerCase();
+      return source.includes("upload") || externalId.startsWith("upload:") || externalId.startsWith("inline-upload:") || doc.storage_path || status.includes("uploaded");
+    });
+  }
+
+  function docTypeIcon(type, name) {
+    const text = `${type || ""} ${name || ""}`.toLowerCase();
+    if (text.includes("cost") || text.match(/\.(xlsx|xls|xlsm|csv)$/)) return "📊";
+    if (text.includes("invoice") || text.includes("pdf")) return "📄";
+    if (text.includes("timesheet")) return "🕘";
+    if (text.match(/\.(png|jpe?g|webp|gif)$/) || text.includes("image") || text.includes("photo")) return "🖼️";
+    return "📎";
+  }
+
+  function fileSizeText(bytes) {
+    const size = Number(bytes || 0);
+    if (!size) return "";
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function statusBadge(exists) {
+    return exists
+      ? '<span class="status job-doc-ready">Made</span>'
+      : '<span class="status job-doc-missing">Not made yet</span>';
+  }
+
+  function guideButton(view, jobId, label) {
+    return `<button class="link-btn" data-doc-guide="${attr(view)}" data-doc-guide-job="${attr(jobId || "")}" type="button">${html(label)}</button>`;
+  }
+
+  function documentStatusCard({ title, exists, subtitle, actions, guideView, guideLabel, jobId }) {
+    return `
+      <article class="job-document-status-card ${exists ? "ready" : "missing"}">
+        <div>
+          <strong>${html(title)}</strong>
+          <span>${html(subtitle || "")}</span>
+        </div>
+        <div class="job-document-status-actions">
+          ${statusBadge(exists)}
+          <div class="job-document-action-row">
+            ${exists ? actions : guideButton(guideView, jobId, guideLabel)}
+          </div>
+        </div>
+      </article>
+    `;
+  }
+
+  function timesheetRows(groups) {
+    if (!groups.length) {
+      return `<p class="muted job-detail-empty">No timesheets have been saved for this job yet.</p>`;
+    }
+    return `
+      <div class="job-detail-mini-list">
+        ${groups.map((group) => `
+          <article class="job-detail-mini-row">
+            <div>
+              <strong>${html(dateText(group.date))}</strong>
+              <span>${group.employeeCount} employee row${group.employeeCount === 1 ? "" : "s"} • ${Number(group.totalHours || 0)} total hours</span>
+            </div>
+            <button class="link-btn" data-download-timesheet-group="${attr(group.id)}" type="button">Download</button>
+          </article>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function uploadedFileRows(jobId) {
+    const docs = uploadedDocsForJob(jobId);
+    if (!docs.length) {
+      return `<p class="muted job-detail-empty">No existing files have been attached to this job yet.</p>`;
+    }
+    return `
+      <div class="job-detail-file-list">
+        ${docs.map((doc) => `
+          <article class="job-detail-file-row">
+            <div class="uploaded-file-icon">${docTypeIcon(doc.document_type, doc.file_name || doc.original_file_name)}</div>
+            <div class="job-detail-file-info">
+              <strong>${html(doc.file_name || doc.original_file_name || "Attached file")}</strong>
+              <span>${html(doc.document_type || "Job File")}${doc.file_size ? ` • ${fileSizeText(doc.file_size)}` : ""} • ${html(doc.file_status || "uploaded")}</span>
+            </div>
+            <div class="job-detail-file-actions">
+              <button class="link-btn" data-open-uploaded-doc="${attr(doc.id || doc.external_id)}" type="button">Open</button>
+              <button class="link-btn" data-download-uploaded-doc="${attr(doc.id || doc.external_id)}" type="button">Download</button>
+              <button class="link-btn danger-text" data-delete-type="documents" data-delete-id="${attr(doc.id || doc.external_id)}" type="button">Delete</button>
+            </div>
+          </article>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function buildJobDetails(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => row.job_id === job.id);
+    const invoices = (state?.data?.invoices || []).filter((row) => row.job_id === job.id);
+    const timesheetGroups = groupTimesheetsForJob(job.id);
+    const latestTracker = trackers.slice().sort((a, b) => String(b.last_synced_at || b.updated_at || b.created_at || "").localeCompare(String(a.last_synced_at || a.updated_at || a.created_at || "")))[0];
+    const latestInvoice = invoices.slice().sort((a, b) => String(b.invoice_date || b.last_synced_at || b.updated_at || "").localeCompare(String(a.invoice_date || a.last_synced_at || a.updated_at || "")))[0];
+    const attachedDocs = uploadedDocsForJob(job.id);
+    const attachedCostDocs = attachedDocs.filter((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const attachedInvoiceDocs = attachedDocs.filter((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const attachedTimesheetDocs = attachedDocs.filter((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const latestCostDoc = attachedCostDocs[0];
+    const latestInvoiceDoc = attachedInvoiceDocs[0];
+    const latestTimesheetDoc = attachedTimesheetDocs[0];
+
+    const trackerActions = latestTracker ? `
+      <button class="link-btn" data-preview-cost="${attr(latestTracker.id)}" type="button">Preview</button>
+      <button class="link-btn" data-download-cost="${attr(latestTracker.id)}" type="button">Download</button>
+      ${guideButton("costTrackers", job.id, "Open Cost Tracker")}
+    ` : (latestCostDoc ? `
+      <button class="link-btn" data-open-uploaded-doc="${attr(latestCostDoc.id || latestCostDoc.external_id)}" type="button">Open File</button>
+      <button class="link-btn" data-download-uploaded-doc="${attr(latestCostDoc.id || latestCostDoc.external_id)}" type="button">Download File</button>
+      ${guideButton("costTrackers", job.id, "Create Editable Tracker")}
+    ` : "");
+
+    const invoiceActions = latestInvoice ? `
+      <button class="link-btn" data-preview-invoice="${attr(latestInvoice.id)}" type="button">Preview</button>
+      <button class="link-btn" data-download-invoice="${attr(latestInvoice.id)}" type="button">Download</button>
+      ${guideButton("invoices", job.id, "Open Invoice")}
+    ` : (latestInvoiceDoc ? `
+      <button class="link-btn" data-open-uploaded-doc="${attr(latestInvoiceDoc.id || latestInvoiceDoc.external_id)}" type="button">Open File</button>
+      <button class="link-btn" data-download-uploaded-doc="${attr(latestInvoiceDoc.id || latestInvoiceDoc.external_id)}" type="button">Download File</button>
+      ${guideButton("invoices", job.id, "Create Editable Invoice")}
+    ` : "");
+
+    const timesheetActions = timesheetGroups.length ? `
+      ${guideButton("timesheets", job.id, "Open Timesheets")}
+    ` : (latestTimesheetDoc ? `
+      <button class="link-btn" data-open-uploaded-doc="${attr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Open File</button>
+      <button class="link-btn" data-download-uploaded-doc="${attr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Download File</button>
+      ${guideButton("timesheets", job.id, "Create Editable Timesheet")}
+    ` : "");
+
+    return `
+      <tr class="job-details-row">
+        <td colspan="8">
+          <section class="job-details-panel">
+            <div class="job-details-header">
+              <div>
+                <span class="setup-eyebrow">Job Details</span>
+                <h4>${html(jobLabel(job))}</h4>
+                <p>${html(job.company_name || "No customer listed")} • ${html(job.location || "No location listed")} • ${html(dateText(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${html(dateText(job.end_date))}` : ""}</p>
+              </div>
+              <div class="job-details-counts">
+                <span>${trackers.length} cost tracker${trackers.length === 1 ? "" : "s"}</span>
+                <span>${invoices.length} invoice${invoices.length === 1 ? "" : "s"}</span>
+                <span>${timesheetGroups.length} timesheet day${timesheetGroups.length === 1 ? "" : "s"}</span>
+                <span>${uploadedDocsForJob(job.id).length} file${uploadedDocsForJob(job.id).length === 1 ? "" : "s"}</span>
+              </div>
+            </div>
+
+            <div class="job-documents-status-grid">
+              ${documentStatusCard({
+                title: "Cost Tracker",
+                exists: Boolean(latestTracker || latestCostDoc),
+                subtitle: latestTracker ? `${getTrackerNameForJob(latestTracker)} ` : (latestCostDoc ? `${latestCostDoc.file_name || latestCostDoc.original_file_name || "Uploaded cost tracker"} • attached file` : ""),
+                actions: trackerActions,
+                guideView: "costTrackers",
+                guideLabel: "Create Cost Tracker",
+                jobId: job.id
+              })}
+              ${documentStatusCard({
+                title: "Invoice",
+                exists: Boolean(latestInvoice || latestInvoiceDoc),
+                subtitle: latestInvoice ? `${latestInvoice.invoice_number || "Invoice"} • ${moneyText(invoiceAmount(latestInvoice))} • ${latestInvoice.status || "unsent"}` : (latestInvoiceDoc ? `${latestInvoiceDoc.file_name || latestInvoiceDoc.original_file_name || "Uploaded invoice"} • attached file` : ""),
+                actions: invoiceActions,
+                guideView: "invoices",
+                guideLabel: "Create Invoice",
+                jobId: job.id
+              })}
+              ${documentStatusCard({
+                title: "Timesheets",
+                exists: Boolean(timesheetGroups.length || latestTimesheetDoc),
+                subtitle: timesheetGroups.length ? `${timesheetGroups.length} saved day${timesheetGroups.length === 1 ? "" : "s"} for this job.` : (latestTimesheetDoc ? `${latestTimesheetDoc.file_name || latestTimesheetDoc.original_file_name || "Uploaded timesheet"} • attached file` : ""),
+                actions: timesheetActions,
+                guideView: "timesheets",
+                guideLabel: "Create Timesheet",
+                jobId: job.id
+              })}
+            </div>
+
+            <div class="job-details-split-grid">
+              <section class="job-detail-section">
+                <div class="job-detail-section-header">
+                  <h5>All Timesheets for this Job</h5>
+                  ${guideButton("timesheets", job.id, "+ Timesheet")}
+                </div>
+                ${timesheetRows(timesheetGroups)}
+              </section>
+
+              <section class="job-detail-section">
+                <div class="job-detail-section-header">
+                  <h5>Attached Files</h5>
+                </div>
+                ${uploadedFileRows(job.id)}
+              </section>
+            </div>
+
+            <section class="job-detail-upload-card">
+              <div>
+                <span class="setup-eyebrow">Add an existing document</span>
+                <h5>Attach a file to this job</h5>
+                <p>Upload job documents.</p>
+              </div>
+              <form class="job-detail-upload-form" data-job-document-upload="true">
+                <input type="hidden" name="job_id" value="${attr(job.id)}" />
+                <label>
+                  Document Type
+                  <select name="document_type">
+                    <option value="Cost Tracker">Cost Tracker</option>
+                    <option value="Invoice">Invoice</option>
+                    <option value="Timesheet">Timesheet</option>
+                    <option value="Job File">Other Job File</option>
+                  </select>
+                </label>
+                <label class="wide">
+                  Choose File(s)
+                  <input name="documents" type="file" multiple required />
+                </label>
+                <button class="btn primary" type="submit">Add to Job</button>
+              </form>
+            </section>
+          </section>
+        </td>
+      </tr>
+    `;
+  }
+
+  function jobSummaryChips(job) {
+    const filesForJob = uploadedDocsForJob(job.id);
+    const uploadedCostCount = filesForJob.filter((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
+    const uploadedInvoiceCount = filesForJob.filter((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
+    const uploadedTimesheetCount = filesForJob.filter((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
+    const trackers = (state?.data?.costTrackers || []).filter((row) => row.job_id === job.id).length + uploadedCostCount;
+    const invoices = (state?.data?.invoices || []).filter((row) => row.job_id === job.id).length + uploadedInvoiceCount;
+    const timesheets = groupTimesheetsForJob(job.id).length + uploadedTimesheetCount;
+    const files = filesForJob.length;
+    return `
+      <div class="job-document-chip-row">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers ? "✓" : "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices ? "✓" : "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets ? timesheets : "—"}</span>
+        <span class="job-doc-chip ${files ? "made" : "missing"}">Files ${files ? files : "—"}</span>
+      </div>
+    `;
+  }
+
+  window.renderJobs = function renderJobsWithExpandableDocuments() {
+    const rows = typeof filtered === "function"
+      ? filtered(state.data.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state.data.jobs || []);
+
+    const count = document.getElementById("jobsCount");
+    const table = document.getElementById("jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+
+    table.innerHTML = rows.map((job) => {
+      const isOpen = window.__pimpExpandedJobId === job.id;
+      return `
+        <tr class="job-main-row ${isOpen ? "expanded" : ""}" data-job-row-id="${attr(job.id)}">
+          <td data-label="Job #"><strong>${html(job.job_number || "-")}</strong><br><button class="link-btn job-row-open-btn" data-toggle-job-details="${attr(job.id)}" type="button">${isOpen ? "Hide details" : "View details"}</button></td>
+          <td data-label="Job Name">${html(job.job_name || "-")}${jobSummaryChips(job)}</td>
+          <td data-label="Company">${html(job.company_name || "-")}</td>
+          <td data-label="Location">${html(job.location || "-")}</td>
+          <td data-label="Status"><span class="status ${html(job.status || "")}">${html(job.status || "unknown")}</span></td>
+          <td data-label="Dates">${html(dateText(job.start_date))}${job.end_date && job.end_date !== job.start_date ? " to " + html(dateText(job.end_date)) : ""}</td>
+          <td data-label="Files">Click job to view documents</td>
+          <td data-label="Actions" class="actions-cell">
+            <button class="link-btn" data-edit-job="${attr(job.id)}" type="button">Edit</button>
+            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+        ${isOpen ? buildJobDetails(job) : ""}
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8">No records found.</td></tr>');
+  };
+  try { renderJobs = window.renderJobs; } catch {}
+
+  window.renderDocuments = function renderDocumentsMovedToJobs() {
+    const count = document.getElementById("documentsCount");
+    if (count) count.textContent = (state?.data?.documents || []).length;
+  };
+  try { renderDocuments = window.renderDocuments; } catch {}
+
+  function removeDocumentsNavigation() {
+    document.querySelectorAll('[data-view="documents"]').forEach((node) => node.remove());
+    const documentsView = document.getElementById("documentsView");
+    if (documentsView) {
+      documentsView.classList.add("hidden");
+      documentsView.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  document.addEventListener("click", (event) => {
+    const toggle = event.target.closest?.("[data-toggle-job-details]");
+    if (toggle) {
+      event.preventDefault();
+      const id = toggle.dataset.toggleJobDetails;
+      window.__pimpExpandedJobId = window.__pimpExpandedJobId === id ? null : id;
+      renderJobs();
+      return;
+    }
+
+    const row = event.target.closest?.("tr[data-job-row-id]");
+    if (row && !event.target.closest("button,a,input,select,textarea,label")) {
+      const id = row.dataset.jobRowId;
+      window.__pimpExpandedJobId = window.__pimpExpandedJobId === id ? null : id;
+      renderJobs();
+    }
+  }, true);
+
+  document.addEventListener("DOMContentLoaded", () => {
+    removeDocumentsNavigation();
+    try { renderJobs(); } catch {}
+  });
+
+  setTimeout(() => {
+    removeDocumentsNavigation();
+    try { renderJobs(); } catch {}
+  }, 0);
+})();
+
+
+
+/* ========================================================================
+   FINAL INVOICE OPTIONAL JOB + COST TRACKER COMMENTS PATCH
+   ------------------------------------------------------------------------
+   - Invoice tab uses only the Source Cost Tracker dropdown.
+   - Job / AFE is optional and stored as a hidden field when a tracker has one.
+   - Standalone invoices can be saved without a job connected.
+   - Cost tracker Comments transfer directly into the invoice Description.
+   ======================================================================== */
+(function finalInvoiceOptionalJobAndCommentsPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function setValue(form, name, value) {
+    try {
+      if (typeof setFormValue === "function") {
+        setFormValue(form, name, value ?? "");
+        return;
+      }
+    } catch {}
+    const field = form?.querySelector?.(`[name="${CSS.escape(name)}"]`);
+    if (field) field.value = value ?? "";
+  }
+
+  function parseJsonMaybe(value) {
+    if (!value) return {};
+    if (typeof value === "object") return value || {};
+    try { return JSON.parse(value); } catch { return {}; }
+  }
+
+  function trackerNameSafe(tracker) {
+    try { if (typeof getTrackerName === "function") return getTrackerName(tracker); } catch {}
+    const summary = parseJsonMaybe(tracker?.summary);
+    return tracker?.tracker_name || tracker?.cost_tracker_name || tracker?.name || summary.trackerName || summary.tracker_name || "Cost Tracker";
+  }
+
+  function trackerSummarySafe(tracker) {
+    try { if (typeof costTrackerSummary === "function") return costTrackerSummary(tracker); } catch {}
+    return parseJsonMaybe(tracker?.summary);
+  }
+
+  function numberSafe(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function moneySafe(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return `$${numberSafe(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  function escapeText(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+    }[char]));
+  }
+
+  function findJobSafe(jobId) {
+    try { if (typeof findJob === "function") return findJob(jobId); } catch {}
+    return (state?.data?.jobs || []).find((job) => job.id === jobId);
+  }
+
+  function ensureInvoiceHiddenJobField() {
+    const form = qs("#invoiceForm");
+    if (!form) return null;
+
+    // Remove the visible Job / AFE picker from the invoice source panel.
+    qsa('select.job-select[name="job_id"], select[name="job_id"].job-select', form).forEach((select) => {
+      const label = select.closest("label");
+      if (label) label.remove();
+      else select.remove();
+    });
+
+    let hidden = form.querySelector('input[type="hidden"][name="job_id"]');
+    if (!hidden) {
+      hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "job_id";
+      const sourcePanel = qs(".invoice-source-panel", form);
+      if (sourcePanel) sourcePanel.insertBefore(hidden, sourcePanel.firstChild);
+      else form.prepend(hidden);
+    }
+
+    if (!qs(".invoice-source-note", form)) {
+      const note = document.createElement("div");
+      note.className = "invoice-source-note";
+      note.innerHTML = "<strong>Job / AFE is optional.</strong><span>The invoice can be saved with no job connected. If a selected cost tracker has a job, the invoice will link to it automatically.</span>";
+      const status = qs('.invoice-source-panel label:has(select[name="status"])', form);
+      const sourcePanel = qs(".invoice-source-panel", form);
+      if (status && sourcePanel) sourcePanel.insertBefore(note, status);
+      else sourcePanel?.appendChild(note);
+    }
+
+    return hidden;
+  }
+
+  function trackerCommentsForInvoice(tracker) {
+    const summary = trackerSummarySafe(tracker);
+    const candidates = [
+      tracker?.notes,
+      tracker?.comments,
+      tracker?.comment,
+      summary.comments,
+      summary.comment,
+      summary.notes,
+      summary.costTrackerComments,
+      summary.cost_tracker_comments,
+      summary.sheetComments,
+      summary.sheet_comments
+    ];
+
+    for (const candidate of candidates) {
+      const text = String(candidate ?? "").trim();
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function fallbackTrackerDescription(tracker, job = null) {
+    const summary = trackerSummarySafe(tracker);
+    const parts = [
+      trackerNameSafe(tracker),
+      job?.job_number ? `Job / AFE: ${job.job_number}` : "",
+      job?.job_name ? `Project: ${job.job_name}` : "",
+      job?.location ? `Location: ${job.location}` : "",
+      summary.totalJobDays ? `Total Days: ${summary.totalJobDays}` : ""
+    ].filter(Boolean);
+
+    const items = Array.isArray(tracker?.line_items) ? tracker.line_items : [];
+    const lines = items
+      .filter((item) => numberSafe(item.cost_total) > 0 || numberSafe(item.quoted_total) > 0)
+      .slice(0, 10)
+      .map((item) => `• ${item.description || item.category || "Item"} — ${moneySafe(item.quoted_total || item.cost_total || 0)}`);
+
+    return [parts.join("\n"), lines.join("\n")].filter(Boolean).join("\n\n");
+  }
+
+  const previousTrackerInvoiceDescription = typeof trackerInvoiceDescription === "function" ? trackerInvoiceDescription : null;
+  window.trackerInvoiceDescription = function trackerInvoiceDescriptionWithComments(tracker, job = null) {
+    const comments = trackerCommentsForInvoice(tracker);
+    if (comments) return comments;
+    if (previousTrackerInvoiceDescription) {
+      try {
+        const previous = previousTrackerInvoiceDescription(tracker, job);
+        if (String(previous || "").trim()) return previous;
+      } catch {}
+    }
+    return fallbackTrackerDescription(tracker, job);
+  };
+  try { trackerInvoiceDescription = window.trackerInvoiceDescription; } catch {}
+
+  window.getInvoiceSourceTrackerFromForm = function getInvoiceSourceTrackerFromFormOnlyCostTracker() {
+    const form = qs("#invoiceForm");
+    if (!form) return null;
+    const select = form.querySelector('[name="cost_tracker_id"]');
+    const trackerId = select?.value || "";
+    return trackerId ? (state?.data?.costTrackers || []).find((row) => row.id === trackerId) || null : null;
+  };
+  try { getInvoiceSourceTrackerFromForm = window.getInvoiceSourceTrackerFromForm; } catch {}
+
+  const previousFillInvoiceFromCostTracker = typeof fillInvoiceFromCostTracker === "function" ? fillInvoiceFromCostTracker : null;
+  window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerWithOptionalJobAndComments(tracker, options = {}) {
+    ensureInvoiceHiddenJobField();
+    if (!tracker) return;
+
+    if (previousFillInvoiceFromCostTracker) {
+      previousFillInvoiceFromCostTracker(tracker, options);
+    }
+
+    const form = qs("#invoiceForm");
+    if (!form) return;
+
+    ensureInvoiceHiddenJobField();
+    const job = findJobSafe(tracker.job_id);
+
+    setValue(form, "cost_tracker_id", tracker.id || "");
+    setValue(form, "job_id", tracker.job_id || "");
+    setValue(form, "description", trackerCommentsForInvoice(tracker) || fallbackTrackerDescription(tracker, job));
+
+    // Keep project/bill-to helpful, but do not require a visible Job / AFE dropdown.
+    if (!form.querySelector('[name="project"]')?.value) {
+      setValue(form, "project", job?.job_name || trackerNameSafe(tracker));
+    }
+    if (job && !form.querySelector('[name="bill_to"]')?.value) {
+      setValue(form, "bill_to", [job.company_name || "", job.contact_name ? `Attn: ${job.contact_name}` : "", job.location || ""].filter(Boolean).join("\n"));
+    }
+
+    try { if (typeof recomputeInvoiceTotals === "function") recomputeInvoiceTotals(); } catch {}
+    try { window.fitInvoiceTemplateToViewport?.(); } catch {}
+  };
+  try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+
+  window.fillInvoiceFromSelectedCostTracker = function fillInvoiceFromSelectedCostTrackerOnly() {
+    const tracker = window.getInvoiceSourceTrackerFromForm();
+    if (!tracker) {
+      try { showToast("Select a saved cost tracker first, or fill the invoice manually and save it as a standalone invoice.", true); } catch {}
+      return;
+    }
+    window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+  };
+  try { fillInvoiceFromSelectedCostTracker = window.fillInvoiceFromSelectedCostTracker; } catch {}
+
+  const previousBuildInvoiceData = typeof buildInvoiceData === "function" ? buildInvoiceData : null;
+  if (previousBuildInvoiceData) {
+    window.buildInvoiceData = function buildInvoiceDataOptionalJob(values, job, items, summary, invoiceNumber) {
+      const tracker = values?.cost_tracker_id
+        ? (state?.data?.costTrackers || []).find((row) => row.id === values.cost_tracker_id)
+        : null;
+      const trackerJob = tracker?.job_id ? findJobSafe(tracker.job_id) : null;
+      const effectiveJob = job || trackerJob || null;
+      const data = previousBuildInvoiceData(values || {}, effectiveJob, items || [], summary || {}, invoiceNumber);
+      return {
+        ...data,
+        job: effectiveJob,
+        tracker: tracker || data.tracker || null,
+        description: values?.description || (tracker ? trackerCommentsForInvoice(tracker) : "") || data.description || "",
+        project: values?.project || effectiveJob?.job_name || (tracker ? trackerNameSafe(tracker) : "") || data.project || "",
+        poNumber: values?.po_number || effectiveJob?.job_number || data.poNumber || "",
+        billTo: values?.bill_to || effectiveJob?.company_name || data.billTo || ""
+      };
+    };
+    try { buildInvoiceData = window.buildInvoiceData; } catch {}
+  }
+
+  const previousHandleCreateInvoice = typeof handleCreateInvoice === "function" ? handleCreateInvoice : null;
+  if (previousHandleCreateInvoice) {
+    window.handleCreateInvoice = async function handleCreateInvoiceOptionalJob(event) {
+      ensureInvoiceHiddenJobField();
+
+      const form = event?.currentTarget || qs("#invoiceForm");
+      const tracker = window.getInvoiceSourceTrackerFromForm?.();
+      const hiddenJob = form?.querySelector('input[type="hidden"][name="job_id"]');
+      if (hiddenJob) hiddenJob.value = tracker?.job_id || hiddenJob.value || "";
+
+      try {
+        await previousHandleCreateInvoice.call(this, event);
+      } catch (error) {
+        const message = String(error?.message || error || "");
+        if (/job_id.*null|violates not-null|null value in column "job_id"|invoices_job_id/i.test(message)) {
+          try { showToast("Invoice job is optional now. Run supabase_invoice_optional_job_fix.sql in Supabase SQL Editor, then try saving again.", true); } catch {}
+          return;
+        }
+        throw error;
+      }
+    };
+    try { handleCreateInvoice = window.handleCreateInvoice; } catch {}
+  }
+
+  function installInvoiceSourceListeners() {
+    ensureInvoiceHiddenJobField();
+    const source = qs('#invoiceForm [name="cost_tracker_id"]');
+    if (source && !source.dataset.optionalJobListenerInstalled) {
+      source.dataset.optionalJobListenerInstalled = "true";
+      source.addEventListener("change", () => {
+        const tracker = (state?.data?.costTrackers || []).find((row) => row.id === source.value);
+        if (tracker) window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+        else {
+          const hidden = ensureInvoiceHiddenJobField();
+          if (hidden) hidden.value = "";
+        }
+      });
+    }
+  }
+
+  // Cost tracker exact-sheet preview/download guard for current and saved trackers.
+  // The preview uses the same spreadsheet-style sheet renderer used on the Cost Tracker page.
+  const previousPreviewSaved = typeof previewSavedCostTracker === "function" ? previewSavedCostTracker : null;
+  if (typeof renderSpreadsheetStyleCostTrackerPreview === "function") {
+    window.previewSavedCostTracker = function previewSavedCostTrackerExactSheetGuard(tracker) {
+      try {
+        const data = typeof normalizePreviewDataFromTracker === "function"
+          ? normalizePreviewDataFromTracker(tracker)
+          : (typeof normalizedCostTrackerData === "function" ? normalizedCostTrackerData(tracker) : null);
+        if (data && typeof openCostTrackerPreviewFinal === "function") {
+          openCostTrackerPreviewFinal(renderSpreadsheetStyleCostTrackerPreview(data));
+          return;
+        }
+      } catch {}
+      if (previousPreviewSaved) previousPreviewSaved(tracker);
+    };
+    try { previewSavedCostTracker = window.previewSavedCostTracker; } catch {}
+  }
+
+  document.addEventListener("DOMContentLoaded", installInvoiceSourceListeners);
+  setTimeout(installInvoiceSourceListeners, 0);
+
+  document.addEventListener("change", (event) => {
+    const source = event.target.closest?.('#invoiceForm [name="cost_tracker_id"]');
+    if (!source) return;
+    const tracker = (state?.data?.costTrackers || []).find((row) => row.id === source.value);
+    if (tracker) {
+      event.stopPropagation();
+      window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+    }
+  }, true);
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id === "invoiceForm") {
+      ensureInvoiceHiddenJobField();
+      const form = event.target;
+      const tracker = window.getInvoiceSourceTrackerFromForm?.();
+      const hiddenJob = form.querySelector('input[type="hidden"][name="job_id"]');
+      if (hiddenJob) hiddenJob.value = tracker?.job_id || hiddenJob.value || "";
+    }
+  }, true);
+})();
+
+
+/* ========================================================================
+   FINAL JOB DOCUMENTS + COST TRACKER EXACT BID SHEET LAYOUT PATCH
+   ------------------------------------------------------------------------
+   - Removes job file uploads from the Create Job form workflow.
+   - Keeps document uploads inside the expanded job details after a job exists.
+   - Makes job rows easier to visually separate.
+   - Makes cost tracker preview/download use the same BID/COST TRACKING SHEET
+     layout for current, saved, and uploaded trackers.
+   - Downloads the original uploaded Excel file when a cost tracker was uploaded
+     from an existing XLSX file so the original layout/design is preserved.
+   ======================================================================== */
+(function finalJobDocumentsCostTrackerLayoutPatch() {
+  const SOFT_BLUE = "D9EAF7";
+  const SOFT_YELLOW = "FFF2CC";
+  const SOFT_ORANGE = "F4B183";
+  const DARK = "111827";
+  const LIGHT_GRAY = "F3F4F6";
+  const MID_GRAY = "E5E7EB";
+  const GREEN = "DCFCE7";
+
+  function html(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+    }[char]));
+  }
+
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return html(value);
+  }
+
+  function num(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    if (value === null || value === undefined || value === "") return 0;
+    const cleaned = String(value).replace(/[$,%]/g, "").replace(/,/g, "").trim();
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function moneyText(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return num(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+
+  function pctText(value) {
+    const n = num(value);
+    if (!n) return "0.00%";
+    return `${(Math.abs(n) <= 1 ? n * 100 : n).toFixed(2)}%`;
+  }
+
+  function parseJson(value, fallback) {
+    if (value === null || value === undefined || value === "") return fallback;
+    if (typeof value === "object") return value;
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+
+  function cleanName(name, ext = "xlsx") {
+    const base = String(name || "cost_tracker")
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^a-zA-Z0-9._ -]/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 120) || "cost_tracker";
+    return `${base}.${ext}`;
+  }
+
+  function findJobById(jobId) {
+    try { if (typeof findJob === "function") return findJob(jobId); } catch {}
+    return (state?.data?.jobs || []).find((job) => job.id === jobId) || null;
+  }
+
+  function trackerName(tracker) {
+    const summary = parseJson(tracker?.summary, {});
+    try { if (typeof getTrackerName === "function") return getTrackerName(tracker); } catch {}
+    return tracker?.tracker_name || tracker?.cost_tracker_name || tracker?.name || summary.trackerName || summary.tracker_name || "Cost Tracker";
+  }
+
+  function summarizeItems(items, fallback = {}) {
+    const list = Array.isArray(items) ? items : [];
+    const sum = (category, field) => list
+      .filter((item) => String(item.category || "").toLowerCase() === category)
+      .reduce((total, item) => total + num(item[field]), 0);
+    const laborCost = num(fallback.laborCost ?? fallback.labor_cost ?? sum("labor", "cost_total"));
+    const equipmentCost = num(fallback.equipmentCost ?? fallback.equipment_cost ?? sum("equipment", "cost_total"));
+    const materialCost = num(fallback.materialCost ?? fallback.material_cost ?? sum("materials", "cost_total"));
+    const subcontractorCost = num(fallback.subcontractorCost ?? fallback.subcontractor_cost ?? sum("subcontractors", "cost_total"));
+    const otherCost = num(fallback.otherCost ?? fallback.other_cost ?? sum("misc", "cost_total"));
+    const totalCost = num(fallback.totalCost ?? fallback.total_cost ?? (laborCost + equipmentCost + materialCost + subcontractorCost + otherCost));
+
+    const laborRate = num(fallback.laborRate ?? fallback.labor_rate ?? sum("labor", "quoted_total"));
+    const equipmentRate = num(fallback.equipmentRate ?? fallback.equipment_rate ?? sum("equipment", "quoted_total"));
+    const materialRate = num(fallback.materialRate ?? fallback.material_rate ?? sum("materials", "quoted_total"));
+    const subcontractorRate = num(fallback.subcontractorRate ?? fallback.subcontractor_rate ?? sum("subcontractors", "quoted_total"));
+    const otherRate = num(fallback.otherRate ?? fallback.other_rate ?? sum("misc", "quoted_total"));
+    const quotedPrice = num(fallback.quotedPrice ?? fallback.quoted_price ?? fallback.rateTotal ?? fallback.rate_total ?? (laborRate + equipmentRate + materialRate + subcontractorRate + otherRate));
+    const profit = num(fallback.profit ?? (quotedPrice - totalCost));
+    const margin = fallback.margin !== undefined && fallback.margin !== null && fallback.margin !== "" ? num(fallback.margin) : (quotedPrice > 0 ? profit / quotedPrice : 0);
+
+    return { laborCost, equipmentCost, materialCost, subcontractorCost, otherCost, totalCost, laborRate, equipmentRate, materialRate, subcontractorRate, otherRate, quotedPrice, profit, margin };
+  }
+
+  function normalizeTrackerForBidSheet(tracker) {
+    const summary = parseJson(tracker?.summary, {});
+    const items = parseJson(tracker?.line_items, []);
+    const job = findJobById(tracker?.job_id) || {
+      job_number: summary.jobNumber || summary.job_number || "Unassigned",
+      job_name: summary.jobName || summary.job_name || trackerName(tracker),
+      company_name: summary.client || summary.company_name || "",
+      location: summary.location || ""
+    };
+    const totals = summarizeItems(Array.isArray(items) ? items : [], {
+      ...summary,
+      labor_cost: tracker?.labor_cost,
+      material_cost: tracker?.material_cost,
+      equipment_cost: tracker?.equipment_cost,
+      subcontractor_cost: tracker?.subcontractor_cost,
+      other_cost: tracker?.other_cost,
+      total_cost: tracker?.total_cost,
+      quoted_price: tracker?.quoted_price,
+      profit: tracker?.profit,
+      margin: tracker?.margin
+    });
+
+    return {
+      meta: {
+        name: trackerName(tracker),
+        date: tracker?.cost_tracker_date || tracker?.tracker_date || summary.costTrackerDate || summary.cost_tracker_date || String(tracker?.created_at || "").slice(0, 10) || "",
+        jobNumber: job?.job_number || summary.jobNumber || summary.job_number || "Unassigned",
+        client: job?.company_name || summary.client || "",
+        jobName: job?.job_name || summary.jobName || summary.job_name || trackerName(tracker),
+        totalDays: summary.totalJobDays || summary.total_job_days || job?.total_job_days || "",
+        location: job?.location || summary.location || "",
+        comments: tracker?.notes || summary.comments || summary.notes || "",
+        byWhom: summary.byWhom || summary.by_whom || ""
+      },
+      items: Array.isArray(items) ? items : [],
+      totals,
+      sourceTracker: tracker
+    };
+  }
+
+  function normalizeCurrentFormForBidSheet() {
+    const form = document.getElementById("costTrackerForm");
+    let values = {};
+    try { values = form && typeof formToObject === "function" ? formToObject(form) : Object.fromEntries(new FormData(form)); } catch {}
+    let totalsResult = null;
+    try { if (typeof recomputeCostTrackerTotals === "function") totalsResult = recomputeCostTrackerTotals(); } catch {}
+    let items = totalsResult?.items || [];
+    if (!items.length) {
+      try { if (typeof extractCostTrackerLineItems === "function") items = extractCostTrackerLineItems({ includeBlank: true }); } catch {}
+    }
+    const job = findJobById(values.job_id) || {};
+    const totals = summarizeItems(items, totalsResult?.summary || {});
+    return {
+      meta: {
+        name: values.cost_tracker_name || document.getElementById("sheetTrackerNameDisplay")?.textContent || job.job_name || "Cost Tracker",
+        date: values.cost_tracker_date || new Date().toISOString().slice(0, 10),
+        jobNumber: job.job_number || "Unassigned",
+        client: job.company_name || "",
+        jobName: job.job_name || "",
+        totalDays: values.total_job_days || job.total_job_days || "",
+        location: job.location || "",
+        comments: values.notes || "",
+        byWhom: values.by_whom || ""
+      },
+      items: Array.isArray(items) ? items : [],
+      totals,
+      sourceTracker: null
+    };
+  }
+
+  function category(items, name) {
+    return (items || []).filter((item) => String(item.category || "").toLowerCase() === name);
+  }
+
+  function blankRow(cols = 10) {
+    return Array.from({ length: cols }, () => "");
+  }
+
+  function buildBidSheetRows(data) {
+    const rows = [];
+    const formulas = [];
+    const totals = data.totals || {};
+    const meta = data.meta || {};
+    const items = data.items || [];
+    const totalRowRefs = [];
+
+    const push = (row) => { rows.push(row.concat(Array(Math.max(0, 10 - row.length)).fill(""))); return rows.length; };
+    const pushBlank = () => push(blankRow());
+    const cell = (col, row) => `${col}${row}`;
+
+    push(["BID/COST TRACKING SHEET"]);
+    pushBlank();
+    push(["Cost Tracker Name", meta.name || "", "Date", meta.date || "", "Job/AFE #", meta.jobNumber || "", "", "", "", ""]);
+    push(["Client", meta.client || "", "Job Name", meta.jobName || "", "Total Days", meta.totalDays || "", "", "", "", ""]);
+    push(["Location", meta.location || "", "", "", "", "", "", "", "", ""]);
+    pushBlank();
+
+    function section(title, headers, sectionItems, mapper, formulaMaker, totalLabel, minRows = 1) {
+      const sectionTitleRow = push([title]);
+      const headerRow = push(headers);
+      const start = rows.length + 1;
+      const normalized = sectionItems.length ? sectionItems : Array.from({ length: minRows }, () => ({}));
+      normalized.forEach((item) => {
+        const rowNum = push(mapper(item));
+        formulaMaker(rowNum, item);
+      });
+      const end = rows.length;
+      const totalRow = push([totalLabel, "", "", "", "", "", 0, "", "", 0]);
+      formulas.push({ ref: cell("G", totalRow), f: `SUM(G${start}:G${end})`, v: sectionItems.reduce((s, item) => s + num(item.cost_total), 0) });
+      formulas.push({ ref: cell("J", totalRow), f: `SUM(J${start}:J${end})`, v: sectionItems.reduce((s, item) => s + num(item.quoted_total), 0) });
+      totalRowRefs.push({ cost: cell("G", totalRow), rate: cell("J", totalRow) });
+      pushBlank();
+      return { sectionTitleRow, headerRow, start, end, totalRow };
+    }
+
+    section(
+      "PERSONNEL",
+      ["Role", "Qty", "Hours", "Cost", "OT Hours", "OT Cost", "Cost Total", "Rate", "OT Rate", "Rate Total"],
+      category(items, "labor"),
+      (item) => [item.description || item.role || "", item.qty || "", item.effective_hours ?? item.hours ?? "", item.cost_rate || "", item.ot_hours || "", item.ot_cost_rate || "", num(item.cost_total), item.bill_rate || "", item.ot_bill_rate || "", num(item.quoted_total)],
+      (row) => {
+        formulas.push({ ref: cell("G", row), f: `IFERROR(B${row}*C${row}*D${row}+E${row}*F${row},0)`, v: num(rows[row - 1][6]) });
+        formulas.push({ ref: cell("J", row), f: `IFERROR(B${row}*C${row}*H${row}+E${row}*I${row},0)`, v: num(rows[row - 1][9]) });
+      },
+      "PERSONNEL TOTAL",
+      2
+    );
+
+    section(
+      "EQUIPMENT",
+      ["Equipment", "Qty", "Hours", "Cost / Hr", "Days", "Cost / Day", "Cost Total", "Hr Rate", "Day Rate", "Rate Total"],
+      category(items, "equipment"),
+      (item) => [item.description || "", item.qty || "", item.hours || "", item.cost_rate || "", item.days || "", item.day_cost || "", num(item.cost_total), item.bill_rate || "", item.day_rate || "", num(item.quoted_total)],
+      (row) => {
+        formulas.push({ ref: cell("G", row), f: `IFERROR(B${row}*C${row}*D${row}+B${row}*E${row}*F${row},0)`, v: num(rows[row - 1][6]) });
+        formulas.push({ ref: cell("J", row), f: `IFERROR(B${row}*C${row}*H${row}+B${row}*E${row}*I${row},0)`, v: num(rows[row - 1][9]) });
+      },
+      "EQUIPMENT TOTAL",
+      1
+    );
+
+    function simpleSection(title, categoryName, minRows = 1) {
+      section(
+        title,
+        ["Description", "Qty", "Cost", "Markup %", "Quoted Override", "", "Cost Total", "", "", "Rate Total"],
+        category(items, categoryName),
+        (item) => [item.description || "", item.qty || "", item.cost || "", item.markup_percent ?? "", item.quoted_override ?? "", "", num(item.cost_total), "", "", num(item.quoted_total)],
+        (row) => {
+          formulas.push({ ref: cell("G", row), f: `IFERROR(B${row}*C${row},0)`, v: num(rows[row - 1][6]) });
+          formulas.push({ ref: cell("J", row), f: `IF(E${row}<>"",E${row},IFERROR(G${row}*(1+D${row}/100),0))`, v: num(rows[row - 1][9]) });
+        },
+        `${title} TOTAL`,
+        minRows
+      );
+    }
+
+    simpleSection("MATERIALS", "materials", 1);
+    simpleSection("SUBCONTRACTORS", "subcontractors", 1);
+    simpleSection("MISCELLANEOUS", "misc", 2);
+
+    const summaryTitleRow = push(["SUMMARY"]);
+    const rateRow = push(["RATE TOTAL", totals.quotedPrice || 0]);
+    const costRow = push(["COST TOTAL", totals.totalCost || 0]);
+    const profitRow = push(["BID PROFIT", totals.profit || 0]);
+    const marginRow = push(["GROSS MARGIN", totals.margin || 0]);
+    formulas.push({ ref: `B${rateRow}`, f: totalRowRefs.map((r) => r.rate).join("+"), v: totals.quotedPrice || 0 });
+    formulas.push({ ref: `B${costRow}`, f: totalRowRefs.map((r) => r.cost).join("+"), v: totals.totalCost || 0 });
+    formulas.push({ ref: `B${profitRow}`, f: `B${rateRow}-B${costRow}`, v: totals.profit || 0 });
+    formulas.push({ ref: `B${marginRow}`, f: `IF(B${rateRow}>0,B${profitRow}/B${rateRow},0)`, v: totals.margin || 0, z: "0.00%" });
+
+    const comments = String(meta.comments || "").trim();
+    const byWhom = String(meta.byWhom || "").trim();
+    if (comments || byWhom) {
+      pushBlank();
+      push(["COMMENTS:", comments, "", "", "", "", "By Whom:", byWhom, "", ""]);
+    }
+
+    return { rows, formulas, summaryRows: { summaryTitleRow, rateRow, costRow, profitRow, marginRow } };
+  }
+
+  function bidSheetHtml(data) {
+    const meta = data?.meta || {};
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const totals = data?.totals || summarizeItems(items, {});
+    const list = (name) => items.filter((item) => String(item.category || "").toLowerCase() === name);
+    const sum = (rows, field) => rows.reduce((total, item) => total + num(item[field]), 0);
+    const moneyCell = (value, className = "") => `<span class="money-output ${className}">${moneyText(value)}</span>`;
+    const textCell = (value) => html(value || "");
+    const numberCell = (value) => {
+      const n = num(value);
+      return value === null || value === undefined || value === "" ? "" : String(n).replace(/\.00$/, "");
+    };
+    const emptyRows = (count, cols) => Array.from({ length: count }, () => `<tr>${Array.from({ length: cols }, () => "<td>&nbsp;</td>").join("")}</tr>`).join("");
+
+    function laborRows() {
+      const rows = list("labor");
+      const body = rows.map((item) => `
+        <tr class="sheet-cost-row">
+          <td>${textCell(item.description || item.role)}</td>
+          <td class="input-red">${numberCell(item.qty)}</td>
+          <td class="input-red">${numberCell(item.effective_hours ?? item.hours)}</td>
+          <td>${moneyCell(item.cost_rate)}</td>
+          <td class="input-blue">${numberCell(item.ot_hours)}</td>
+          <td>${moneyCell(item.ot_cost_rate)}</td>
+          <td>${moneyCell(item.cost_total)}</td>
+          <td>${moneyCell(item.bill_rate)}</td>
+          <td>${moneyCell(item.ot_bill_rate)}</td>
+          <td>${moneyCell(item.quoted_total)}</td>
+        </tr>
+      `).join("");
+      return body || emptyRows(5, 10);
+    }
+
+    function equipmentRows() {
+      const rows = list("equipment");
+      const body = rows.map((item) => `
+        <tr class="sheet-cost-row">
+          <td>${textCell(item.description)}</td>
+          <td class="input-red">${numberCell(item.qty)}</td>
+          <td class="input-blue">${numberCell(item.hours)}</td>
+          <td>${moneyCell(item.cost_rate)}</td>
+          <td class="input-blue">${numberCell(item.days)}</td>
+          <td>${moneyCell(item.day_cost)}</td>
+          <td>${moneyCell(item.cost_total)}</td>
+          <td>${moneyCell(item.bill_rate)}</td>
+          <td>${moneyCell(item.day_rate)}</td>
+          <td>${moneyCell(item.quoted_total)}</td>
+        </tr>
+      `).join("");
+      return body || emptyRows(5, 10);
+    }
+
+    function simpleRows(categoryName, cols = 4) {
+      const rows = list(categoryName);
+      const body = rows.map((item) => {
+        if (categoryName === "misc") {
+          return `
+            <tr class="sheet-cost-row">
+              <td>${textCell(item.description)}</td>
+              <td class="input-blue">${numberCell(item.qty)}</td>
+              <td>${moneyCell(item.cost)}</td>
+              <td>${moneyCell(item.quoted_total || item.cost_total)}</td>
+            </tr>
+          `;
+        }
+        return `
+          <tr class="sheet-cost-row">
+            <td>${textCell(item.description)}</td>
+            <td>${moneyCell(item.cost || item.cost_total)}</td>
+            <td class="red-head">${numberCell(item.markup_percent)}${item.markup_percent !== undefined && item.markup_percent !== "" ? "%" : ""}</td>
+            <td>${moneyCell(item.quoted_total || item.cost_total)}</td>
+          </tr>
+        `;
+      }).join("");
+      return body || emptyRows(categoryName === "misc" ? 2 : 4, cols);
+    }
+
+    const labor = list("labor");
+    const equipment = list("equipment");
+    const materials = list("materials");
+    const subcontractors = list("subcontractors");
+    const misc = list("misc");
+    const totalCost = totals.totalCost ?? totals.total_cost ?? sum(items, "cost_total");
+    const quotedTotal = totals.quotedPrice ?? totals.quoted_price ?? sum(items, "quoted_total");
+    const profit = totals.profit ?? (num(quotedTotal) - num(totalCost));
+    const margin = totals.margin ?? (num(quotedTotal) > 0 ? num(profit) / num(quotedTotal) : 0);
+
+    return `
+      <div class="cost-tracker-preview-shell spreadsheet-preview-shell">
+        <div class="sheet-scroll preview-sheet-scroll">
+          <div class="cost-sheet cost-sheet-preview original-cost-template-preview">
+            <div class="sheet-title-row">BID/COST TRACKING SHEET</div>
+
+            <div class="sheet-meta-grid">
+              <div class="sheet-meta-cell wide">COST TRACKER NAME:<strong>${html(meta.name || "Untitled Cost Tracker")}</strong></div>
+              <div class="sheet-meta-cell">DATE:<strong>${html(meta.date || "—")}</strong></div>
+              <div class="sheet-meta-cell">Job/AFE #<strong>${html(meta.jobNumber || "Unassigned")}</strong></div>
+              <div class="sheet-meta-cell">CLIENT:<strong>${html(meta.client || "—")}</strong></div>
+              <div class="sheet-meta-cell wide">JOB NAME:<strong>${html(meta.jobName || "—")}</strong></div>
+              <div class="sheet-meta-cell small">Total Days:<strong>${html(meta.totalDays || "—")}</strong></div>
+              <div class="sheet-meta-cell wide">Location:<strong>${html(meta.location || "—")}</strong></div>
+            </div>
+
+            <div class="sheet-grid-layout">
+              <div class="sheet-left-column">
+                <table class="sheet-table labor-table">
+                  <colgroup><col class="desc-col"><col class="qty-col"><col class="hours-col"><col class="money-col"><col class="hours-col"><col class="money-col"><col class="total-col"><col class="money-col"><col class="money-col"><col class="total-col"></colgroup>
+                  <thead><tr class="section-row"><th colspan="10">PERSONNEL</th></tr><tr><th></th><th>QTY</th><th>HOURS</th><th>COST</th><th>OT HOURS</th><th>OT COST</th><th>COST TOTAL</th><th>RATE</th><th>OT RATE</th><th>RATE TOTAL</th></tr></thead>
+                  <tbody>${laborRows()}</tbody>
+                  <tfoot><tr class="total-row"><th>PERSONNEL TOTAL</th><td></td><td></td><td></td><td></td><td></td><td>${moneyCell(sum(labor, "cost_total"))}</td><td></td><td></td><td>${moneyCell(sum(labor, "quoted_total"))}</td></tr></tfoot>
+                </table>
+
+                <table class="sheet-table equipment-table">
+                  <colgroup><col class="desc-col"><col class="qty-col"><col class="hours-col"><col class="money-col"><col class="hours-col"><col class="money-col"><col class="total-col"><col class="money-col"><col class="money-col"><col class="total-col"></colgroup>
+                  <thead><tr class="section-row"><th colspan="10">EQUIPMENT</th></tr><tr><th></th><th>QTY</th><th>HOURS</th><th>COST</th><th>DAYS</th><th>DAY COST</th><th>COST TOTAL</th><th>HR RATE</th><th>DAY RATE</th><th>RATE TOTAL</th></tr></thead>
+                  <tbody>${equipmentRows()}</tbody>
+                  <tfoot><tr class="total-row"><th>EQUIPMENT TOTAL</th><td></td><td></td><td></td><td></td><td></td><td>${moneyCell(sum(equipment, "cost_total"))}</td><td></td><td></td><td>${moneyCell(sum(equipment, "quoted_total"))}</td></tr></tfoot>
+                </table>
+
+                <table class="sheet-table assumptions-table"><tbody><tr><th colspan="4">Assumptions</th></tr><tr><td>Est Daily Material Costs</td><td class="input-red">1500</td><td></td><td></td></tr><tr><td>Per Diem Markup</td><td class="input-red">0</td><td></td><td></td></tr><tr><td>Overtime</td><td class="input-red text-center">Y</td><td></td><td></td></tr></tbody></table>
+              </div>
+
+              <div class="sheet-right-column">
+                <table class="sheet-table materials-table"><colgroup><col class="right-desc-col"><col class="right-cost-col"><col class="right-markup-col"><col class="right-total-col"></colgroup><thead><tr class="section-row centered"><th colspan="4">MATERIALS AND ADDITIONAL</th></tr><tr><th>Description of Items</th><th>Cost</th><th class="red-head">Markup %</th><th>Total</th></tr></thead><tbody>${simpleRows("materials")}</tbody><tfoot><tr class="total-row"><th>MATERIALS TOTAL</th><td>${moneyCell(sum(materials, "cost_total"))}</td><td></td><td>${moneyCell(sum(materials, "quoted_total"))}</td></tr></tfoot></table>
+                <table class="sheet-table subcontractor-table"><colgroup><col class="right-desc-col"><col class="right-cost-col"><col class="right-markup-col"><col class="right-total-col"></colgroup><thead><tr class="section-row"><th colspan="4">Subcontractors</th></tr><tr><th></th><th>Cost</th><th class="red-head">Markup %</th><th>Total</th></tr></thead><tbody>${simpleRows("subcontractors")}</tbody><tfoot><tr class="total-row"><th>SUBCONTRACTOR TOTAL</th><td>${moneyCell(sum(subcontractors, "cost_total"))}</td><td></td><td>${moneyCell(sum(subcontractors, "quoted_total"))}</td></tr></tfoot></table>
+                <table class="sheet-table misc-table"><colgroup><col class="right-desc-col"><col class="qty-col"><col class="right-cost-col"><col class="right-total-col"></colgroup><thead><tr class="section-row"><th colspan="4">MISCELLANEOUS</th></tr></thead><tbody>${simpleRows("misc")}</tbody><tfoot><tr class="total-row"><th>MISCELLANEOUS TOTAL</th><td></td><td>${moneyCell(sum(misc, "cost_total"))}</td><td>${moneyCell(sum(misc, "quoted_total"))}</td></tr></tfoot></table>
+
+                <div class="sheet-summary-block preview-summary-block">
+                  <div class="summary-label">RATE TOTAL=</div><div class="summary-value orange">${moneyText(quotedTotal)}</div><div class="summary-mirror">${moneyText(quotedTotal)}</div>
+                  <div class="summary-label">COST TOTAL</div><div class="summary-value blue">${moneyText(totalCost)}</div><div class="summary-mirror">${moneyText(totalCost)}</div>
+                  <div class="summary-profit-label">Bid Profit:</div><div class="summary-profit yellow">${moneyText(profit)}</div>
+                  <div class="summary-margin-label">Gross Margin</div><div class="summary-margin">${pctText(margin)}</div>
+                </div>
+
+                ${(meta.comments || meta.byWhom) ? `<div class="sheet-notes-box"><strong>COMMENTS:</strong><p>${html(meta.comments || "").replace(/\n/g, "<br>")}</p>${meta.byWhom ? `<p><strong>By Whom:</strong> ${html(meta.byWhom)}</p>` : ""}</div>` : ""}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function openBidSheetPreview(data) {
+    const content = document.getElementById("costTrackerPreviewContent");
+    const dialog = document.getElementById("costTrackerPreviewDialog");
+    if (!content || !dialog) return;
+    window.__pimpLastCostTrackerBidSheetData = data;
+    content.innerHTML = bidSheetHtml(data);
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "open");
+  }
+
+  function styleCell(cell, style) {
+    if (!cell) return;
+    cell.s = { ...(cell.s || {}), ...style };
+  }
+
+  function borderStyle() {
+    return {
+      top: { style: "thin", color: { rgb: "111111" } },
+      bottom: { style: "thin", color: { rgb: "111111" } },
+      left: { style: "thin", color: { rgb: "111111" } },
+      right: { style: "thin", color: { rgb: "111111" } }
+    };
+  }
+
+  async function ensureXlsxStyled() {
+    if (window.XLSX?.utils?.aoa_to_sheet && window.XLSX?.writeFile) return window.XLSX;
+    await new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js";
+      script.onload = resolve;
+      script.onerror = () => reject(new Error("Could not load the Excel download library."));
+      document.head.appendChild(script);
+    });
+    return window.XLSX;
+  }
+
+  async function downloadBidSheetWorkbook(data) {
+    const XLSX = await ensureXlsxStyled();
+    const meta = data?.meta || {};
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const totals = data?.totals || summarizeItems(items, {});
+    const list = (name) => items.filter((item) => String(item.category || "").toLowerCase() === name);
+    const sum = (rows, field) => rows.reduce((total, item) => total + num(item[field]), 0);
+    const totalCost = totals.totalCost ?? totals.total_cost ?? sum(items, "cost_total");
+    const quotedTotal = totals.quotedPrice ?? totals.quoted_price ?? sum(items, "quoted_total");
+    const profit = totals.profit ?? (num(quotedTotal) - num(totalCost));
+    const margin = totals.margin ?? (num(quotedTotal) > 0 ? num(profit) / num(quotedTotal) : 0);
+
+    const rows = Array.from({ length: 43 }, () => Array.from({ length: 17 }, () => ""));
+    const put = (r, c, value) => { rows[r - 1][c - 1] = value ?? ""; };
+    const money = (value) => num(value);
+    put(1, 1, "BID/COST TRACKING SHEET");
+    put(3, 1, "COST TRACKER NAME:"); put(3, 2, meta.name || "Untitled Cost Tracker"); put(3, 5, "DATE:"); put(3, 6, meta.date || ""); put(3, 8, "Job/AFE #"); put(3, 9, meta.jobNumber || "Unassigned"); put(3, 11, "CLIENT:"); put(3, 12, meta.client || "");
+    put(4, 1, "JOB NAME:"); put(4, 2, meta.jobName || ""); put(4, 8, "Total Days:"); put(4, 9, meta.totalDays || ""); put(5, 1, "Location:"); put(5, 2, meta.location || "");
+
+    function writeLeftSection(startRow, title, headers, sectionItems, rowMapper, totalLabel) {
+      put(startRow, 1, title);
+      headers.forEach((h, i) => put(startRow + 1, i + 1, h));
+      const minRows = title === "PERSONNEL" || title === "EQUIPMENT" ? 5 : 2;
+      const rendered = sectionItems.length ? sectionItems : Array.from({ length: minRows }, () => ({}));
+      rendered.forEach((item, index) => rowMapper(item).forEach((value, i) => put(startRow + 2 + index, i + 1, value)));
+      const totalRow = startRow + 2 + rendered.length;
+      put(totalRow, 1, totalLabel);
+      put(totalRow, 7, sum(sectionItems, "cost_total"));
+      put(totalRow, 10, sum(sectionItems, "quoted_total"));
+      return totalRow;
+    }
+
+    function writeRightSection(startRow, title, headers, sectionItems, rowMapper, totalLabel) {
+      put(startRow, 13, title);
+      headers.forEach((h, i) => put(startRow + 1, i + 13, h));
+      const minRows = title === "MISCELLANEOUS" ? 2 : 4;
+      const rendered = sectionItems.length ? sectionItems : Array.from({ length: minRows }, () => ({}));
+      rendered.forEach((item, index) => rowMapper(item).forEach((value, i) => put(startRow + 2 + index, i + 13, value)));
+      const totalRow = startRow + 2 + rendered.length;
+      put(totalRow, 13, totalLabel);
+      if (title === "MISCELLANEOUS") {
+        put(totalRow, 15, sum(sectionItems, "cost_total"));
+        put(totalRow, 16, sum(sectionItems, "quoted_total"));
+      } else {
+        put(totalRow, 14, sum(sectionItems, "cost_total"));
+        put(totalRow, 16, sum(sectionItems, "quoted_total"));
+      }
+      return totalRow;
+    }
+
+    const labor = list("labor");
+    const equipment = list("equipment");
+    const materials = list("materials");
+    const subcontractors = list("subcontractors");
+    const misc = list("misc");
+
+    const laborTotalRow = writeLeftSection(7, "PERSONNEL", ["", "QTY", "HOURS", "COST", "OT HOURS", "OT COST", "COST TOTAL", "RATE", "OT RATE", "RATE TOTAL"], labor, (item) => [item.description || item.role || "", item.qty || "", item.effective_hours ?? item.hours ?? "", money(item.cost_rate), item.ot_hours || "", money(item.ot_cost_rate), money(item.cost_total), money(item.bill_rate), money(item.ot_bill_rate), money(item.quoted_total)], "PERSONNEL TOTAL");
+    const equipmentStart = laborTotalRow + 2;
+    const equipmentTotalRow = writeLeftSection(equipmentStart, "EQUIPMENT", ["", "QTY", "HOURS", "COST", "DAYS", "DAY COST", "COST TOTAL", "HR RATE", "DAY RATE", "RATE TOTAL"], equipment, (item) => [item.description || "", item.qty || "", item.hours || "", money(item.cost_rate), item.days || "", money(item.day_cost), money(item.cost_total), money(item.bill_rate), money(item.day_rate), money(item.quoted_total)], "EQUIPMENT TOTAL");
+    const assumptionsStart = equipmentTotalRow + 3;
+    put(assumptionsStart, 1, "Assumptions"); put(assumptionsStart + 1, 1, "Est Daily Material Costs"); put(assumptionsStart + 1, 2, 1500); put(assumptionsStart + 2, 1, "Per Diem Markup"); put(assumptionsStart + 2, 2, 0); put(assumptionsStart + 3, 1, "Overtime"); put(assumptionsStart + 3, 2, "Y");
+
+    const materialsTotalRow = writeRightSection(7, "MATERIALS AND ADDITIONAL", ["Description of Items", "Cost", "Markup %", "Total"], materials, (item) => [item.description || "", money(item.cost || item.cost_total), item.markup_percent ?? "", money(item.quoted_total || item.cost_total)], "MATERIALS TOTAL");
+    const subStart = materialsTotalRow + 2;
+    const subTotalRow = writeRightSection(subStart, "Subcontractors", ["", "Cost", "Markup %", "Total"], subcontractors, (item) => [item.description || "", money(item.cost || item.cost_total), item.markup_percent ?? "", money(item.quoted_total || item.cost_total)], "SUBCONTRACTOR TOTAL");
+    const miscStart = subTotalRow + 3;
+    const miscTotalRow = writeRightSection(miscStart, "MISCELLANEOUS", ["Description", "Qty", "Cost", "Total"], misc, (item) => [item.description || "", item.qty || "", money(item.cost || item.cost_total), money(item.quoted_total || item.cost_total)], "MISCELLANEOUS TOTAL");
+
+    const summaryStart = Math.max(miscTotalRow + 3, 33);
+    put(summaryStart, 13, "RATE TOTAL="); put(summaryStart, 14, quotedTotal); put(summaryStart, 16, quotedTotal);
+    put(summaryStart + 1, 13, "COST TOTAL"); put(summaryStart + 1, 14, totalCost); put(summaryStart + 1, 16, totalCost);
+    put(summaryStart + 2, 14, "Bid Profit:"); put(summaryStart + 2, 16, profit);
+    put(summaryStart + 3, 14, "Gross Margin"); put(summaryStart + 3, 16, margin);
+    if (meta.comments || meta.byWhom) {
+      put(summaryStart + 6, 1, "COMMENTS:"); put(summaryStart + 6, 2, meta.comments || ""); put(summaryStart + 6, 8, "By Whom:"); put(summaryStart + 6, 9, meta.byWhom || "");
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 22 }, { wch: 9 }, { wch: 9 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 13 }, { wch: 10 }, { wch: 10 }, { wch: 13 }, { wch: 2 }, { wch: 2 }, { wch: 25 }, { wch: 12 }, { wch: 12 }, { wch: 13 }, { wch: 2 }
+    ];
+    ws["!rows"] = rows.map((_, index) => ({ hpt: index === 0 ? 26 : 20 }));
+    ws["!merges"] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: 15 } },
+      { s: { r: 6, c: 0 }, e: { r: 6, c: 9 } },
+      { s: { r: equipmentStart - 1, c: 0 }, e: { r: equipmentStart - 1, c: 9 } },
+      { s: { r: 6, c: 12 }, e: { r: 6, c: 15 } },
+      { s: { r: subStart - 1, c: 12 }, e: { r: subStart - 1, c: 15 } },
+      { s: { r: miscStart - 1, c: 12 }, e: { r: miscStart - 1, c: 15 } },
+      { s: { r: assumptionsStart - 1, c: 0 }, e: { r: assumptionsStart - 1, c: 3 } }
+    ];
+
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1:P43");
+    const border = borderStyle();
+    const setStyle = (ref, style) => { ws[ref] = ws[ref] || { t: "s", v: "" }; styleCell(ws[ref], style); };
+    const sectionRows = new Set([7, equipmentStart, materialsTotalRow + 2, subStart, miscStart, assumptionsStart]);
+    const headerRows = new Set([8, equipmentStart + 1, 8, subStart + 1, miscStart + 1]);
+    for (let R = range.s.r; R <= range.e.r; R += 1) {
+      for (let C = range.s.c; C <= range.e.c; C += 1) {
+        const ref = XLSX.utils.encode_cell({ r: R, c: C });
+        const cellValue = ws[ref]?.v;
+        setStyle(ref, { font: { name: "Arial", sz: 9, color: { rgb: "111827" } }, alignment: { vertical: "center", wrapText: true }, border });
+        if (typeof cellValue === "number" && ![1, 2, 4, 14].includes(C)) ws[ref].z = '$#,##0.00';
+        if (R === summaryStart + 2 || R === summaryStart + 3) ws[ref].z = C === 15 && R === summaryStart + 3 ? '0.00%' : ws[ref].z;
+      }
+    }
+    setStyle("A1", { font: { name: "Arial", sz: 18, bold: true }, alignment: { horizontal: "center", vertical: "center" }, border: {} });
+
+    function styleRect(r1, c1, r2, c2, style) {
+      for (let R = r1; R <= r2; R += 1) for (let C = c1; C <= c2; C += 1) setStyle(XLSX.utils.encode_cell({ r: R - 1, c: C - 1 }), style);
+    }
+    [7, equipmentStart, subStart, miscStart, assumptionsStart].forEach((r) => styleRect(r, 1, r, 16, { font: { name: "Arial", sz: 10, bold: true }, alignment: { horizontal: "center", vertical: "center" }, border }));
+    styleRect(7, 13, 7, 16, { font: { name: "Arial", sz: 10, bold: true }, alignment: { horizontal: "center", vertical: "center" }, border });
+    [8, equipmentStart + 1].forEach((r) => styleRect(r, 1, r, 10, { font: { name: "Arial", sz: 9, bold: true }, alignment: { horizontal: "center", vertical: "center" }, border }));
+    [8, subStart + 1, miscStart + 1].forEach((r) => styleRect(r, 13, r, 16, { font: { name: "Arial", sz: 9, bold: true }, alignment: { horizontal: "center", vertical: "center" }, border }));
+    [laborTotalRow, equipmentTotalRow].forEach((r) => styleRect(r, 1, r, 10, { font: { name: "Arial", sz: 9, bold: true }, fill: { fgColor: { rgb: "F2F2F2" } }, border }));
+    [materialsTotalRow, subTotalRow, miscTotalRow].forEach((r) => styleRect(r, 13, r, 16, { font: { name: "Arial", sz: 9, bold: true }, fill: { fgColor: { rgb: "F2F2F2" } }, border }));
+    // Editable/input colors match the on-page template.
+    [2,3,5].forEach((c) => styleRect(9, c, laborTotalRow - 1, c, { fill: { fgColor: { rgb: c === 5 ? "B7CDE3" : "FF0D0D" } }, border, alignment: { horizontal: "center", vertical: "center" } }));
+    [2,3,5].forEach((c) => styleRect(equipmentStart + 2, c, equipmentTotalRow - 1, c, { fill: { fgColor: { rgb: c === 2 ? "FF0D0D" : "B7CDE3" } }, border, alignment: { horizontal: "center", vertical: "center" } }));
+    styleRect(9, 15, materialsTotalRow - 1, 15, { fill: { fgColor: { rgb: "FF0D0D" } }, border, alignment: { horizontal: "center", vertical: "center" } });
+    styleRect(subStart + 2, 15, subTotalRow - 1, 15, { fill: { fgColor: { rgb: "FF0D0D" } }, border, alignment: { horizontal: "center", vertical: "center" } });
+    styleRect(miscStart + 2, 14, miscTotalRow - 1, 14, { fill: { fgColor: { rgb: "B7CDE3" } }, border, alignment: { horizontal: "center", vertical: "center" } });
+    styleRect(assumptionsStart + 1, 2, assumptionsStart + 3, 2, { fill: { fgColor: { rgb: "FF0D0D" } }, border, alignment: { horizontal: "center", vertical: "center" } });
+    styleRect(summaryStart, 14, summaryStart, 14, { fill: { fgColor: { rgb: "FF9933" } }, font: { name: "Arial", sz: 10, bold: true }, border });
+    styleRect(summaryStart + 1, 14, summaryStart + 1, 14, { fill: { fgColor: { rgb: "00A2FF" } }, font: { name: "Arial", sz: 10, bold: true }, border });
+    styleRect(summaryStart + 2, 16, summaryStart + 2, 16, { fill: { fgColor: { rgb: "FFFF99" } }, font: { name: "Arial", sz: 10, bold: true }, border });
+    setStyle(XLSX.utils.encode_cell({ r: summaryStart + 3 - 1, c: 15 }), { font: { name: "Arial", sz: 10, bold: true }, border });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Cost Tracker");
+    XLSX.writeFile(wb, cleanName(data?.meta?.name || "cost_tracker", "xlsx"));
+  }
+
+  function spreadsheetDocumentForTracker(tracker) {
+    const summary = parseJson(tracker?.summary, {});
+    const ids = [summary.uploadedDocumentId, summary.uploaded_document_id, tracker?.uploaded_document_id, tracker?.document_id].filter(Boolean).map(String);
+    const docs = state?.data?.documents || [];
+    let doc = docs.find((item) => ids.includes(String(item.id)) || ids.includes(String(item.external_id)));
+    if (!doc && (summary.storagePath || summary.storage_path || tracker?.storage_path)) {
+      const storagePath = summary.storagePath || summary.storage_path || tracker?.storage_path;
+      doc = docs.find((item) => item.storage_path === storagePath);
+    }
+    if (!doc && (summary.uploadedFileName || summary.uploaded_file_name || tracker?.download_filename)) {
+      const fileName = String(summary.uploadedFileName || summary.uploaded_file_name || tracker?.download_filename || "").toLowerCase();
+      doc = docs.find((item) => String(item.file_name || item.original_file_name || "").toLowerCase() === fileName && (!tracker?.job_id || item.job_id === tracker.job_id));
+    }
+    const name = String(doc?.file_name || doc?.original_file_name || "").toLowerCase();
+    return name.match(/\.(xlsx|xls|xlsm)$/) ? doc : null;
+  }
+
+  async function downloadOriginalUploadedDocument(doc) {
+    if (!doc) return false;
+    if (doc.file_data_base64) {
+      const mime = doc.file_data_mime_type || doc.mime_type || "application/octet-stream";
+      const binary = atob(String(doc.file_data_base64));
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = doc.file_name || doc.original_file_name || "uploaded-cost-tracker.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      return true;
+    }
+    let url = doc.google_drive_url || doc.pdf_url || "";
+    if (!url && doc.storage_path && state?.supabase) {
+      const { data, error } = await state.supabase.storage
+        .from(doc.storage_bucket || "job-documents")
+        .createSignedUrl(doc.storage_path, 60 * 60, { download: doc.file_name || true });
+      if (error) throw error;
+      url = data?.signedUrl || "";
+    }
+    if (url) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = doc.file_name || doc.original_file_name || "uploaded-cost-tracker.xlsx";
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return true;
+    }
+    return false;
+  }
+
+
+  function cleanBase64ForDownload(value) {
+    const text = String(value || "").trim();
+    const comma = text.indexOf(",");
+    return comma >= 0 && /^data:/i.test(text.slice(0, comma)) ? text.slice(comma + 1) : text;
+  }
+
+  function downloadBase64Workbook(base64, fileName, mimeType) {
+    const cleaned = cleanBase64ForDownload(base64);
+    if (!cleaned) return false;
+    const binary = atob(cleaned);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = cleanName(fileName || "uploaded-cost-tracker.xlsx", "xlsx");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return true;
+  }
+
+  async function downloadUploadedTrackerWorkbook(tracker) {
+    if (!tracker) return false;
+    const summary = parseJson(tracker.summary, {});
+    const base64 = summary.originalWorkbookBase64 || summary.original_workbook_base64 || summary.uploadedWorkbookBase64 || summary.uploaded_workbook_base64 || "";
+    if (base64) {
+      return downloadBase64Workbook(
+        base64,
+        summary.originalWorkbookFileName || summary.original_workbook_file_name || summary.uploadedFileName || tracker.download_filename || trackerName(tracker),
+        summary.originalWorkbookMimeType || summary.original_workbook_mime_type
+      );
+    }
+    const doc = spreadsheetDocumentForTracker(tracker);
+    if (doc) return await downloadOriginalUploadedDocument(doc);
+    return false;
+  }
+
+  async function downloadSavedTrackerExact(trackerId) {
+    const tracker = (state?.data?.costTrackers || []).find((row) => row.id === trackerId);
+    if (!tracker) throw new Error("Could not find that cost tracker.");
+    if (await downloadUploadedTrackerWorkbook(tracker)) {
+      try { showToast("Original uploaded Excel workbook downloaded."); } catch {}
+      return;
+    }
+    const data = normalizeTrackerForBidSheet(tracker);
+    await downloadBidSheetWorkbook(data);
+    try { showToast("Cost tracker Excel file downloaded."); } catch {}
+  }
+
+  async function downloadCurrentTrackerExact() {
+    const form = document.getElementById("costTrackerForm");
+    const recordId = form?.querySelector('[name="record_id"]')?.value || "";
+    const tracker = recordId ? (state?.data?.costTrackers || []).find((row) => row.id === recordId) : null;
+    if (tracker && await downloadUploadedTrackerWorkbook(tracker)) {
+      try { showToast("Original uploaded Excel workbook downloaded."); } catch {}
+      return;
+    }
+    const data = window.__pimpLastCostTrackerBidSheetData || normalizeCurrentFormForBidSheet();
+    await downloadBidSheetWorkbook(data);
+    try { showToast("Cost tracker Excel file downloaded."); } catch {}
+  }
+
+  function previewSavedTrackerExact(trackerId) {
+    const tracker = (state?.data?.costTrackers || []).find((row) => row.id === trackerId);
+    if (!tracker) {
+      try { showToast("Could not find that cost tracker.", true); } catch {}
+      return;
+    }
+    openBidSheetPreview(normalizeTrackerForBidSheet(tracker));
+  }
+
+  function previewCurrentTrackerExact() {
+    openBidSheetPreview(normalizeCurrentFormForBidSheet());
+  }
+
+  function removeCreateJobUploadBox() {
+    document.querySelectorAll(".job-upload-guide, #jobCostTrackerUpload, #jobFilesUpload").forEach((node) => {
+      const wrapper = node.closest?.(".job-upload-guide") || node.closest?.("label") || node;
+      wrapper.remove();
+    });
+  }
+
+  // Make this available to older handlers that may call previewSavedCostTracker directly.
+  window.previewSavedCostTracker = function previewSavedCostTrackerExactBidSheet(tracker) {
+    if (!tracker) return;
+    openBidSheetPreview(normalizeTrackerForBidSheet(tracker));
+  };
+  try { previewSavedCostTracker = window.previewSavedCostTracker; } catch {}
+
+  window.downloadSavedCostTracker = function downloadSavedCostTrackerExactBidSheet(tracker) {
+    const id = typeof tracker === "string" ? tracker : tracker?.id;
+    if (!id) return;
+    downloadSavedTrackerExact(id).catch((error) => {
+      try { showToast(error.message || String(error), true); } catch {}
+    });
+  };
+  try { downloadSavedCostTracker = window.downloadSavedCostTracker; } catch {}
+
+  document.addEventListener("click", (event) => {
+    const savedPreview = event.target.closest?.("[data-preview-cost]");
+    const savedDownload = event.target.closest?.("[data-download-cost]");
+    const currentPreview = event.target.closest?.("#previewCostTrackerBtn");
+    const currentDownload = event.target.closest?.("#downloadCostTrackerDraftBtn, #downloadCostTrackerPreviewBtn");
+
+    if (!savedPreview && !savedDownload && !currentPreview && !currentDownload) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (savedPreview) {
+      previewSavedTrackerExact(savedPreview.dataset.previewCost);
+      return;
+    }
+    if (savedDownload) {
+      downloadSavedTrackerExact(savedDownload.dataset.downloadCost).catch((error) => {
+        try { showToast(error.message || String(error), true); } catch {}
+      });
+      return;
+    }
+    if (currentPreview) {
+      previewCurrentTrackerExact();
+      return;
+    }
+    if (currentDownload) {
+      if (currentDownload.id === "downloadCostTrackerPreviewBtn" && window.__pimpLastCostTrackerBidSheetData) {
+        downloadBidSheetWorkbook(window.__pimpLastCostTrackerBidSheetData).catch((error) => {
+          try { showToast(error.message || String(error), true); } catch {}
+        });
+      } else {
+        downloadCurrentTrackerExact().catch((error) => {
+          try { showToast(error.message || String(error), true); } catch {}
+        });
+      }
+    }
+  }, true);
+
+  document.addEventListener("DOMContentLoaded", removeCreateJobUploadBox);
+  setTimeout(removeCreateJobUploadBox, 0);
+})();
+
+/* ========================================================================
+   FINAL JOB DETAIL UPLOAD + INVOICE FLOW REPAIR PATCH
+   ------------------------------------------------------------------------
+   - Clicking Create Invoice/Open Invoice from job details opens the Invoice
+     page and automatically selects that job's newest cost tracker.
+   - Uploading premade cost tracker spreadsheets, invoice files, timesheets,
+     or other files from an already-created job is handled before older upload
+     handlers so failed legacy handlers do not block the upload.
+   - Cost tracker spreadsheet uploads are attached to the job and also create
+     an editable cost tracker record whenever possible.
+   ======================================================================== */
+(function finalJobDetailUploadInvoiceFlowRepairPatch() {
+  const JOB_DOCUMENT_BUCKET = "job-documents";
+
+  function qs(selector, root = document) { return root.querySelector(selector); }
+  function qsa(selector, root = document) { return Array.from(root.querySelectorAll(selector)); }
+  function text(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[ch]));
+  }
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return text(value);
+  }
+  function num(value) {
+    if (value === null || value === undefined || value === "") return 0;
+    const parsed = Number(String(value).replace(/[$,%]/g, "").replace(/,/g, "").trim());
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  function moneyText(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return num(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+  function cleanFileName(name) {
+    return String(name || "uploaded-file")
+      .replace(/[^a-zA-Z0-9._ -]/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .slice(0, 150) || "uploaded-file";
+  }
+  function fileExt(fileOrName) {
+    const name = typeof fileOrName === "string" ? fileOrName : fileOrName?.name;
+    const match = String(name || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+    return match ? match[1] : "";
+  }
+  function isExcelFile(file) {
+    const ext = fileExt(file);
+    const type = String(file?.type || "").toLowerCase();
+    return ["xlsx", "xls", "xlsm"].includes(ext) || type.includes("spreadsheet") || type.includes("excel");
+  }
+  function isPdfFile(file) { return fileExt(file) === "pdf" || String(file?.type || "").toLowerCase().includes("pdf"); }
+  function fileSizeText(bytes) {
+    const size = Number(bytes || 0);
+    if (!size) return "0 KB";
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  function parseJson(value, fallback) {
+    if (value === null || value === undefined || value === "") return fallback;
+    if (typeof value === "object") return value;
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+  function findJobSafe(jobId) {
+    try { if (typeof findJob === "function") return findJob(jobId); } catch {}
+    return (state?.data?.jobs || []).find((job) => job.id === jobId) || null;
+  }
+  function trackerNameSafe(tracker) {
+    try { if (typeof getTrackerName === "function") return getTrackerName(tracker); } catch {}
+    const summary = parseJson(tracker?.summary, {});
+    return tracker?.cost_tracker_name || tracker?.tracker_name || tracker?.name || summary.trackerName || summary.tracker_name || "Cost Tracker";
+  }
+  function trackerQuoted(tracker) {
+    try { if (typeof costTrackerQuoted === "function") return costTrackerQuoted(tracker); } catch {}
+    const summary = parseJson(tracker?.summary, {});
+    return num(tracker?.quoted_price ?? summary.quotedPrice ?? summary.quoted_price ?? summary.rateTotal ?? summary.rate_total);
+  }
+  function trackerUpdatedValue(tracker) {
+    return String(tracker?.last_synced_at || tracker?.updated_at || tracker?.created_at || "");
+  }
+  function latestCostTrackerForJob(jobId) {
+    return (state?.data?.costTrackers || [])
+      .filter((tracker) => tracker.job_id === jobId)
+      .slice()
+      .sort((a, b) => trackerUpdatedValue(b).localeCompare(trackerUpdatedValue(a)))[0] || null;
+  }
+  function setFormValueSafe(form, name, value) {
+    try { if (typeof setFormValue === "function") return setFormValue(form, name, value ?? ""); } catch {}
+    const field = form?.querySelector?.(`[name="${String(name).replace(/"/g, '\\"')}"]`);
+    if (field) field.value = value ?? "";
+  }
+  function mergeStateRecord(key, row) {
+    if (!row) return;
+    state.data[key] = Array.isArray(state.data[key]) ? state.data[key] : [];
+    const index = state.data[key].findIndex((item) => item.id === row.id || (item.external_id && item.external_id === row.external_id));
+    if (index >= 0) state.data[key][index] = { ...state.data[key][index], ...row };
+    else state.data[key] = [row, ...state.data[key]];
+  }
+  function refreshUi() {
+    try { hydrateSelects(); } catch {}
+    try { renderJobs(); } catch {}
+    try { renderCostTrackers(); } catch {}
+    try { renderInvoices(); } catch {}
+    try { renderDocuments(); } catch {}
+    try { refreshWebsiteLists(); } catch {}
+  }
+
+  function openInvoicePageWithJobCostTracker(jobId) {
+    const job = findJobSafe(jobId);
+    const tracker = latestCostTrackerForJob(jobId);
+
+    if (typeof showView === "function") showView("invoices");
+
+    setTimeout(() => {
+      try { hydrateSelects(); } catch {}
+      const form = qs("#invoiceForm");
+      if (!form) return;
+
+      if (tracker) {
+        const source = form.querySelector('[name="cost_tracker_id"]');
+        if (source) {
+          source.value = tracker.id || "";
+          source.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        if (typeof window.fillInvoiceFromCostTracker === "function") {
+          window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+        } else if (typeof fillInvoiceFromCostTracker === "function") {
+          fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+        }
+        try { showToast(`Invoice started from ${trackerNameSafe(tracker)}.`); } catch {}
+        return;
+      }
+
+      setFormValueSafe(form, "job_id", jobId || "");
+      if (job) {
+        setFormValueSafe(form, "project", job.job_name || "");
+        setFormValueSafe(form, "po_number", job.job_number || "");
+        const billTo = [job.company_name || "", job.contact_name ? `Attn: ${job.contact_name}` : "", job.location || ""].filter(Boolean).join("\n");
+        setFormValueSafe(form, "bill_to", billTo);
+      }
+      try { showToast("No cost tracker is connected to this job yet. Create or upload a cost tracker first, or fill the invoice manually.", true); } catch {}
+    }, 0);
+  }
+
+  // This fires before older document-level guide handlers and prevents the old
+  // behavior that only selected a hidden job field on the invoice page.
+  window.addEventListener("click", (event) => {
+    const guide = event.target.closest?.('[data-doc-guide="invoices"][data-doc-guide-job]');
+    const direct = event.target.closest?.("[data-open-invoice-for-job]");
+    const jobId = guide?.dataset.docGuideJob || direct?.dataset.openInvoiceForJob || "";
+    if (!jobId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    openInvoicePageWithJobCostTracker(jobId);
+  }, true);
+
+  function normalizeDocumentType(selectedType, file) {
+    const type = String(selectedType || "Job File").toLowerCase();
+    const name = String(file?.name || "").toLowerCase();
+    if (type.includes("cost") || /cost|tracker|bid|\.xlsx$|\.xlsm$|\.xls$/.test(name)) return "Cost Tracker";
+    if (type.includes("invoice") || /invoice/.test(name)) return "Invoice";
+    if (type.includes("timesheet") || type.includes("time sheet") || /timesheet|timecard|time card/.test(name)) return "Timesheet";
+    return "Job File";
+  }
+  function documentTypeVariants(type, file) {
+    const normalized = normalizeDocumentType(type, file);
+    const snake = normalized.toLowerCase().replace(/\s+/g, "_");
+    return Array.from(new Set([normalized, snake, normalized.toLowerCase(), "Job File", "job_file"]));
+  }
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Could not read selected file."));
+      reader.readAsDataURL(file);
+    });
+  }
+  function safePayload(row) {
+    return Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+  }
+  function uploadedByVariants(row) {
+    const base = safePayload(row);
+    const rows = [base];
+    if ("uploaded_by" in base) {
+      rows.push(safePayload({ ...base, uploaded_by: null }));
+      const { uploaded_by, ...withoutUploadedBy } = base;
+      rows.push(safePayload(withoutUploadedBy));
+    }
+    return rows;
+  }
+  function columnFallbackRows(fullRow) {
+    const storageRow = {
+      job_id: fullRow.job_id,
+      document_type: fullRow.document_type,
+      file_name: fullRow.file_name,
+      original_file_name: fullRow.original_file_name,
+      file_status: fullRow.file_status,
+      google_drive_url: fullRow.google_drive_url || null,
+      pdf_url: fullRow.pdf_url || null,
+      external_source: fullRow.external_source,
+      external_id: fullRow.external_id,
+      last_synced_at: fullRow.last_synced_at,
+      storage_bucket: fullRow.storage_bucket || null,
+      storage_path: fullRow.storage_path || null,
+      mime_type: fullRow.mime_type || null,
+      file_size: fullRow.file_size || null,
+      uploaded_by: fullRow.uploaded_by || null
+    };
+    const inlineRow = {
+      ...storageRow,
+      file_data_base64: fullRow.file_data_base64 || null,
+      file_data_mime_type: fullRow.file_data_mime_type || fullRow.mime_type || null,
+      file_data_size: fullRow.file_data_size || fullRow.file_size || null,
+      storage_error_message: fullRow.storage_error_message || null
+    };
+    const compactRow = {
+      job_id: fullRow.job_id,
+      document_type: fullRow.document_type,
+      file_name: fullRow.file_name,
+      file_status: fullRow.file_status,
+      google_drive_url: fullRow.google_drive_url || fullRow.pdf_url || null,
+      pdf_url: fullRow.pdf_url || null,
+      external_source: fullRow.external_source,
+      external_id: fullRow.external_id,
+      last_synced_at: fullRow.last_synced_at
+    };
+    return [fullRow, inlineRow, storageRow, compactRow];
+  }
+  async function insertDocumentRow(row) {
+    const { data, error } = await state.supabase.from("documents").insert(safePayload(row)).select().single();
+    if (error) throw error;
+    return data;
+  }
+  async function saveUploadedDocumentRecord(payload) {
+    const now = new Date().toISOString();
+    const fileName = payload.file_name || payload.original_file_name || "uploaded-file";
+    const type = normalizeDocumentType(payload.document_type, { name: fileName });
+    const fullRow = {
+      ...payload,
+      job_id: payload.job_id || null,
+      document_type: type,
+      file_name: fileName,
+      original_file_name: payload.original_file_name || fileName,
+      file_status: payload.file_status || "uploaded",
+      external_source: payload.external_source || "dashboard-upload",
+      external_id: payload.external_id || `upload:${payload.job_id || "unassigned"}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}:${cleanFileName(fileName)}`,
+      last_synced_at: payload.last_synced_at || now,
+      uploaded_by: state?.session?.user?.id || null
+    };
+
+    const attempts = [];
+    documentTypeVariants(type, { name: fileName }).forEach((variantType) => {
+      columnFallbackRows({ ...fullRow, document_type: variantType }).forEach((row) => {
+        uploadedByVariants(row).forEach((candidate) => attempts.push(candidate));
+      });
+    });
+
+    let lastError = null;
+    const seen = new Set();
+    for (const attempt of attempts) {
+      const key = JSON.stringify(Object.keys(attempt).sort().map((name) => [name, attempt[name]]));
+      if (seen.has(key)) continue;
+      seen.add(key);
+      try {
+        const saved = await insertDocumentRow(attempt);
+        const merged = { ...fullRow, ...attempt, ...(saved || {}) };
+        mergeStateRecord("documents", merged);
+        return merged;
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        const retryable = /column|schema cache|does not exist|Could not find|document_type|enum|check constraint|uploaded_by|foreign key|not-null|storage_path|storage_bucket|mime_type|file_size|original_file_name|file_data|pdf_url|google_drive_url/i.test(message);
+        if (!retryable) break;
+      }
+    }
+    throw new Error(`The file could not be attached to the job. Run supabase_job_document_upload_repair.sql, then try again. Details: ${lastError?.message || lastError || "Unknown error"}`);
+  }
+
+  async function uploadFileAndSaveRecord(file, jobId, selectedType) {
+    if (!state?.supabase || !state?.session) throw new Error("Sign in before uploading documents.");
+    const type = normalizeDocumentType(selectedType, file);
+    const ext = fileExt(file);
+    if (type === "Cost Tracker" && !isExcelFile(file)) throw new Error("Cost Tracker uploads must be Excel files: .xlsx, .xls, or .xlsm.");
+
+    const safeName = cleanFileName(file.name);
+    const path = `${jobId || "unassigned"}/${type.replace(/\s+/g, "_").toLowerCase()}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+    let storageError = null;
+
+    try {
+      const { error } = await state.supabase.storage.from(JOB_DOCUMENT_BUCKET).upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || "application/octet-stream"
+      });
+      if (error) throw error;
+      return await saveUploadedDocumentRecord({
+        job_id: jobId,
+        document_type: type,
+        file_name: file.name,
+        original_file_name: file.name,
+        file_status: "uploaded",
+        external_source: "dashboard-upload",
+        external_id: `upload:${path}`,
+        storage_bucket: JOB_DOCUMENT_BUCKET,
+        storage_path: path,
+        mime_type: file.type || "application/octet-stream",
+        file_size: file.size || 0,
+        pdf_url: type === "Invoice" && ext === "pdf" ? null : null
+      });
+    } catch (error) {
+      storageError = error;
+    }
+
+    // Emergency fallback for GitHub Pages users while Storage policies are being fixed.
+    // The SQL file included with this package adds these columns so the file can still
+    // open/download from the database if Storage is blocked.
+    const maxInlineBytes = 10 * 1024 * 1024;
+    if ((file.size || 0) > maxInlineBytes) {
+      throw new Error(`Supabase Storage blocked the upload (${storageError?.message || storageError}). Run supabase_job_document_upload_repair.sql, then try again. This file is too large for the temporary database fallback (${fileSizeText(file.size)}).`);
+    }
+    const dataUrl = await readFileAsDataUrl(file);
+    const base64 = dataUrl.includes(",") ? dataUrl.split(",").pop() : dataUrl;
+    return await saveUploadedDocumentRecord({
+      job_id: jobId,
+      document_type: type,
+      file_name: file.name,
+      original_file_name: file.name,
+      file_status: "uploaded",
+      external_source: "dashboard-inline-upload",
+      external_id: `inline-upload:${jobId || "unassigned"}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}:${safeName}`,
+      mime_type: file.type || "application/octet-stream",
+      file_size: file.size || 0,
+      file_data_base64: base64,
+      file_data_mime_type: file.type || "application/octet-stream",
+      file_data_size: file.size || 0,
+      storage_error_message: String(storageError?.message || storageError || "Storage upload failed")
+    });
+  }
+
+  function sheetRowsFromWorkbook(workbook) {
+    const preferredName = workbook.SheetNames.find((name) => /cost|tracker|bid/i.test(name)) || workbook.SheetNames[0];
+    const sheet = workbook.Sheets[preferredName];
+    // Preserve blank cells/rows so uploaded premade trackers keep the same row
+    // and column positions as the original Bid Sheet. Using raw values prevents
+    // currency/date formatting from shifting values into the wrong fields.
+    return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null, blankrows: true });
+  }
+  function cleanCell(value) { return String(value ?? "").trim(); }
+  function lowerCell(value) { return cleanCell(value).toLowerCase(); }
+  function firstNumberInRow(row, reverse = true) {
+    const cells = reverse ? row.slice().reverse() : row;
+    for (const cell of cells) {
+      const n = num(cell);
+      if (n) return n;
+    }
+    return 0;
+  }
+  function arrayBufferToBase64ForUpload(buffer) {
+    const bytes = new Uint8Array(buffer || []);
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+    }
+    return btoa(binary);
+  }
+  function findRowValue(rows, labels) {
+    const labelList = labels.map((item) => item.toLowerCase());
+    for (const row of rows) {
+      const joined = row.map(cleanCell).join(" ").toLowerCase();
+      if (labelList.some((label) => joined.includes(label))) return firstNumberInRow(row, true);
+    }
+    return 0;
+  }
+  function parseTrackerLinesFromRows(rows) {
+    const items = [];
+    const sourceRows = Array.isArray(rows) ? rows : [];
+
+    const textAt = (r, c) => cleanCell(sourceRows?.[r]?.[c]);
+    const nAt = (r, c) => num(sourceRows?.[r]?.[c]);
+    const rowTextAt = (r) => (sourceRows?.[r] || []).map(cleanCell).join(" ").toLowerCase();
+
+    function findCell(pattern, startRow = 0, endRow = sourceRows.length) {
+      for (let r = Math.max(0, startRow); r < Math.min(sourceRows.length, endRow); r += 1) {
+        const row = sourceRows[r] || [];
+        for (let c = 0; c < row.length; c += 1) {
+          if (pattern.test(cleanCell(row[c]))) return { r, c };
+        }
+      }
+      return null;
+    }
+
+    function findHeaderRow(sectionPattern, requiredPatterns = []) {
+      for (let r = 0; r < sourceRows.length; r += 1) {
+        const joined = rowTextAt(r);
+        if (!sectionPattern.test(joined)) continue;
+        if (requiredPatterns.every((pattern) => pattern.test(joined))) return r;
+      }
+      return -1;
+    }
+
+    function findEndRow(startRow, pattern, fallbackCount = 20) {
+      for (let r = Math.max(0, startRow); r < sourceRows.length; r += 1) {
+        if (pattern.test(rowTextAt(r))) return r;
+      }
+      return Math.min(sourceRows.length, startRow + fallbackCount);
+    }
+
+    function headerMap(headerRow) {
+      const map = {};
+      const row = sourceRows[headerRow] || [];
+      row.forEach((value, index) => {
+        const label = cleanCell(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        if (!label) return;
+        if (label === "qty") map.qty = index;
+        else if (label === "hours") map.hours = index;
+        else if (label === "cost") map.cost = index;
+        else if (label === "ot hours") map.ot_hours = index;
+        else if (label === "ot cost") map.ot_cost = index;
+        else if (label === "cost total") map.cost_total = index;
+        else if (label === "rate") map.rate = index;
+        else if (label === "ot rate") map.ot_rate = index;
+        else if (label === "rate total") map.rate_total = index;
+        else if (label === "days") map.days = index;
+        else if (label === "day cost") map.day_cost = index;
+        else if (label === "hr rate") map.hr_rate = index;
+        else if (label === "day rate") map.day_rate = index;
+        else if (label === "description" || label === "description of items") map.description = index;
+        else if (label === "total") map.total = index;
+        else if (label.includes("markup")) map.markup = index;
+      });
+      return map;
+    }
+
+    const firstNonEmpty = (row, start = 0, end = row.length) => {
+      for (let c = start; c < Math.min(row.length, end); c += 1) {
+        const value = cleanCell(row[c]);
+        if (value) return value;
+      }
+      return "";
+    };
+
+    function pushLaborRows() {
+      const header = findHeaderRow(/personnel/i, [/qty/i, /hours/i, /cost\s+total/i]);
+      if (header < 0) return;
+      const map = headerMap(header);
+      const descCol = findCell(/personnel/i, header, header + 1)?.c ?? 0;
+      const end = findEndRow(header + 1, /personnel\s+total/i, 12);
+
+      for (let r = header + 1; r < end; r += 1) {
+        const row = sourceRows[r] || [];
+        const description = cleanCell(row[descCol]) || cleanCell(row[0]);
+        const hasNumbers = row.some((value) => num(value) !== 0);
+        if (/^(personnel|qty|hours|cost|rate|total)$/i.test(description)) continue;
+        if (!description && !hasNumbers) {
+          items.push({ category: "labor", description: "", __preserve_empty: true, __source_row: r + 1 });
+          continue;
+        }
+        if (!description && hasNumbers) continue;
+
+        const qty = nAt(r, map.qty ?? 2);
+        const hours = nAt(r, map.hours ?? 3);
+        const costRate = nAt(r, map.cost ?? 4);
+        const otHours = nAt(r, map.ot_hours ?? 5);
+        const otCost = nAt(r, map.ot_cost ?? 6);
+        const costTotal = nAt(r, map.cost_total ?? 7) || (qty * hours * costRate) + (qty * otHours * otCost);
+        const billRate = nAt(r, map.rate ?? 8);
+        const otBill = nAt(r, map.ot_rate ?? 9);
+        const quotedTotal = nAt(r, map.rate_total ?? 10) || (qty * hours * billRate) + (qty * otHours * otBill);
+
+        items.push({
+          category: "labor",
+          description,
+          qty,
+          hours,
+          effective_hours: hours,
+          cost_rate: costRate,
+          ot_hours: otHours,
+          ot_cost_rate: otCost,
+          cost_total: costTotal,
+          bill_rate: billRate,
+          ot_bill_rate: otBill,
+          quoted_total: quotedTotal,
+          __source_row: r + 1
+        });
+      }
+    }
+
+    function pushEquipmentRows() {
+      const header = findHeaderRow(/equipment/i, [/qty/i, /cost\s+total/i, /rate\s+total/i]);
+      if (header < 0) return;
+      const map = headerMap(header);
+      const descCol = findCell(/equipment/i, header, header + 1)?.c ?? 0;
+      const end = findEndRow(header + 1, /equipment\s+total/i, 18);
+
+      for (let r = header + 1; r < end; r += 1) {
+        const row = sourceRows[r] || [];
+        const description = cleanCell(row[descCol]) || cleanCell(row[0]);
+        const hasNumbers = row.some((value) => num(value) !== 0);
+        if (/^(equipment|qty|hours|cost|days|rate|total)$/i.test(description)) continue;
+        if (!description && !hasNumbers) {
+          items.push({ category: "equipment", description: "", __preserve_empty: true, __source_row: r + 1 });
+          continue;
+        }
+        if (!description && hasNumbers) {
+          items.push({ category: "equipment", description: "", __preserve_empty: true, __source_row: r + 1 });
+          continue;
+        }
+
+        const qty = nAt(r, map.qty ?? 2);
+        const hours = nAt(r, map.hours ?? 3);
+        const costRate = nAt(r, map.cost ?? 4);
+        const days = nAt(r, map.days ?? 5);
+        const dayCost = nAt(r, map.day_cost ?? 6);
+        const costTotal = nAt(r, map.cost_total ?? 7) || (qty * hours * costRate) + (qty * days * dayCost);
+        const billRate = nAt(r, map.hr_rate ?? map.rate ?? 8);
+        const dayRate = nAt(r, map.day_rate ?? 9);
+        const quotedTotal = nAt(r, map.rate_total ?? 10) || (qty * hours * billRate) + (qty * days * dayRate);
+
+        items.push({
+          category: "equipment",
+          description,
+          qty,
+          hours,
+          cost_rate: costRate,
+          days,
+          day_cost: dayCost,
+          cost_total: costTotal,
+          bill_rate: billRate,
+          day_rate: dayRate,
+          quoted_total: quotedTotal,
+          __source_row: r + 1
+        });
+      }
+    }
+
+    function percentValue(value) {
+      const numeric = num(value);
+      if (!numeric) return 0;
+      return Math.abs(numeric) <= 1 ? numeric * 100 : numeric;
+    }
+
+    function pushMaterialsRows() {
+      const headerCell = findCell(/description\s+of\s+items/i, 0, sourceRows.length);
+      if (!headerCell) return;
+      const header = headerCell.r;
+      const descCol = headerCell.c;
+      const map = headerMap(header);
+      const costCol = map.cost ?? (descCol + 3);
+      const markupCol = map.markup ?? (costCol + 1);
+      const totalCol = map.total ?? (costCol + 2);
+      const defaultMarkup = percentValue(sourceRows?.[header]?.[markupCol]) || 25;
+      const end = findEndRow(header + 1, /materials\s+total/i, 14);
+
+      for (let r = header + 1; r < end; r += 1) {
+        const row = sourceRows[r] || [];
+        const description = cleanCell(row[descCol]);
+        const cost = nAt(r, costCol);
+        const quoted = nAt(r, totalCol) || (cost ? cost * (1 + defaultMarkup / 100) : 0);
+        const markup = percentValue(row[markupCol]) || defaultMarkup;
+        if (!description && !row.some((value) => num(value) !== 0)) {
+          items.push({ category: "materials", description: "", qty: 1, cost: "", markup_percent: defaultMarkup, cost_total: 0, quoted_total: 0, __preserve_empty: true, __source_row: r + 1 });
+          continue;
+        }
+        if (/materials?\s+total|description|cost|total/i.test(description)) continue;
+        items.push({
+          category: "materials",
+          description,
+          qty: 1,
+          cost,
+          markup_percent: markup,
+          cost_total: cost,
+          quoted_total: quoted,
+          __source_row: r + 1
+        });
+      }
+    }
+
+    function pushSubcontractorRows() {
+      const section = findCell(/^subcontractors?$/i, 0, sourceRows.length);
+      if (!section) return;
+      const header = section.r + 1;
+      const descCol = section.c;
+      const map = headerMap(header);
+      const costCol = map.cost ?? (descCol + 3);
+      const markupCol = map.markup ?? (costCol + 1);
+      const totalCol = map.total ?? (costCol + 2);
+      const defaultMarkup = percentValue(sourceRows?.[header]?.[markupCol]) || 10;
+      const end = findEndRow(header + 1, /subcontractor\s+total/i, 8);
+
+      for (let r = header + 1; r < end; r += 1) {
+        const row = sourceRows[r] || [];
+        const description = firstNonEmpty(row, descCol, costCol);
+        const cost = nAt(r, costCol);
+        const quoted = nAt(r, totalCol) || (cost ? cost * (1 + defaultMarkup / 100) : 0);
+        const markup = percentValue(row[markupCol]) || defaultMarkup;
+        if (!description && !row.some((value) => num(value) !== 0)) {
+          items.push({ category: "subcontractors", description: "", qty: 1, cost: "", markup_percent: defaultMarkup, cost_total: 0, quoted_total: 0, __preserve_empty: true, __source_row: r + 1 });
+          continue;
+        }
+        if (/subcontractors?|cost|total/i.test(description)) continue;
+        items.push({
+          category: "subcontractors",
+          description,
+          qty: 1,
+          cost,
+          markup_percent: markup,
+          cost_total: cost,
+          quoted_total: quoted,
+          __source_row: r + 1
+        });
+      }
+    }
+
+    function pushMiscRows() {
+      const section = findCell(/miscellaneous/i, 0, sourceRows.length);
+      if (!section) return;
+      const descCol = section.c;
+      const qtyCol = descCol + 2;
+      const costCol = descCol + 3;
+      const costTotalCol = descCol + 4;
+      const quotedCol = descCol + 5;
+      const end = findEndRow(section.r + 1, /miscellaneous\s+total/i, 8);
+
+      for (let r = section.r + 1; r < end; r += 1) {
+        const row = sourceRows[r] || [];
+        const description = cleanCell(row[descCol]);
+        if (/miscellaneous|total/i.test(description)) continue;
+        const qty = nAt(r, qtyCol);
+        const cost = nAt(r, costCol) || (/full\s+per\s+diem/i.test(description) ? 100 : /partial\s+per\s+diem/i.test(description) ? 50 : 0);
+        const costTotal = nAt(r, costTotalCol) || (qty * cost);
+        const quotedTotal = nAt(r, quotedCol) || costTotal;
+        if (!description && !row.some((value) => num(value) !== 0)) {
+          items.push({ category: "misc", description: "", qty: "", cost: "", markup_percent: 0, cost_total: 0, quoted_total: 0, __preserve_empty: true, __source_row: r + 1 });
+          continue;
+        }
+        items.push({
+          category: "misc",
+          description,
+          qty: qty || "",
+          cost,
+          markup_percent: 0,
+          quoted_override: quotedTotal && quotedTotal !== costTotal ? quotedTotal : "",
+          cost_total: costTotal,
+          quoted_total: quotedTotal,
+          __source_row: r + 1
+        });
+      }
+    }
+
+    pushLaborRows();
+    pushEquipmentRows();
+    pushMaterialsRows();
+    pushSubcontractorRows();
+    pushMiscRows();
+
+    return items;
+  }
+  function totalsFromItems(items) {
+    const categories = ["labor", "equipment", "materials", "subcontractors", "misc"];
+    const totals = {};
+    categories.forEach((cat) => {
+      totals[`${cat}Cost`] = items.filter((item) => item.category === cat).reduce((sum, item) => sum + num(item.cost_total || item.cost), 0);
+      totals[`${cat}Rate`] = items.filter((item) => item.category === cat).reduce((sum, item) => sum + num(item.quoted_total), 0);
+    });
+    const laborCost = totals.laborCost || 0;
+    const equipmentCost = totals.equipmentCost || 0;
+    const materialCost = totals.materialsCost || 0;
+    const subcontractorCost = totals.subcontractorsCost || 0;
+    const otherCost = totals.miscCost || 0;
+    const totalCost = laborCost + equipmentCost + materialCost + subcontractorCost + otherCost;
+    const quotedPrice = (totals.laborRate || 0) + (totals.equipmentRate || 0) + (totals.materialsRate || 0) + (totals.subcontractorsRate || 0) + (totals.miscRate || 0);
+    const profit = quotedPrice - totalCost;
+    const margin = quotedPrice > 0 ? profit / quotedPrice : 0;
+    return { laborCost, equipmentCost, materialCost, subcontractorCost, otherCost, totalCost, quotedPrice, profit, margin };
+  }
+
+  function extractUploadedCostTrackerCommentsFromRows(rows) {
+    if (typeof window.__pimpExtractCostTrackerComments === "function") {
+      return window.__pimpExtractCostTrackerComments(rows);
+    }
+    return "";
+  }
+
+  function extractUploadedCostTrackerByWhomFromRows(rows) {
+    if (typeof window.__pimpExtractCostTrackerByWhom === "function") {
+      return window.__pimpExtractCostTrackerByWhom(rows);
+    }
+    return "";
+  }
+
+  async function parseCostTrackerSpreadsheet(file, job) {
+    const buffer = await file.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array", cellStyles: true, cellFormula: true, cellDates: true });
+    const originalWorkbookBase64 = arrayBufferToBase64ForUpload(buffer);
+    const rows = sheetRowsFromWorkbook(workbook);
+    // Use the uploaded sheet rows directly. Do not merge with the factory template,
+    // because that is what shifted/moved uploaded values into the wrong fields.
+    const items = parseTrackerLinesFromRows(rows);
+    const itemTotals = totalsFromItems(items);
+    const rateTotal = findRowValue(rows, ["rate total", "quoted total", "quote total"]);
+    const costTotal = findRowValue(rows, ["cost total", "total cost"]);
+    const bidProfit = findRowValue(rows, ["bid profit", "profit"]);
+    const grossMargin = findRowValue(rows, ["gross margin", "margin"]);
+
+    const extractedComments = extractUploadedCostTrackerCommentsFromRows(rows);
+    const extractedByWhom = extractUploadedCostTrackerByWhomFromRows(rows);
+
+    const summary = {
+      trackerName: String(file.name || "Uploaded Cost Tracker").replace(/\.[^.]+$/, ""),
+      costTrackerDate: new Date().toISOString().slice(0, 10),
+      jobId: job?.id || null,
+      jobNumber: job?.job_number || "",
+      jobName: job?.job_name || "",
+      client: job?.company_name || "",
+      location: job?.location || "",
+      totalJobDays: job?.total_job_days || "",
+      comments: `Uploaded existing Excel cost tracker: ${file.name}`,
+      uploadedFileName: file.name,
+      uploadType: "premade_cost_tracker_excel",
+      originalWorkbookBase64,
+      originalWorkbookFileName: file.name,
+      originalWorkbookMimeType: file.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      comments: extractedComments || `Uploaded existing Excel cost tracker: ${file.name}`,
+      byWhom: extractedByWhom || "",
+      rateTotal: rateTotal || itemTotals.quotedPrice,
+      totalCost: costTotal || itemTotals.totalCost,
+      profit: bidProfit || ((rateTotal || itemTotals.quotedPrice) - (costTotal || itemTotals.totalCost)),
+      margin: grossMargin ? (grossMargin > 1 ? grossMargin / 100 : grossMargin) : itemTotals.margin
+    };
+
+    return { rows, items, summary, totals: itemTotals };
+  }
+
+  async function insertCostTrackerRow(payload) {
+    // Keep line_items and summary whenever possible. Some Supabase setups define
+    // total_cost/profit/margin as generated columns, so remove those first instead
+    // of falling all the way back to a tracker with no imported row data.
+    const withoutGenerated = { ...payload, total_cost: undefined, profit: undefined, margin: undefined };
+    const variants = [
+      withoutGenerated,
+      { ...withoutGenerated, html_snapshot: undefined, uploaded_document_id: undefined },
+      { ...withoutGenerated, html_snapshot: undefined, uploaded_document_id: undefined, cost_tracker_name: undefined, tracker_name: undefined },
+      { ...withoutGenerated, html_snapshot: undefined, uploaded_document_id: undefined, line_items: undefined },
+      { ...withoutGenerated, html_snapshot: undefined, uploaded_document_id: undefined, line_items: undefined, summary: undefined, cost_tracker_name: undefined, tracker_name: undefined }
+    ];
+    let lastError = null;
+    for (const row of variants) {
+      try {
+        const clean = safePayload(row);
+        const saved = typeof manualUpsert === "function"
+          ? await manualUpsert("cost_trackers", clean, "external_id")
+          : await (async () => {
+              const { data, error } = await state.supabase.from("cost_trackers").insert(clean).select().single();
+              if (error) throw error;
+              return data;
+            })();
+        mergeStateRecord("costTrackers", saved || clean);
+        return saved || clean;
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        if (!/column|schema cache|does not exist|Could not find|generated|non-DEFAULT|total_cost|profit|margin|html_snapshot|line_items|summary|uploaded_document_id|cost_tracker_name|tracker_name/i.test(message)) break;
+      }
+    }
+    console.warn("Cost tracker import failed:", lastError?.message || lastError);
+    return null;
+  }
+
+  async function createEditableCostTrackerFromUpload(file, job, doc) {
+    const parsed = await parseCostTrackerSpreadsheet(file, job).catch((error) => {
+      console.warn("Could not parse uploaded cost tracker spreadsheet:", error?.message || error);
+      return null;
+    });
+    const trackerName = parsed?.summary?.trackerName || String(file.name || "Uploaded Cost Tracker").replace(/\.[^.]+$/, "");
+    const items = parsed?.items || [];
+    const totals = parsed?.totals || totalsFromItems(items);
+    const summary = parsed?.summary || {
+      trackerName,
+      jobId: job?.id || null,
+      jobNumber: job?.job_number || "",
+      jobName: job?.job_name || "",
+      client: job?.company_name || "",
+      location: job?.location || "",
+      uploadedFileName: file.name,
+      uploadType: "premade_cost_tracker_excel",
+      comments: `Uploaded existing Excel cost tracker: ${file.name}`,
+      rateTotal: totals.quotedPrice,
+      totalCost: totals.totalCost,
+      profit: totals.profit,
+      margin: totals.margin
+    };
+
+    summary.uploadedDocumentId = doc?.id || summary.uploadedDocumentId || null;
+    summary.uploaded_document_id = doc?.id || summary.uploaded_document_id || null;
+    summary.storagePath = doc?.storage_path || summary.storagePath || null;
+    summary.storage_path = doc?.storage_path || summary.storage_path || null;
+    summary.storageBucket = doc?.storage_bucket || summary.storageBucket || "job-documents";
+    summary.storage_bucket = doc?.storage_bucket || summary.storage_bucket || "job-documents";
+
+    const payload = {
+      job_id: job?.id || null,
+      cost_tracker_name: trackerName,
+      tracker_name: trackerName,
+      labor_cost: totals.laborCost || 0,
+      material_cost: totals.materialCost || 0,
+      equipment_cost: totals.equipmentCost || 0,
+      subcontractor_cost: totals.subcontractorCost || 0,
+      other_cost: totals.otherCost || 0,
+      total_cost: summary.totalCost || totals.totalCost || 0,
+      quoted_price: summary.rateTotal || totals.quotedPrice || 0,
+      profit: summary.profit || totals.profit || 0,
+      margin: summary.margin ?? totals.margin ?? 0,
+      notes: summary.comments || `Uploaded existing Excel cost tracker: ${file.name}`,
+      summary,
+      line_items: items,
+      html_snapshot: typeof renderCostTrackerHtml === "function" ? renderCostTrackerHtml({ job, items, summary, notes: summary.comments || "" }) : "",
+      uploaded_document_id: doc?.id || null,
+      external_source: "dashboard-upload",
+      external_id: `uploaded-cost-tracker:${doc?.external_id || job?.id || "unassigned"}:${file.name}`,
+      last_synced_at: new Date().toISOString()
+    };
+    return await insertCostTrackerRow(payload);
+  }
+
+  async function createInvoiceRecordFromUploadedFile(file, job, doc) {
+    const baseName = String(file.name || "Uploaded Invoice").replace(/\.[^.]+$/, "");
+    const payload = {
+      job_id: job?.id || null,
+      client_id: job?.client_id || null,
+      invoice_number: baseName,
+      invoice_date: new Date().toISOString().slice(0, 10),
+      due_date: typeof addDays === "function" ? addDays(new Date().toISOString().slice(0, 10), 30) : null,
+      subtotal: 0,
+      tax: 0,
+      status: "unsent",
+      pdf_url: doc?.pdf_url || doc?.google_drive_url || null,
+      google_drive_url: doc?.google_drive_url || doc?.pdf_url || null,
+      summary: {
+        uploadedFileName: file.name,
+        uploadedDocumentId: doc?.id || null,
+        uploadType: "premade_invoice_file",
+        project: job?.job_name || "",
+        poNumber: job?.job_number || ""
+      },
+      external_source: "dashboard-upload",
+      external_id: `uploaded-invoice:${doc?.external_id || job?.id || "unassigned"}:${file.name}`,
+      last_synced_at: new Date().toISOString()
+    };
+    const variants = [payload, { ...payload, summary: undefined }, { ...payload, summary: undefined, pdf_url: undefined, google_drive_url: undefined }];
+    for (const row of variants) {
+      try {
+        const saved = typeof manualUpsert === "function"
+          ? await manualUpsert("invoices", safePayload(row), "external_id")
+          : await (async () => {
+              const { data, error } = await state.supabase.from("invoices").insert(safePayload(row)).select().single();
+              if (error) throw error;
+              return data;
+            })();
+        mergeStateRecord("invoices", saved || row);
+        return saved || row;
+      } catch (error) {
+        const message = String(error?.message || error || "");
+        if (!/column|schema cache|does not exist|Could not find|summary|pdf_url|google_drive_url|job_id.*null|not-null/i.test(message)) break;
+      }
+    }
+    return null;
+  }
+
+  async function handleFixedJobDocumentUpload(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+
+    if (!state?.supabase || !state?.session) {
+      try { showToast("Sign in before uploading documents.", true); } catch {}
+      return;
+    }
+
+    const form = event.target;
+    const jobId = form.querySelector('[name="job_id"]')?.value || "";
+    const job = findJobSafe(jobId);
+    const selectedType = form.querySelector('[name="document_type"]')?.value || "Job File";
+    const input = form.querySelector('input[type="file"]');
+    const files = Array.from(input?.files || []);
+    const button = form.querySelector('button[type="submit"]');
+    const originalText = button?.textContent || "Add to Job";
+
+    if (!jobId || !job) {
+      try { showToast("Open the job first, then upload the document from inside that job row.", true); } catch {}
+      return;
+    }
+    if (!files.length) {
+      try { showToast("Choose a file to upload.", true); } catch {}
+      return;
+    }
+
+    try {
+      if (button) { button.disabled = true; button.textContent = "Uploading..."; }
+      const uploadedDocs = [];
+      const importedTrackers = [];
+      const importedInvoices = [];
+
+      for (const file of files) {
+        const normalizedType = normalizeDocumentType(selectedType, file);
+        const doc = await uploadFileAndSaveRecord(file, jobId, normalizedType);
+        uploadedDocs.push(doc);
+
+        if (normalizedType === "Cost Tracker" && isExcelFile(file)) {
+          const tracker = await createEditableCostTrackerFromUpload(file, job, doc);
+          if (tracker) importedTrackers.push(tracker);
+        }
+        if (normalizedType === "Invoice") {
+          const invoice = await createInvoiceRecordFromUploadedFile(file, job, doc);
+          if (invoice) importedInvoices.push(invoice);
+        }
+      }
+
+      form.reset();
+      window.__pimpExpandedJobId = jobId;
+      try { await loadAllData({ silent: true }); } catch {}
+      refreshUi();
+
+      let message = `${uploadedDocs.length} file${uploadedDocs.length === 1 ? "" : "s"} added to ${job.job_number || job.job_name || "this job"}.`;
+      if (importedTrackers.length) message += ` ${importedTrackers.length} editable cost tracker${importedTrackers.length === 1 ? "" : "s"} created.`;
+      if (importedInvoices.length) message += ` ${importedInvoices.length} invoice record${importedInvoices.length === 1 ? "" : "s"} created.`;
+      try { showToast(message); } catch {}
+    } catch (error) {
+      try { showToast(error.message || String(error), true); } catch {}
+    } finally {
+      if (button) { button.disabled = false; button.textContent = originalText; }
+    }
+  }
+
+  // Window capture listener runs before older document capture upload handlers.
+  window.addEventListener("submit", (event) => {
+    if (event.target?.matches?.("[data-job-document-upload]")) handleFixedJobDocumentUpload(event);
+  }, true);
+
+  // Make job detail upload labels clearer after every render without rebuilding
+  // the whole job table.
+  function improveJobUploadForms() {
+    qsa("[data-job-document-upload]").forEach((form) => {
+      if (form.dataset.finalUploadRepairUi === "true") return;
+      form.dataset.finalUploadRepairUi = "true";
+      const select = form.querySelector('[name="document_type"]');
+      if (select) {
+        select.innerHTML = `
+          <option value="Cost Tracker">Premade Cost Tracker Excel</option>
+          <option value="Invoice">Premade Invoice PDF / Excel</option>
+          <option value="Timesheet">Premade Timesheet</option>
+          <option value="Job File">Other Job File</option>
+        `;
+      }
+      const file = form.querySelector('input[type="file"]');
+      if (file) file.setAttribute("accept", ".xlsx,.xls,.xlsm,.pdf,.doc,.docx,.csv,.png,.jpg,.jpeg,.webp,.txt");
+      const button = form.querySelector('button[type="submit"]');
+      if (button) button.textContent = "Upload to Job";
+    });
+  }
+  const priorRenderJobs = window.renderJobs || (typeof renderJobs === "function" ? renderJobs : null);
+  if (priorRenderJobs) {
+    window.renderJobs = function renderJobsWithUploadRepairUi() {
+      const result = priorRenderJobs.apply(this, arguments);
+      improveJobUploadForms();
+      return result;
+    };
+    try { renderJobs = window.renderJobs; } catch {}
+  }
+
+  document.addEventListener("DOMContentLoaded", improveJobUploadForms);
+  setTimeout(improveJobUploadForms, 0);
+})();
+
+
+/* ========================================================================
+   PRESERVE UPLOADED COST TRACKER ROWS + ATTACHED DOCUMENT DELETE PATCH
+   ------------------------------------------------------------------------
+   - Uploaded Excel cost trackers keep default/blank rows instead of trimming
+     the sheet down to only rows with values.
+   - Comments and By Whom values are pulled from the uploaded sheet when found.
+   - Attached job documents can be deleted directly from the expanded job row.
+   ======================================================================== */
+(function preserveUploadedCostTrackerRowsAndDocumentDeletePatch() {
+  function safeText(value) {
+    return String(value ?? "").trim();
+  }
+
+  function normalizeLabel(value) {
+    return safeText(value)
+      .toLowerCase()
+      .replace(/&/g, "and")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function numericOrBlank(value) {
+    if (value === null || value === undefined || value === "") return "";
+    const n = Number(String(value).replace(/[$,%]/g, "").replace(/,/g, "").trim());
+    return Number.isFinite(n) ? n : value;
+  }
+
+  function cloneTemplateRows(category) {
+    let rows = [];
+    try {
+      rows = Array.isArray(DEFAULT_COST_LINES?.[category]) ? DEFAULT_COST_LINES[category] : [];
+    } catch {
+      rows = [];
+    }
+    return rows.map((row) => ({ category, ...row, __preserve_empty: true }));
+  }
+
+  function mergeTemplateRows(category, uploadedRows) {
+    const templates = cloneTemplateRows(category);
+    const used = new Set();
+    const results = [];
+
+    templates.forEach((templateRow) => {
+      const wanted = normalizeLabel(templateRow.description);
+      let matchIndex = -1;
+      uploadedRows.forEach((row, index) => {
+        if (matchIndex >= 0 || used.has(index)) return;
+        const current = normalizeLabel(row.description);
+        if (!wanted || !current) return;
+        if (current === wanted || current.includes(wanted) || wanted.includes(current)) matchIndex = index;
+      });
+
+      if (matchIndex >= 0) {
+        used.add(matchIndex);
+        results.push({
+          ...templateRow,
+          ...uploadedRows[matchIndex],
+          description: templateRow.description || uploadedRows[matchIndex].description,
+          __preserve_empty: true
+        });
+      } else {
+        results.push(templateRow);
+      }
+    });
+
+    uploadedRows.forEach((row, index) => {
+      if (!used.has(index)) results.push({ category, ...row, description: row.description || "" });
+    });
+
+    if (!results.length) results.push({ category, description: "", __preserve_empty: true });
+    return results;
+  }
+
+  window.__pimpPreserveCostTrackerRows = function preserveCostTrackerRows(items) {
+    const source = Array.isArray(items) ? items : [];
+    const categories = ["labor", "equipment", "materials", "subcontractors", "misc"];
+    const normalized = source.map((item) => ({
+      ...item,
+      category: item.category || "misc",
+      description: safeText(item.description || item.role || item.name),
+      qty: item.qty === 0 && item.category === "misc" ? "" : numericOrBlank(item.qty),
+      hours: numericOrBlank(item.hours),
+      effective_hours: item.effective_hours === undefined ? numericOrBlank(item.hours) : numericOrBlank(item.effective_hours),
+      cost_rate: numericOrBlank(item.cost_rate),
+      ot_hours: numericOrBlank(item.ot_hours),
+      ot_cost_rate: numericOrBlank(item.ot_cost_rate),
+      bill_rate: numericOrBlank(item.bill_rate),
+      ot_bill_rate: numericOrBlank(item.ot_bill_rate),
+      days: numericOrBlank(item.days),
+      day_cost: numericOrBlank(item.day_cost),
+      day_rate: numericOrBlank(item.day_rate),
+      cost: numericOrBlank(item.cost),
+      markup_percent: numericOrBlank(item.markup_percent),
+      quoted_override: item.quoted_override || "",
+      cost_total: numericOrBlank(item.cost_total) || 0,
+      quoted_total: numericOrBlank(item.quoted_total) || 0
+    }));
+
+    return categories.flatMap((category) => {
+      const uploadedRows = normalized.filter((item) => item.category === category);
+      return mergeTemplateRows(category, uploadedRows);
+    });
+  };
+
+  function rowValues(row) {
+    return (row || []).map((cell) => safeText(cell)).filter(Boolean);
+  }
+
+  function findLabelCell(rows, pattern) {
+    for (let r = 0; r < (rows || []).length; r += 1) {
+      const row = rows[r] || [];
+      for (let c = 0; c < row.length; c += 1) {
+        if (pattern.test(safeText(row[c]))) return { r, c };
+      }
+    }
+    return null;
+  }
+
+  function stopText(value) {
+    return /^(personnel|equipment|materials?|subcontractors?|miscellaneous|rate\s*total|cost\s*total|bid\s*profit|gross\s*margin|date|job\s*\/\s*afe|client|job\s*name|location|total\s*days)/i.test(safeText(value));
+  }
+
+  function collectTextNearLabel(rows, labelPattern, options = {}) {
+    const found = findLabelCell(rows, labelPattern);
+    if (!found) return "";
+    const values = [];
+    const maxRight = options.maxRight ?? 12;
+    const maxDown = options.maxDown ?? 10;
+    const row = rows[found.r] || [];
+
+    for (let c = found.c + 1; c <= found.c + maxRight && c < row.length; c += 1) {
+      const value = safeText(row[c]);
+      if (value && !labelPattern.test(value) && !stopText(value)) values.push(value);
+    }
+
+    for (let r = found.r + 1; r <= found.r + maxDown && r < rows.length; r += 1) {
+      const below = rows[r] || [];
+      const lineValues = [];
+      for (let c = Math.max(0, found.c); c <= found.c + maxRight && c < below.length; c += 1) {
+        const value = safeText(below[c]);
+        if (!value || labelPattern.test(value)) continue;
+        if (options.stopAtByWhom && /by\s*whom/i.test(value)) return values.join("\n").trim();
+        if (stopText(value) && values.length) return values.join("\n").trim();
+        if (!stopText(value)) lineValues.push(value);
+      }
+      if (lineValues.length) values.push(lineValues.join(" "));
+    }
+
+    return Array.from(new Set(values)).join("\n").trim();
+  }
+
+  window.__pimpExtractCostTrackerComments = function extractCostTrackerComments(rows) {
+    return collectTextNearLabel(rows, /comments?\s*:?/i, { maxRight: 16, maxDown: 12, stopAtByWhom: true });
+  };
+
+  window.__pimpExtractCostTrackerByWhom = function extractCostTrackerByWhom(rows) {
+    return collectTextNearLabel(rows, /by\s*whom\s*:?|prepared\s*by\s*:?/i, { maxRight: 8, maxDown: 2 });
+  };
+
+  const previousDeleteDashboardRecord = typeof window.deleteDashboardRecord === "function"
+    ? window.deleteDashboardRecord
+    : (typeof deleteDashboardRecord === "function" ? deleteDashboardRecord : null);
+
+  function documentName(row) {
+    return row?.file_name || row?.original_file_name || row?.document_type || "document";
+  }
+
+  async function deleteAttachedDocument(id) {
+    if (!state?.supabase || !state?.session) {
+      try { showToast("Sign in before deleting documents.", true); } catch {}
+      return;
+    }
+
+    const doc = (state?.data?.documents || []).find((row) => row.id === id || row.external_id === id);
+    if (!doc) {
+      try { showToast("Could not find that document. Refresh the page and try again.", true); } catch {}
+      return;
+    }
+
+    if (!window.confirm(`Delete this document: ${documentName(doc)}?
+
+This removes it from the job documents list.`)) return;
+
+    try {
+      if (doc.storage_path) {
+        const bucket = doc.storage_bucket || "job-documents";
+        const { error: storageError } = await state.supabase.storage.from(bucket).remove([doc.storage_path]);
+        if (storageError) console.warn("Storage file delete skipped:", storageError.message || storageError);
+      }
+
+      let query = state.supabase.from("documents").delete();
+      query = doc.id ? query.eq("id", doc.id) : query.eq("external_id", doc.external_id);
+      const { error } = await query;
+      if (error) throw error;
+
+      state.data.documents = (state.data.documents || []).filter((row) => row.id !== doc.id && row.external_id !== doc.external_id);
+      try { await loadAllData({ silent: true }); } catch {}
+      try { refreshWebsiteLists(); } catch {}
+      try { renderAll(); } catch {}
+      try { renderUploadedFilesPanel(); } catch {}
+      try { showToast("Document deleted from this job."); } catch {}
+    } catch (error) {
+      try { showToast(error.message || String(error), true); } catch {}
+    }
+  }
+
+  window.deleteDashboardRecord = async function deleteDashboardRecordWithAttachedDocuments(type, id) {
+    if (type === "documents") return deleteAttachedDocument(id);
+    if (previousDeleteDashboardRecord) return previousDeleteDashboardRecord(type, id);
+  };
+
+  try { deleteDashboardRecord = window.deleteDashboardRecord; } catch {}
+})();
+
+
+/* ========================================================================
+   EXACT UPLOADED EXCEL DOWNLOAD PATCH
+   ------------------------------------------------------------------------
+   If a cost tracker was created by uploading a premade Excel workbook, keep
+   the original workbook bytes in the tracker summary and download that exact
+   file again. This preserves the original Bid Sheet formatting, formulas,
+   OT hours/OT cost columns, comments, merged cells, and miscellaneous layout.
+   ======================================================================== */
+(function exactUploadedCostTrackerWorkbookDownloadPatch() {
+  const ORIGINAL_KEYS = [
+    "originalWorkbookBase64",
+    "original_workbook_base64",
+    "uploadedWorkbookBase64",
+    "uploaded_workbook_base64"
+  ];
+
+  function parseTrackerJson(value, fallback) {
+    if (!value) return fallback;
+    if (typeof value === "object") return value;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function getTrackerSummaryForDownload(tracker) {
+    if (!tracker) return {};
+    try {
+      if (typeof costTrackerSummary === "function") {
+        const summary = costTrackerSummary(tracker);
+        if (summary && typeof summary === "object") return summary;
+      }
+    } catch {}
+    return parseTrackerJson(tracker.summary, {});
+  }
+
+  function uploadedDocumentForTracker(summary) {
+    const docs = Array.isArray(state?.data?.documents) ? state.data.documents : [];
+    return docs.find((doc) =>
+      doc.id === summary.uploadedDocumentId ||
+      doc.id === summary.uploaded_document_id ||
+      doc.storage_path === summary.storagePath ||
+      doc.storage_path === summary.storage_path ||
+      doc.file_name === summary.uploadedFileName ||
+      doc.original_file_name === summary.uploadedFileName
+    );
+  }
+
+  function cleanBase64(value) {
+    const text = String(value || "").trim();
+    const comma = text.indexOf(",");
+    return comma >= 0 && /^data:/i.test(text.slice(0, comma)) ? text.slice(comma + 1) : text;
+  }
+
+  function originalWorkbookPayload(tracker) {
+    const summary = getTrackerSummaryForDownload(tracker);
+    const doc = uploadedDocumentForTracker(summary) || {};
+    let base64 = "";
+
+    for (const key of ORIGINAL_KEYS) {
+      if (summary[key]) {
+        base64 = summary[key];
+        break;
+      }
+    }
+
+    if (!base64) {
+      base64 = doc.file_data_base64 || doc.fileDataBase64 || doc.data_base64 || "";
+    }
+
+    const storagePath =
+      summary.storagePath ||
+      summary.storage_path ||
+      doc.storage_path ||
+      "";
+
+    if (!base64 && !storagePath) return null;
+
+    return {
+      base64: base64 ? cleanBase64(base64) : "",
+      storagePath,
+      storageBucket: doc.storage_bucket || summary.storageBucket || summary.storage_bucket || "job-documents",
+      fileName:
+        summary.originalWorkbookFileName ||
+        summary.original_workbook_file_name ||
+        summary.uploadedFileName ||
+        tracker?.download_filename ||
+        doc.file_name ||
+        doc.original_file_name ||
+        `${tracker?.tracker_name || tracker?.cost_tracker_name || "Uploaded_Cost_Tracker"}.xlsx`,
+      mimeType:
+        summary.originalWorkbookMimeType ||
+        summary.original_workbook_mime_type ||
+        doc.mime_type ||
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    };
+  }
+
+  function hasExactUploadedWorkbook(tracker) {
+    const payload = originalWorkbookPayload(tracker);
+    return Boolean(payload?.base64 || payload?.storagePath);
+  }
+
+  function base64ToBlob(base64, mimeType) {
+    const cleaned = cleanBase64(base64);
+    const byteCharacters = atob(cleaned);
+    const byteArrays = [];
+    const sliceSize = 1024;
+
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i += 1) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      byteArrays.push(new Uint8Array(byteNumbers));
+    }
+
+    return new Blob(byteArrays, { type: mimeType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  }
+
+  function sanitizeDownloadName(name) {
+    const raw = String(name || "Uploaded_Cost_Tracker.xlsx").trim() || "Uploaded_Cost_Tracker.xlsx";
+    const withExt = /\.[a-z0-9]+$/i.test(raw) ? raw : `${raw}.xlsx`;
+    return withExt.replace(/[\\/:*?"<>|]+/g, "_");
+  }
+
+  function downloadBlob(blob, fileName) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = sanitizeDownloadName(fileName);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  }
+
+  async function downloadExactUploadedWorkbook(tracker) {
+    const payload = originalWorkbookPayload(tracker);
+    if (!payload) return false;
+
+    try {
+      if (payload.base64) {
+        downloadBlob(base64ToBlob(payload.base64, payload.mimeType), payload.fileName);
+        try { showToast("Original uploaded Excel workbook downloaded."); } catch {}
+        return true;
+      }
+
+      if (payload.storagePath && state?.supabase) {
+        const { data, error } = await state.supabase.storage
+          .from(payload.storageBucket || "job-documents")
+          .download(payload.storagePath);
+
+        if (error) throw error;
+        downloadBlob(data, payload.fileName);
+        try { showToast("Original uploaded Excel workbook downloaded."); } catch {}
+        return true;
+      }
+
+      throw new Error("The original workbook is not stored on this cost tracker.");
+    } catch (error) {
+      console.warn("Original uploaded workbook download failed:", error);
+      try { showToast("The original uploaded Excel file could not be downloaded. Try downloading it from the attached Documents list.", true); } catch {}
+      return true;
+    }
+  }
+
+  function trackerFromCurrentCostForm() {
+    const form = document.getElementById("costTrackerForm");
+    const recordId = form?.querySelector('[name="record_id"]')?.value;
+    if (!recordId) return null;
+    return (state?.data?.costTrackers || []).find((row) => row.id === recordId) || null;
+  }
+
+  function trackerFromDownloadButton(button) {
+    const trackerId = button?.dataset?.downloadCost;
+    if (!trackerId) return trackerFromCurrentCostForm();
+    return (state?.data?.costTrackers || []).find((row) => row.id === trackerId) || null;
+  }
+
+  window.addEventListener("click", (event) => {
+    const button = event.target?.closest?.("#downloadCostTrackerDraftBtn, #downloadCostTrackerPreviewBtn, [data-download-cost]");
+    if (!button) return;
+
+    const tracker = trackerFromDownloadButton(button);
+    if (!tracker || !hasExactUploadedWorkbook(tracker)) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    downloadExactUploadedWorkbook(tracker).catch((error) => {
+      console.warn("Original uploaded workbook download failed:", error);
+      try { showToast(error.message || String(error), true); } catch {}
+    });
+    return false;
+  }, true);
+})();
+
+
+/* ========================================================================
+   FINAL SIDEBAR COLLAPSE + JOB ACTION CLEANUP PATCH
+   ------------------------------------------------------------------------
+   - Adds a user-controlled Hide Menu / Show Menu toggle for the left sidebar.
+   - Saves the collapsed menu preference in this browser.
+   - Removes Cost Tracker shortcut buttons from the Jobs table Actions column.
+   ======================================================================== */
+(function finalSidebarCollapseAndJobActionCleanupPatch() {
+  const STORAGE_KEY = "pimp_dashboard_sidebar_collapsed_v1";
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function getShell() {
+    return qs("#appShell");
+  }
+
+  function getToggleButton() {
+    let button = qs("#sidebarToggleBtn");
+    if (button) return button;
+
+    const actions = qs(".topbar-actions.global-actions") || qs(".topbar-actions");
+    if (!actions) return null;
+
+    button = document.createElement("button");
+    button.className = "btn ghost sidebar-toggle-btn";
+    button.id = "sidebarToggleBtn";
+    button.type = "button";
+    button.setAttribute("aria-pressed", "false");
+    actions.insertBefore(button, actions.firstChild);
+    return button;
+  }
+
+  function setSidebarCollapsed(collapsed) {
+    const shell = getShell();
+    const button = getToggleButton();
+
+    if (shell) shell.classList.toggle("sidebar-collapsed", Boolean(collapsed));
+    document.body.classList.toggle("sidebar-collapsed", Boolean(collapsed));
+
+    if (button) {
+      button.textContent = collapsed ? "Show Menu" : "Hide Menu";
+      button.setAttribute("aria-pressed", collapsed ? "true" : "false");
+      button.setAttribute("aria-label", collapsed ? "Show left navigation menu" : "Hide left navigation menu");
+      button.title = collapsed ? "Show left navigation menu" : "Hide left navigation menu";
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0");
+    } catch {}
+  }
+
+  function initSidebarToggle() {
+    const saved = (() => {
+      try { return localStorage.getItem(STORAGE_KEY) === "1"; } catch { return false; }
+    })();
+
+    const button = getToggleButton();
+    setSidebarCollapsed(saved);
+
+    if (button && !button.dataset.sidebarToggleBound) {
+      button.dataset.sidebarToggleBound = "true";
+      button.addEventListener("click", () => {
+        const currentlyCollapsed = getShell()?.classList.contains("sidebar-collapsed") || document.body.classList.contains("sidebar-collapsed");
+        setSidebarCollapsed(!currentlyCollapsed);
+        setTimeout(() => {
+          try { window.dispatchEvent(new Event("resize")); } catch {}
+        }, 50);
+      });
+    }
+  }
+
+  function removeCostTrackerButtonsFromJobActions() {
+    const jobsTable = qs("#jobsTable");
+    if (!jobsTable) return;
+
+    qsa('[data-open-cost-for-job], [data-doc-guide="costTrackers"][data-doc-guide-job]', jobsTable).forEach((button) => {
+      const actionsCell = button.closest('td[data-label="Actions"], .actions-cell, .table-actions');
+      if (actionsCell) button.remove();
+    });
+  }
+
+  const previousRenderJobs = typeof window.renderJobs === "function" ? window.renderJobs : (typeof renderJobs === "function" ? renderJobs : null);
+  if (previousRenderJobs && !previousRenderJobs.__sidebarCleanupWrapped) {
+    const wrappedRenderJobs = function renderJobsWithoutCostTrackerActionButton() {
+      const result = previousRenderJobs.apply(this, arguments);
+      removeCostTrackerButtonsFromJobActions();
+      return result;
+    };
+    wrappedRenderJobs.__sidebarCleanupWrapped = true;
+    window.renderJobs = wrappedRenderJobs;
+    try { renderJobs = window.renderJobs; } catch {}
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    initSidebarToggle();
+    removeCostTrackerButtonsFromJobActions();
+  });
+
+  setTimeout(() => {
+    initSidebarToggle();
+    removeCostTrackerButtonsFromJobActions();
+  }, 0);
+
+  window.addEventListener("load", () => {
+    initSidebarToggle();
+    removeCostTrackerButtonsFromJobActions();
+  });
+})();
+
+/* ========================================================================
+   MANUAL FINAL TOTAL OVERRIDES
+   ------------------------------------------------------------------------
+   Cost tracker:
+   - Rate Total Override adjusts the final quoted/rate total.
+   - Cost Total Override adjusts the final cost total.
+   Invoice:
+   - Subtotal, Sales Tax, Total, Payment Credits, and Balance Due can be
+     manually adjusted. Blank override fields keep automatic calculations.
+   ======================================================================== */
+(function installManualFinalTotalOverrides() {
+  const hasRawValue = (value) => String(value ?? "").trim() !== "";
+  const toMoneyNumber = (value) => (typeof roundMoney === "function" ? roundMoney(value) : Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100);
+  const toNumber = (value) => (typeof number === "function" ? number(value) : (Number(value || 0) || 0));
+  const safeSummary = (row) => (typeof costTrackerSummary === "function" ? costTrackerSummary(row) : parseJsonObject(row?.summary));
+
+  function readFormRaw(form, name) {
+    return form?.querySelector(`[name="${name}"]`)?.value ?? "";
+  }
+
+  function readValue(values, ...names) {
+    for (const name of names) {
+      const value = values?.[name];
+      if (hasRawValue(value)) return value;
+    }
+    return "";
+  }
+
+  function firstOverrideValue(...values) {
+    for (const value of values) {
+      if (value !== undefined && value !== null && value !== "") return value;
+    }
+    return "";
+  }
+
+  function setFormValueIfPresent(form, name, value) {
+    const field = form?.querySelector(`[name="${name}"]`);
+    if (field) field.value = value ?? "";
+  }
+
+  function setMoneyText(selector, value) {
+    const node = typeof $ === "function" ? $(selector) : document.querySelector(selector);
+    if (!node) return;
+    const formatted = typeof money === "function" ? money(value) : `$${toMoneyNumber(value).toFixed(2)}`;
+    if (node.matches?.("input")) node.placeholder = formatted;
+    else node.textContent = formatted;
+  }
+
+  function normalizeCostOverrideArgs(rateArg = null, costArg = null) {
+    if (rateArg && typeof rateArg === "object" && !Array.isArray(rateArg)) {
+      return {
+        rateRaw: firstOverrideValue(rateArg.rateTotalOverrideRaw, rateArg.rateTotalOverride, rateArg.quotedPriceOverrideRaw, rateArg.quotedPriceOverride),
+        costRaw: firstOverrideValue(rateArg.costTotalOverrideRaw, rateArg.costTotalOverride, rateArg.totalCostOverrideRaw, rateArg.totalCostOverride)
+      };
+    }
+
+    return {
+      rateRaw: rateArg && toNumber(rateArg) > 0 ? rateArg : "",
+      costRaw: costArg && toNumber(costArg) > 0 ? costArg : ""
+    };
+  }
+
+  window.summarizeCostItems = function summarizeCostItemsWithManualTotals(items, rateArg = null, costArg = null) {
+    const empty = {
+      laborCost: 0,
+      materialCost: 0,
+      equipmentCost: 0,
+      subcontractorCost: 0,
+      otherCost: 0,
+      totalCost: 0,
+      quotedPrice: 0,
+      profit: 0,
+      margin: 0,
+      rateTotal: 0,
+      byCategory: {}
+    };
+
+    const summary = (Array.isArray(items) ? items : []).reduce((acc, item) => {
+      const cost = toNumber(item?.cost_total);
+      const quoted = toNumber(item?.quoted_total);
+      acc.totalCost += cost;
+      acc.rateTotal += quoted;
+
+      if (!acc.byCategory[item.category]) acc.byCategory[item.category] = { cost: 0, quoted: 0 };
+      acc.byCategory[item.category].cost += cost;
+      acc.byCategory[item.category].quoted += quoted;
+
+      if (item.category === "labor") acc.laborCost += cost;
+      if (item.category === "materials") acc.materialCost += cost;
+      if (item.category === "equipment") acc.equipmentCost += cost;
+      if (item.category === "subcontractors") acc.subcontractorCost += cost;
+      if (item.category === "misc") acc.otherCost += cost;
+      return acc;
+    }, empty);
+
+    Object.keys(summary.byCategory).forEach((category) => {
+      summary.byCategory[category].cost = toMoneyNumber(summary.byCategory[category].cost);
+      summary.byCategory[category].quoted = toMoneyNumber(summary.byCategory[category].quoted);
+    });
+
+    const autoTotalCost = toMoneyNumber(summary.totalCost);
+    const autoRateTotal = toMoneyNumber(summary.rateTotal);
+    const overrides = normalizeCostOverrideArgs(rateArg, costArg);
+    const hasRateOverride = hasRawValue(overrides.rateRaw);
+    const hasCostOverride = hasRawValue(overrides.costRaw);
+    const totalCost = hasCostOverride ? toMoneyNumber(overrides.costRaw) : autoTotalCost;
+    const quotedPrice = hasRateOverride ? toMoneyNumber(overrides.rateRaw) : autoRateTotal;
+
+    summary.autoTotalCost = autoTotalCost;
+    summary.autoRateTotal = autoRateTotal;
+    summary.totalCost = totalCost;
+    summary.rateTotal = autoRateTotal;
+    summary.quotedPrice = quotedPrice;
+    summary.costTotalOverride = hasCostOverride ? totalCost : null;
+    summary.totalCostOverride = summary.costTotalOverride;
+    summary.rateTotalOverride = hasRateOverride ? quotedPrice : null;
+    summary.quotedPriceOverride = summary.rateTotalOverride;
+    summary.profit = toMoneyNumber(quotedPrice - totalCost);
+    summary.margin = quotedPrice > 0 ? toMoneyNumber(summary.profit / quotedPrice) : 0;
+
+    ["laborCost", "materialCost", "equipmentCost", "subcontractorCost", "otherCost", "totalCost", "quotedPrice", "profit", "rateTotal", "autoTotalCost", "autoRateTotal"].forEach((key) => {
+      summary[key] = toMoneyNumber(summary[key]);
+    });
+
+    return summary;
+  };
+  try { summarizeCostItems = window.summarizeCostItems; } catch {}
+
+  window.recomputeCostTrackerTotals = function recomputeCostTrackerTotalsWithManualOverrides() {
+    const form = typeof $ === "function" ? $("#costTrackerForm") : document.querySelector("#costTrackerForm");
+    if (!form) return null;
+
+    try { if (typeof syncRegularLaborHoursFromTotalDays === "function") syncRegularLaborHoursFromTotalDays(); } catch {}
+
+    const values = typeof formToObject === "function" ? formToObject(form) : Object.fromEntries(new FormData(form).entries());
+    const items = typeof extractCostTrackerLineItems === "function" ? extractCostTrackerLineItems({ includeBlank: true }) : [];
+    const summary = window.summarizeCostItems(items, {
+      rateTotalOverrideRaw: readValue(values, "quoted_price_override", "rate_total_override"),
+      costTotalOverrideRaw: readValue(values, "cost_total_override", "total_cost_override")
+    });
+
+    const byCategory = summary.byCategory || {};
+    setMoneyText("#sheetLaborCost", byCategory.labor?.cost || 0);
+    setMoneyText("#sheetLaborRate", byCategory.labor?.quoted || 0);
+    setMoneyText("#sheetEquipmentCost", byCategory.equipment?.cost || 0);
+    setMoneyText("#sheetEquipmentRate", byCategory.equipment?.quoted || 0);
+    setMoneyText("#sheetMaterialsCost", byCategory.materials?.cost || 0);
+    setMoneyText("#sheetMaterialsRate", byCategory.materials?.quoted || 0);
+    setMoneyText("#sheetSubcontractorCost", byCategory.subcontractors?.cost || 0);
+    setMoneyText("#sheetSubcontractorRate", byCategory.subcontractors?.quoted || 0);
+    setMoneyText("#sheetMiscCost", byCategory.misc?.cost || 0);
+    setMoneyText("#sheetMiscRate", byCategory.misc?.quoted || 0);
+
+    const laborRows = items.filter((item) => item.category === "labor");
+    if (typeof setText === "function") {
+      setText("#sheetLaborQty", cleanNumberDisplay(laborRows.reduce((sum, row) => sum + toNumber(row.qty), 0)));
+      setText("#sheetLaborHours", cleanNumberDisplay(laborRows.reduce((sum, row) => sum + toNumber(row.effective_hours ?? row.hours), 0)));
+      setText("#sheetLaborOtHours", cleanNumberDisplay(laborRows.reduce((sum, row) => sum + toNumber(row.ot_hours), 0)));
+    }
+
+    setMoneyText("#costTotalPreview", summary.totalCost);
+    setMoneyText("#quotedTotalPreview", summary.quotedPrice);
+    setMoneyText("#profitPreview", summary.profit);
+    if (typeof setText === "function") setText("#marginPreview", typeof formatPercent === "function" ? formatPercent(summary.margin) : `${(summary.margin * 100).toFixed(2)}%`);
+    setMoneyText("#sheetQuotedMirror", summary.quotedPrice);
+    setMoneyText("#sheetCostMirror", summary.totalCost);
+
+    return { items, summary };
+  };
+  try { recomputeCostTrackerTotals = window.recomputeCostTrackerTotals; } catch {}
+
+  const previousBuildCostTrackerPayload = typeof buildCostTrackerPayload === "function" ? buildCostTrackerPayload : null;
+  if (previousBuildCostTrackerPayload) {
+    window.buildCostTrackerPayload = function buildCostTrackerPayloadWithManualTotals(job, items, summary, notes = null, formValues = {}) {
+      const payload = previousBuildCostTrackerPayload(job, items, summary, notes, formValues);
+      const mergedSummary = {
+        ...(payload.summary || {}),
+        costTotalOverride: summary?.costTotalOverride ?? null,
+        totalCostOverride: summary?.totalCostOverride ?? null,
+        rateTotalOverride: summary?.rateTotalOverride ?? null,
+        quotedPriceOverride: summary?.quotedPriceOverride ?? null,
+        autoTotalCost: summary?.autoTotalCost ?? payload.summary?.autoTotalCost ?? null,
+        autoRateTotal: summary?.autoRateTotal ?? payload.summary?.autoRateTotal ?? null,
+        totalCost: summary?.totalCost ?? payload.summary?.totalCost ?? 0,
+        quotedPrice: summary?.quotedPrice ?? payload.summary?.quotedPrice ?? 0,
+        profit: summary?.profit ?? payload.summary?.profit ?? 0,
+        margin: summary?.margin ?? payload.summary?.margin ?? 0
+      };
+      return {
+        ...payload,
+        quoted_price: summary?.quotedPrice ?? payload.quoted_price,
+        summary: mergedSummary,
+        html_snapshot: typeof renderCostTrackerHtml === "function"
+          ? renderCostTrackerHtml({
+              job: job || { job_number: "Unassigned", job_name: mergedSummary.trackerName || payload.tracker_name || "Cost Tracker", company_name: "", location: "" },
+              items,
+              summary: mergedSummary,
+              notes: notes || formValues.notes || ""
+            })
+          : payload.html_snapshot
+      };
+    };
+    try { buildCostTrackerPayload = window.buildCostTrackerPayload; } catch {}
+  }
+
+  const previousLoadCostTrackerIntoForm = typeof loadCostTrackerIntoForm === "function" ? loadCostTrackerIntoForm : null;
+  if (previousLoadCostTrackerIntoForm) {
+    window.loadCostTrackerIntoForm = function loadCostTrackerIntoFormWithManualTotals(tracker) {
+      previousLoadCostTrackerIntoForm(tracker);
+      const form = typeof $ === "function" ? $("#costTrackerForm") : document.querySelector("#costTrackerForm");
+      const summary = safeSummary(tracker);
+      const rateOverride = firstOverrideValue(summary.rateTotalOverride, summary.quotedPriceOverride);
+      const costOverride = firstOverrideValue(summary.costTotalOverride, summary.totalCostOverride);
+      setFormValueIfPresent(form, "quoted_price_override", rateOverride);
+      setFormValueIfPresent(form, "cost_total_override", costOverride);
+      window.recomputeCostTrackerTotals();
+    };
+    try { loadCostTrackerIntoForm = window.loadCostTrackerIntoForm; } catch {}
+  }
+
+  window.costTrackerQuoted = function costTrackerQuotedWithManualRate(row) {
+    const summary = safeSummary(row);
+    const explicit = firstOverrideValue(summary.rateTotalOverride, summary.quotedPriceOverride);
+    if (hasRawValue(explicit)) return toNumber(explicit);
+    const saved = firstOverrideValue(summary.quotedPrice, summary.quoted_price, row?.quoted_price, summary.rateTotal, summary.rate_total);
+    if (hasRawValue(saved)) return toNumber(saved);
+    return 0;
+  };
+  try { costTrackerQuoted = window.costTrackerQuoted; } catch {}
+
+  window.costTrackerTotal = function costTrackerTotalWithManualCost(row) {
+    const summary = safeSummary(row);
+    const explicit = firstOverrideValue(summary.costTotalOverride, summary.totalCostOverride);
+    if (hasRawValue(explicit)) return toNumber(explicit);
+    const saved = firstOverrideValue(summary.totalCost, summary.total_cost, row?.total_cost);
+    if (hasRawValue(saved)) return toNumber(saved);
+    return toNumber(row?.labor_cost) + toNumber(row?.material_cost) + toNumber(row?.equipment_cost) + toNumber(row?.subcontractor_cost) + toNumber(row?.other_cost);
+  };
+  try { costTrackerTotal = window.costTrackerTotal; } catch {}
+
+  window.costTrackerProfit = function costTrackerProfitWithManualTotals(row) {
+    const summary = safeSummary(row);
+    const explicit = firstOverrideValue(summary.profit, row?.profit);
+    if (hasRawValue(explicit) && (hasRawValue(summary.costTotalOverride) || hasRawValue(summary.rateTotalOverride))) return toNumber(explicit);
+    return window.costTrackerQuoted(row) - window.costTrackerTotal(row);
+  };
+  try { costTrackerProfit = window.costTrackerProfit; } catch {}
+
+  window.costTrackerMargin = function costTrackerMarginWithManualTotals(row) {
+    const quoted = window.costTrackerQuoted(row);
+    return quoted > 0 ? window.costTrackerProfit(row) / quoted : 0;
+  };
+  try { costTrackerMargin = window.costTrackerMargin; } catch {}
+
+  function normalizeInvoiceOverrideArgs(taxRate, payments, overrides = {}) {
+    return {
+      subtotalRaw: firstOverrideValue(overrides.subtotalRaw, overrides.subtotalOverride, overrides.subtotal),
+      taxRaw: firstOverrideValue(overrides.taxRaw, overrides.taxOverride, overrides.tax),
+      totalRaw: firstOverrideValue(overrides.totalRaw, overrides.totalOverride, overrides.total),
+      balanceRaw: firstOverrideValue(overrides.balanceRaw, overrides.balanceDueOverride, overrides.balance_due_override, overrides.balanceDue),
+      taxRate: toNumber(taxRate),
+      payments: toNumber(payments)
+    };
+  }
+
+  window.summarizeInvoiceItems = function summarizeInvoiceItemsWithManualOverrides(items, taxRate = 0, payments = 0, overrides = {}) {
+    const normalized = normalizeInvoiceOverrideArgs(taxRate, payments, overrides);
+    const autoSubtotal = toMoneyNumber((Array.isArray(items) ? items : []).reduce((sum, item) => sum + toNumber(item?.amount), 0));
+    const subtotal = hasRawValue(normalized.subtotalRaw) ? toMoneyNumber(normalized.subtotalRaw) : autoSubtotal;
+    const normalizedTaxRate = typeof normalizeInvoiceTaxRate === "function" ? normalizeInvoiceTaxRate(normalized.taxRate) : (normalized.taxRate > 1 ? normalized.taxRate / 100 : normalized.taxRate);
+    const autoTax = toMoneyNumber(subtotal * normalizedTaxRate);
+    const tax = hasRawValue(normalized.taxRaw) ? toMoneyNumber(normalized.taxRaw) : autoTax;
+    const autoTotal = toMoneyNumber(subtotal + tax);
+    const total = hasRawValue(normalized.totalRaw) ? toMoneyNumber(normalized.totalRaw) : autoTotal;
+    const autoBalanceDue = toMoneyNumber(total - normalized.payments);
+    const balanceDue = hasRawValue(normalized.balanceRaw) ? toMoneyNumber(normalized.balanceRaw) : autoBalanceDue;
+
+    return {
+      subtotal,
+      tax,
+      total,
+      payments: toMoneyNumber(normalized.payments),
+      balanceDue,
+      autoSubtotal,
+      autoTax,
+      autoTotal,
+      autoBalanceDue,
+      subtotalOverride: hasRawValue(normalized.subtotalRaw) ? subtotal : null,
+      taxOverride: hasRawValue(normalized.taxRaw) ? tax : null,
+      totalOverride: hasRawValue(normalized.totalRaw) ? total : null,
+      balanceDueOverride: hasRawValue(normalized.balanceRaw) ? balanceDue : null
+    };
+  };
+  try { summarizeInvoiceItems = window.summarizeInvoiceItems; } catch {}
+
+  window.recomputeInvoiceTotals = function recomputeInvoiceTotalsWithManualOverrides() {
+    const form = typeof $ === "function" ? $("#invoiceForm") : document.querySelector("#invoiceForm");
+    if (!form) return null;
+
+    const values = typeof formToObject === "function" ? formToObject(form) : Object.fromEntries(new FormData(form).entries());
+    const items = typeof extractInvoiceLineItems === "function" ? extractInvoiceLineItems() : [];
+    const summary = window.summarizeInvoiceItems(items, values.tax_rate, values.payments, {
+      subtotalRaw: readFormRaw(form, "subtotal_override"),
+      taxRaw: readFormRaw(form, "tax_override"),
+      totalRaw: readFormRaw(form, "total_override"),
+      balanceRaw: readFormRaw(form, "balance_due_override")
+    });
+
+    setMoneyText("#invoiceSubtotalPreview", summary.subtotal);
+    setMoneyText("#invoiceTaxPreview", summary.tax);
+    setMoneyText("#invoiceTotalPreview", summary.total);
+    setMoneyText("#invoicePaymentsPreview", summary.payments);
+    setMoneyText("#invoiceBalancePreview", summary.balanceDue);
+
+    return { items, summary };
+  };
+  try { recomputeInvoiceTotals = window.recomputeInvoiceTotals; } catch {}
+
+  const previousBuildInvoiceData = typeof buildInvoiceData === "function" ? buildInvoiceData : null;
+  if (previousBuildInvoiceData) {
+    window.buildInvoiceData = function buildInvoiceDataWithManualTotals(values, job, items, summary, invoiceNumber) {
+      const data = previousBuildInvoiceData(values || {}, job, items || [], summary || {}, invoiceNumber);
+      return {
+        ...data,
+        summary: summary || data.summary,
+        payments: (summary && summary.payments !== undefined) ? summary.payments : toNumber(values?.payments)
+      };
+    };
+    try { buildInvoiceData = window.buildInvoiceData; } catch {}
+  }
+
+  const previousLoadInvoiceIntoForm = typeof loadInvoiceIntoForm === "function" ? loadInvoiceIntoForm : null;
+  if (previousLoadInvoiceIntoForm) {
+    window.loadInvoiceIntoForm = function loadInvoiceIntoFormWithManualTotals(invoice) {
+      previousLoadInvoiceIntoForm(invoice);
+      const form = typeof $ === "function" ? $("#invoiceForm") : document.querySelector("#invoiceForm");
+      const summary = typeof invoiceSummary === "function" ? invoiceSummary(invoice) : parseJsonObject(invoice?.summary);
+      setFormValueIfPresent(form, "subtotal_override", firstOverrideValue(summary.subtotalOverride, summary.manualSubtotalOverride));
+      setFormValueIfPresent(form, "tax_override", firstOverrideValue(summary.taxOverride, summary.manualTaxOverride));
+      setFormValueIfPresent(form, "total_override", firstOverrideValue(summary.totalOverride, summary.manualTotalOverride));
+      setFormValueIfPresent(form, "balance_due_override", firstOverrideValue(summary.balanceDueOverride, summary.manualBalanceDueOverride));
+      setFormValueIfPresent(form, "payments", firstOverrideValue(invoice?.payments, summary.payments, 0));
+      window.recomputeInvoiceTotals();
+    };
+    try { loadInvoiceIntoForm = window.loadInvoiceIntoForm; } catch {}
+  }
+
+  function ensureOverrideFieldsForOlderHtml() {
+    const costForm = document.querySelector("#costTrackerForm");
+    if (costForm && !costForm.querySelector('[name="cost_total_override"]')) {
+      const existing = costForm.querySelector(".quoted-override-cell");
+      if (existing) {
+        existing.insertAdjacentHTML("afterend", `<label class="total-override-cell cost-override-cell">Cost Total Override<input name="cost_total_override" type="number" step="0.01" placeholder="Leave blank to use calculated cost total" /></label>`);
+      }
+    }
+
+    const invoiceForm = document.querySelector("#invoiceForm");
+    if (invoiceForm && !invoiceForm.querySelector('[name="subtotal_override"]')) {
+      const sourcePanel = invoiceForm.querySelector(".invoice-source-panel");
+      sourcePanel?.insertAdjacentHTML("afterend", `
+        <section class="invoice-manual-adjustments" aria-label="Manual invoice total adjustments">
+          <div class="manual-adjustment-copy"><strong>Manual invoice total adjustments</strong><span>Leave a field blank to use the automatic value.</span></div>
+          <label>Subtotal Override<input name="subtotal_override" type="number" step="0.01" placeholder="Auto subtotal" /></label>
+          <label>Sales Tax Override<input name="tax_override" type="number" step="0.01" placeholder="Auto sales tax" /></label>
+          <label>Total Override<input name="total_override" type="number" step="0.01" placeholder="Auto total" /></label>
+          <label>Payment Credits<input name="payments" type="number" step="0.01" value="0" /></label>
+          <label>Balance Due Override<input name="balance_due_override" type="number" step="0.01" placeholder="Auto balance due" /></label>
+        </section>`);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    ensureOverrideFieldsForOlderHtml();
+    try { window.recomputeCostTrackerTotals(); } catch {}
+    try { window.recomputeInvoiceTotals(); } catch {}
+  });
+})();
+
+/* Keep dashboard stat cards aligned with manually adjusted totals. */
+(function installManualTotalsStatsPatch() {
+  window.renderStats = function renderStatsWithManualTotals() {
+    const jobs = state?.data?.jobs || [];
+    const costTrackers = state?.data?.costTrackers || [];
+    const invoices = state?.data?.invoices || [];
+    const activeJobs = jobs.filter((job) => (job.status || "").toLowerCase() === "active").length;
+    const quoted = costTrackers.reduce((sum, row) => sum + (typeof costTrackerQuoted === "function" ? costTrackerQuoted(row) : number(row.quoted_price)), 0);
+    const totalCost = costTrackers.reduce((sum, row) => sum + (typeof costTrackerTotal === "function" ? costTrackerTotal(row) : number(row.total_cost)), 0);
+    const profit = costTrackers.reduce((sum, row) => sum + (typeof costTrackerProfit === "function" ? costTrackerProfit(row) : 0), 0);
+    const openInvoices = invoices
+      .filter((invoice) => !["paid", "cancelled"].includes((invoice.status || "").toLowerCase()))
+      .reduce((sum, row) => sum + (typeof invoiceTotal === "function" ? invoiceTotal(row) : number(row.subtotal) + number(row.tax)), 0);
+
+    if (typeof setText === "function") {
+      setText("#statJobs", jobs.length);
+      setText("#statActiveJobs", activeJobs);
+      setText("#statQuoted", money(quoted));
+      setText("#statCost", money(totalCost));
+      setText("#statProfit", money(profit));
+      setText("#statOpenInvoices", money(openInvoices));
+    }
+  };
+  try { renderStats = window.renderStats; } catch {}
+})();
+
+
+/* ========================================================================== 
+   FINAL DIRECT-INVOICE-EDIT PATCH
+   --------------------------------------------------------------------------
+   Removes invoice override controls and makes the invoice template itself the
+   editable source of truth. Autofill still calculates totals, but users can
+   directly adjust subtotal, sales tax, total, payments/credits, and balance due.
+   ========================================================================== */
+(function installDirectEditableInvoiceTotalsPatch() {
+  const DIRECT_TOTAL_FIELDS = ["subtotal", "tax", "total", "payments", "balance_due"];
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function getForm() {
+    return typeof $ === "function" ? $("#invoiceForm") : document.querySelector("#invoiceForm");
+  }
+
+  function localNumber(value) {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function localRound(value) {
+    if (typeof roundMoney === "function") return roundMoney(value);
+    return Math.round((localNumber(value) + Number.EPSILON) * 100) / 100;
+  }
+
+  function hasValue(value) {
+    return value !== undefined && value !== null && String(value).trim() !== "";
+  }
+
+  function moneyFieldValue(value) {
+    return localRound(value).toFixed(2);
+  }
+
+  function directField(form, fieldName) {
+    return form?.querySelector(`[data-invoice-total-field="${fieldName}"]`) || null;
+  }
+
+  function isManualField(input) {
+    return input?.dataset?.invoiceManual === "true";
+  }
+
+  function setManualState(input, manual) {
+    if (!input) return;
+    input.dataset.invoiceManual = manual ? "true" : "false";
+  }
+
+  function readFieldValue(form, fieldName) {
+    const input = directField(form, fieldName);
+    if (!input) return null;
+    return hasValue(input.value) ? localRound(input.value) : null;
+  }
+
+  function setFieldValue(form, fieldName, value, options = {}) {
+    const input = directField(form, fieldName);
+    if (!input) return;
+
+    const force = options.force === true;
+    if (force || !isManualField(input)) {
+      input.value = moneyFieldValue(value);
+      input.dataset.autoValue = moneyFieldValue(value);
+      if (force && fieldName !== "payments") setManualState(input, false);
+    }
+  }
+
+  function setTotalTextFallback(selector, value) {
+    const node = typeof $ === "function" ? $(selector) : document.querySelector(selector);
+    if (!node) return;
+    if (node.matches?.("input, textarea")) {
+      if (!isManualField(node)) node.value = moneyFieldValue(value);
+    } else {
+      node.textContent = typeof money === "function" ? money(value) : moneyFieldValue(value);
+    }
+  }
+
+  function clearManualTotalFlags(form) {
+    DIRECT_TOTAL_FIELDS.forEach((fieldName) => {
+      const input = directField(form, fieldName);
+      if (!input) return;
+      if (fieldName === "payments") {
+        input.value = hasValue(input.value) ? input.value : "0.00";
+        setManualState(input, true);
+      } else {
+        setManualState(input, false);
+      }
+    });
+  }
+
+  function removeOverrideControls() {
+    qsa("#invoiceForm .invoice-manual-adjustments").forEach((node) => node.remove());
+    qsa('#invoiceForm [name="subtotal_override"], #invoiceForm [name="tax_override"], #invoiceForm [name="total_override"], #invoiceForm [name="balance_due_override"]').forEach((node) => {
+      const section = node.closest?.(".invoice-manual-adjustments");
+      if (section) section.remove();
+      else node.remove();
+    });
+  }
+
+  function convertStaticTotalToInput(id, name, fieldName) {
+    const form = getForm();
+    if (!form || directField(form, fieldName)) return;
+    const oldNode = form.querySelector(`#${id}`);
+    if (!oldNode) return;
+
+    const input = document.createElement("input");
+    input.id = id;
+    input.name = name;
+    input.type = "number";
+    input.step = "0.01";
+    input.className = "invoice-total-input";
+    input.dataset.invoiceTotalField = fieldName;
+    input.value = oldNode.textContent ? String(oldNode.textContent).replace(/[^0-9.\-]/g, "") : "";
+
+    const label = document.createElement("label");
+    label.className = "invoice-total-field";
+    label.setAttribute("aria-label", name.replaceAll("_", " "));
+    label.appendChild(input);
+    oldNode.replaceWith(label);
+  }
+
+  function ensureDirectTotalInputs() {
+    removeOverrideControls();
+    convertStaticTotalToInput("invoiceSubtotalPreview", "subtotal", "subtotal");
+    convertStaticTotalToInput("invoiceTaxPreview", "tax", "tax");
+    convertStaticTotalToInput("invoiceTotalPreview", "total", "total");
+    convertStaticTotalToInput("invoicePaymentsPreview", "payments", "payments");
+    convertStaticTotalToInput("invoiceBalancePreview", "balance_due", "balance_due");
+
+    const form = getForm();
+    const payments = directField(form, "payments");
+    if (payments && !hasValue(payments.value)) payments.value = "0.00";
+    if (payments) setManualState(payments, true);
+  }
+
+  window.summarizeInvoiceItems = function summarizeInvoiceItemsDirectEditable(items, taxRate = 0, payments = 0, options = {}) {
+    const form = options.form || getForm();
+    const subtotalInput = directField(form, "subtotal");
+    const taxInput = directField(form, "tax");
+    const totalInput = directField(form, "total");
+    const paymentsInput = directField(form, "payments");
+    const balanceInput = directField(form, "balance_due");
+
+    const lineSubtotal = localRound((Array.isArray(items) ? items : []).reduce((sum, item) => sum + localNumber(item?.amount), 0));
+    const subtotal = isManualField(subtotalInput) && hasValue(subtotalInput.value) ? localRound(subtotalInput.value) : lineSubtotal;
+
+    const normalizedTaxRate = typeof normalizeInvoiceTaxRate === "function"
+      ? normalizeInvoiceTaxRate(taxRate)
+      : (localNumber(taxRate) > 1 ? localNumber(taxRate) / 100 : localNumber(taxRate));
+
+    const calculatedTax = localRound(subtotal * normalizedTaxRate);
+    const tax = isManualField(taxInput) && hasValue(taxInput.value) ? localRound(taxInput.value) : calculatedTax;
+    const calculatedTotal = localRound(subtotal + tax);
+    const total = isManualField(totalInput) && hasValue(totalInput.value) ? localRound(totalInput.value) : calculatedTotal;
+    const paymentCredits = hasValue(paymentsInput?.value) ? localRound(paymentsInput.value) : localRound(payments);
+    const calculatedBalance = localRound(total - paymentCredits);
+    const balanceDue = isManualField(balanceInput) && hasValue(balanceInput.value) ? localRound(balanceInput.value) : calculatedBalance;
+
+    return {
+      subtotal,
+      tax,
+      total,
+      payments: paymentCredits,
+      paymentCredits,
+      balanceDue,
+      autoSubtotal: lineSubtotal,
+      autoTax: calculatedTax,
+      autoTotal: calculatedTotal,
+      autoBalanceDue: calculatedBalance,
+      manualTotals: {
+        subtotal: Boolean(isManualField(subtotalInput)),
+        tax: Boolean(isManualField(taxInput)),
+        total: Boolean(isManualField(totalInput)),
+        payments: Boolean(isManualField(paymentsInput)),
+        balanceDue: Boolean(isManualField(balanceInput))
+      },
+      directEditableTotals: true
+    };
+  };
+  try { summarizeInvoiceItems = window.summarizeInvoiceItems; } catch {}
+
+  window.recomputeInvoiceTotals = function recomputeInvoiceTotalsDirectEditable(options = {}) {
+    const form = getForm();
+    if (!form) return { items: [], summary: { subtotal: 0, tax: 0, total: 0, payments: 0, balanceDue: 0 } };
+
+    ensureDirectTotalInputs();
+    const values = typeof formToObject === "function" ? formToObject(form) : Object.fromEntries(new FormData(form).entries());
+    const items = typeof extractInvoiceLineItems === "function" ? extractInvoiceLineItems() : [];
+    const summary = window.summarizeInvoiceItems(items, values.tax_rate, values.payments, { form });
+
+    setFieldValue(form, "subtotal", summary.subtotal, options);
+    setFieldValue(form, "tax", summary.tax, options);
+    setFieldValue(form, "total", summary.total, options);
+    setFieldValue(form, "payments", summary.payments, { force: options.force === true && !hasValue(readFieldValue(form, "payments")) });
+    setFieldValue(form, "balance_due", summary.balanceDue, options);
+
+    setTotalTextFallback("#invoiceSubtotalPreview", summary.subtotal);
+    setTotalTextFallback("#invoiceTaxPreview", summary.tax);
+    setTotalTextFallback("#invoiceTotalPreview", summary.total);
+    setTotalTextFallback("#invoicePaymentsPreview", summary.payments);
+    setTotalTextFallback("#invoiceBalancePreview", summary.balanceDue);
+
+    return { items, summary };
+  };
+  try { recomputeInvoiceTotals = window.recomputeInvoiceTotals; } catch {}
+
+  const previousBuildInvoiceData = typeof buildInvoiceData === "function" ? buildInvoiceData : null;
+  if (previousBuildInvoiceData) {
+    window.buildInvoiceData = function buildInvoiceDataDirectEditable(values, job, items, summary, invoiceNumber) {
+      const data = previousBuildInvoiceData(values || {}, job, items || [], summary || {}, invoiceNumber);
+      return {
+        ...data,
+        summary: summary || data.summary,
+        payments: summary?.payments ?? summary?.paymentCredits ?? localNumber(values?.payments),
+        paymentCredits: summary?.payments ?? summary?.paymentCredits ?? localNumber(values?.payments)
+      };
+    };
+    try { buildInvoiceData = window.buildInvoiceData; } catch {}
+  }
+
+  function applySavedTotalsToForm(invoice) {
+    const form = getForm();
+    if (!form || !invoice) return;
+    ensureDirectTotalInputs();
+
+    const summary = typeof invoiceSummary === "function" ? invoiceSummary(invoice) : {};
+    const savedSubtotal = localRound(invoice.subtotal ?? summary.subtotal ?? 0);
+    const savedTax = localRound(invoice.tax ?? summary.tax ?? 0);
+    const savedTotal = localRound(typeof invoiceTotal === "function" ? invoiceTotal(invoice) : (summary.total ?? savedSubtotal + savedTax));
+    const savedPayments = localRound(invoice.payments ?? summary.payments ?? summary.paymentCredits ?? 0);
+    const savedBalance = localRound(typeof invoiceBalanceDue === "function" ? invoiceBalanceDue(invoice) : (summary.balanceDue ?? savedTotal - savedPayments));
+
+    const items = Array.isArray(invoice.line_items) ? invoice.line_items : [];
+    const taxRate = invoice.tax_rate ?? summary.taxRate ?? 0;
+    const baseSubtotal = localRound(items.reduce((sum, item) => sum + localNumber(item?.amount), 0));
+    const normalizedTaxRate = typeof normalizeInvoiceTaxRate === "function" ? normalizeInvoiceTaxRate(taxRate) : (localNumber(taxRate) > 1 ? localNumber(taxRate) / 100 : localNumber(taxRate));
+    const baseTax = localRound(baseSubtotal * normalizedTaxRate);
+    const baseTotal = localRound(baseSubtotal + baseTax);
+    const baseBalance = localRound(baseTotal - savedPayments);
+    const manual = summary.manualTotals || {};
+    const differs = (a, b) => Math.abs(localNumber(a) - localNumber(b)) > 0.005;
+
+    const fields = [
+      ["subtotal", savedSubtotal, manual.subtotal || differs(savedSubtotal, baseSubtotal)],
+      ["tax", savedTax, manual.tax || differs(savedTax, baseTax)],
+      ["total", savedTotal, manual.total || differs(savedTotal, baseTotal)],
+      ["payments", savedPayments, true],
+      ["balance_due", savedBalance, manual.balanceDue || manual.balance_due || differs(savedBalance, baseBalance)]
+    ];
+
+    fields.forEach(([fieldName, value, isManual]) => {
+      const input = directField(form, fieldName);
+      if (!input) return;
+      input.value = moneyFieldValue(value);
+      setManualState(input, Boolean(isManual));
+    });
+
+    window.recomputeInvoiceTotals();
+  }
+
+  const previousLoadInvoiceIntoForm = typeof loadInvoiceIntoForm === "function" ? loadInvoiceIntoForm : null;
+  if (previousLoadInvoiceIntoForm) {
+    window.loadInvoiceIntoForm = function loadInvoiceIntoFormDirectEditable(invoice) {
+      previousLoadInvoiceIntoForm(invoice);
+      applySavedTotalsToForm(invoice);
+    };
+    try { loadInvoiceIntoForm = window.loadInvoiceIntoForm; } catch {}
+  }
+
+  const previousFillInvoiceFromCostTracker = typeof fillInvoiceFromCostTracker === "function" ? fillInvoiceFromCostTracker : null;
+  if (previousFillInvoiceFromCostTracker) {
+    window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerDirectEditable(tracker, options = {}) {
+      previousFillInvoiceFromCostTracker(tracker, options);
+      const form = getForm();
+      if (form) {
+        clearManualTotalFlags(form);
+        window.recomputeInvoiceTotals({ force: true });
+      }
+      try { window.fitInvoiceTemplateToViewport?.(); } catch {}
+    };
+    try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+  }
+
+  document.addEventListener("input", (event) => {
+    const input = event.target?.closest?.('#invoiceForm [data-invoice-total-field]');
+    if (!input) return;
+
+    const fieldName = input.dataset.invoiceTotalField;
+    if (fieldName === "payments") {
+      setManualState(input, true);
+    } else {
+      setManualState(input, hasValue(input.value));
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    const source = event.target?.closest?.('#invoiceForm select[name="cost_tracker_id"]');
+    if (!source) return;
+    const form = getForm();
+    if (!source.value && form) {
+      clearManualTotalFlags(form);
+      window.recomputeInvoiceTotals({ force: true });
+    }
+  }, true);
+
+  document.addEventListener("DOMContentLoaded", () => {
+    ensureDirectTotalInputs();
+    const form = getForm();
+    if (form) clearManualTotalFlags(form);
+    try { window.recomputeInvoiceTotals({ force: true }); } catch {}
+  });
+
+  // Run once now in case this script loads after the DOM has already been parsed.
+  if (document.readyState !== "loading") {
+    ensureDirectTotalInputs();
+    const form = getForm();
+    if (form) clearManualTotalFlags(form);
+    try { window.recomputeInvoiceTotals({ force: true }); } catch {}
+  }
+})();
+
+
+/* ========================================================================
+   FINAL INVOICE AUTOFILL RULES
+   ------------------------------------------------------------------------
+   - The Generate # button is removed/disabled; invoice numbers are manual.
+   - Autofill never copies a job number into P.O. No.
+   - Autofilled invoice amount/subtotal uses the cost tracker's final Rate
+     Total, including any Rate Total Override saved on the cost tracker.
+   - Existing invoice template design stays editable in-place.
+   ======================================================================== */
+(function installFinalManualInvoiceAutofillRules() {
+  const qs = (selector, root = document) => root.querySelector(selector);
+  const qsa = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const n = (value) => {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const round = (value) => {
+    if (typeof roundMoney === "function") return roundMoney(value);
+    return Math.round((n(value) + Number.EPSILON) * 100) / 100;
+  };
+  const hasValue = (value) => String(value ?? "").trim() !== "";
+  const summaryOf = (tracker) => {
+    try {
+      if (typeof costTrackerSummary === "function") return costTrackerSummary(tracker) || {};
+    } catch {}
+    try {
+      return tracker?.summary && typeof tracker.summary === "string" ? JSON.parse(tracker.summary) : (tracker?.summary || {});
+    } catch {
+      return {};
+    }
+  };
+  const trackerName = (tracker) => {
+    try { if (typeof getTrackerName === "function") return getTrackerName(tracker); } catch {}
+    return tracker?.tracker_name || tracker?.cost_tracker_name || tracker?.name || "Cost Tracker";
+  };
+  const moneyText = (value) => {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return `$${round(value).toFixed(2)}`;
+  };
+  const setValue = (form, name, value) => {
+    const field = form?.querySelector(`[name="${name}"]`);
+    if (field) field.value = value ?? "";
+  };
+  const getValue = (form, name) => form?.querySelector(`[name="${name}"]`)?.value ?? "";
+
+  function finalTrackerRateTotal(tracker) {
+    const summary = summaryOf(tracker);
+    const candidates = [
+      summary.rateTotalOverride,
+      summary.quotedPriceOverride,
+      summary.manualRateTotal,
+      summary.manualQuotedPrice,
+      summary.quotedPrice,
+      summary.quoted_price,
+      tracker?.quoted_price,
+      summary.rateTotal,
+      summary.rate_total
+    ];
+
+    for (const candidate of candidates) {
+      if (hasValue(candidate)) return round(candidate);
+    }
+
+    try {
+      if (typeof costTrackerQuoted === "function") return round(costTrackerQuoted(tracker));
+    } catch {}
+
+    return 0;
+  }
+
+  window.costTrackerRateTotalForInvoice = finalTrackerRateTotal;
+  try { costTrackerRateTotalForInvoice = window.costTrackerRateTotalForInvoice; } catch {}
+
+  window.groupCostItemsForInvoice = function groupCostItemsForInvoiceFinalRateTotal(tracker) {
+    const job = tracker?.job_id && typeof findJob === "function" ? findJob(tracker.job_id) : null;
+    const summary = summaryOf(tracker);
+    const subtotal = finalTrackerRateTotal(tracker);
+    const descriptionParts = [
+      trackerName(tracker),
+      job?.job_number ? `Job / AFE: ${job.job_number}` : "",
+      job?.job_name ? `Project: ${job.job_name}` : "",
+      summary.totalJobDays ? `Total Days: ${summary.totalJobDays}` : ""
+    ].filter(Boolean);
+
+    return [{
+      quantity: 1,
+      description: descriptionParts.join("\n"),
+      rate: subtotal,
+      amount: subtotal,
+      source_total_type: "rate_total"
+    }];
+  };
+  try { groupCostItemsForInvoice = window.groupCostItemsForInvoice; } catch {}
+
+  function hideGenerateInvoiceButton() {
+    qsa("#generateInvoiceNumberBtn").forEach((button) => button.remove());
+  }
+
+  hideGenerateInvoiceButton();
+  document.addEventListener("DOMContentLoaded", hideGenerateInvoiceButton);
+
+  // Leave generateInvoiceNumber available for old code, but make it return blank so
+  // invoice numbers are not silently generated into new invoices anymore.
+  const previousGenerateInvoiceNumber = typeof generateInvoiceNumber === "function" ? generateInvoiceNumber : null;
+  window.generateInvoiceNumber = function generateInvoiceNumberDisabledForManualEntry() {
+    return "";
+  };
+  try { generateInvoiceNumber = window.generateInvoiceNumber; } catch {}
+
+  function requireManualInvoiceNumber(form) {
+    const invoiceNumberInput = form?.querySelector('[name="invoice_number"]');
+    if (!invoiceNumberInput) return true;
+    invoiceNumberInput.required = true;
+    const invoiceNumber = invoiceNumberInput.value.trim();
+    if (invoiceNumber) return true;
+    try { showToast("Enter an invoice number before saving the invoice.", true); } catch {}
+    invoiceNumberInput.focus();
+    return false;
+  }
+
+  const previousFillInvoiceFromCostTracker = typeof fillInvoiceFromCostTracker === "function" ? fillInvoiceFromCostTracker : null;
+  window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerFinalManualRules(tracker, options = {}) {
+    const form = qs("#invoiceForm");
+    const previousInvoiceNumber = getValue(form, "invoice_number");
+    const previousPoNumber = getValue(form, "po_number");
+
+    if (previousFillInvoiceFromCostTracker) {
+      previousFillInvoiceFromCostTracker(tracker, { ...options, keepInvoiceNumber: true });
+    }
+
+    const activeForm = qs("#invoiceForm");
+    if (!activeForm || !tracker) return;
+
+    // Never autofill invoice number or P.O. No.; preserve a user's typed values.
+    setValue(activeForm, "invoice_number", previousInvoiceNumber || "");
+    setValue(activeForm, "po_number", previousPoNumber || "");
+
+    // Keep useful job/project data without using the P.O. No. field.
+    setValue(activeForm, "cost_tracker_id", tracker.id || "");
+    setValue(activeForm, "job_id", tracker.job_id || "");
+
+    // Rebuild the line item from the final Rate Total, including saved override.
+    try { if (typeof clearInvoiceLines === "function") clearInvoiceLines(); } catch {}
+    try {
+      window.groupCostItemsForInvoice(tracker).forEach((item) => addInvoiceLine(item));
+    } catch {}
+
+    // Force subtotal/amounts to refresh from the new rate-total line unless the user
+    // manually changes totals afterward.
+    try {
+      const totalFields = qsa('#invoiceForm [data-invoice-total-field]');
+      totalFields.forEach((input) => {
+        if (input.dataset.invoiceTotalField !== "payments") input.dataset.invoiceManual = "false";
+      });
+      if (typeof recomputeInvoiceTotals === "function") recomputeInvoiceTotals({ force: true });
+    } catch {}
+
+    try { window.fitInvoiceTemplateToViewport?.(); } catch {}
+    try { showToast(`Invoice filled from "${trackerName(tracker)}". Subtotal uses Rate Total: ${moneyText(finalTrackerRateTotal(tracker))}.`); } catch {}
+  };
+  try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+
+  window.fillInvoiceFromSelectedCostTracker = function fillInvoiceFromSelectedCostTrackerFinalManualRules() {
+    const form = qs("#invoiceForm");
+    const trackerId = form?.querySelector('[name="cost_tracker_id"]')?.value || "";
+    const tracker = trackerId ? (state?.data?.costTrackers || []).find((row) => row.id === trackerId) : null;
+    if (!tracker) {
+      try { showToast("Select a saved cost tracker first.", true); } catch {}
+      return;
+    }
+    window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+  };
+  try { fillInvoiceFromSelectedCostTracker = window.fillInvoiceFromSelectedCostTracker; } catch {}
+
+  const previousBuildInvoiceData = typeof buildInvoiceData === "function" ? buildInvoiceData : null;
+  if (previousBuildInvoiceData) {
+    window.buildInvoiceData = function buildInvoiceDataFinalManualRules(values, job, items, summary, invoiceNumber) {
+      const manualInvoiceNumber = String(values?.invoice_number || invoiceNumber || "").trim();
+      const data = previousBuildInvoiceData(values || {}, job || null, items || [], summary || {}, manualInvoiceNumber);
+      return {
+        ...data,
+        invoiceNumber: manualInvoiceNumber,
+        poNumber: values?.po_number || "",
+        summary: summary || data.summary || {}
+      };
+    };
+    try { buildInvoiceData = window.buildInvoiceData; } catch {}
+  }
+
+  const previousHandleCreateInvoice = typeof handleCreateInvoice === "function" ? handleCreateInvoice : null;
+  if (previousHandleCreateInvoice) {
+    window.handleCreateInvoice = async function handleCreateInvoiceFinalManualRules(event) {
+      const form = event?.currentTarget || qs("#invoiceForm");
+      if (!requireManualInvoiceNumber(form)) {
+        event?.preventDefault?.();
+        event?.stopImmediatePropagation?.();
+        return;
+      }
+
+      // Prevent older payload builders from falling back to job number for P.O. No.
+      const poInput = form?.querySelector('[name="po_number"]');
+      const userPo = poInput?.value || "";
+      try {
+        await previousHandleCreateInvoice.call(this, event);
+      } finally {
+        if (poInput) poInput.value = userPo;
+      }
+    };
+    try { handleCreateInvoice = window.handleCreateInvoice; } catch {}
+  }
+
+  // Capture submit before older handlers so a blank manual invoice # cannot be saved.
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id !== "invoiceForm") return;
+    if (!requireManualInvoiceNumber(event.target)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+
+  // If any older change handler runs after this one and fills P.O. No. from job,
+  // clear it back out unless the user typed it before autofill.
+  document.addEventListener("change", (event) => {
+    const source = event.target?.closest?.('#invoiceForm [name="cost_tracker_id"]');
+    if (!source) return;
+    const form = qs("#invoiceForm");
+    const typedPo = getValue(form, "po_number");
+    setTimeout(() => {
+      const afterForm = qs("#invoiceForm");
+      if (afterForm && !typedPo) setValue(afterForm, "po_number", "");
+    }, 0);
+  }, true);
+})();
+
+
+/* Final save handler: invoice # stays manual and P.O. No. never falls back to job number. */
+(function installFinalInvoiceSaveNoPoFallback() {
+  const qs = (selector, root = document) => root.querySelector(selector);
+  const n = (value) => {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const requiredInvoiceNumber = (form) => String(form?.querySelector('[name="invoice_number"]')?.value || "").trim();
+
+  window.handleCreateInvoice = async function handleCreateInvoiceManualNumberNoPoFallback(event) {
+    event?.preventDefault?.();
+
+    const form = event?.currentTarget || qs("#invoiceForm");
+    if (!form) return;
+
+    const invoiceNumber = requiredInvoiceNumber(form);
+    if (!invoiceNumber) {
+      try { showToast("Enter an invoice number before saving the invoice.", true); } catch {}
+      form.querySelector('[name="invoice_number"]')?.focus();
+      return;
+    }
+
+    if (!state.supabase || !state.session) {
+      try { showToast("Sign in and connect Supabase before saving invoices.", true); } catch {}
+      return;
+    }
+
+    try { if (typeof setDefaultInvoiceDates === "function") setDefaultInvoiceDates(); } catch {}
+    const values = typeof formToObject === "function" ? formToObject(form) : Object.fromEntries(new FormData(form).entries());
+    values.invoice_number = invoiceNumber;
+
+    const tracker = values.cost_tracker_id
+      ? (state?.data?.costTrackers || []).find((row) => row.id === values.cost_tracker_id)
+      : null;
+    const job = (values.job_id && typeof findJob === "function" ? findJob(values.job_id) : null) || (tracker?.job_id && typeof findJob === "function" ? findJob(tracker.job_id) : null);
+    if (tracker?.job_id) values.job_id = tracker.job_id;
+
+    const totals = typeof recomputeInvoiceTotals === "function" ? recomputeInvoiceTotals() : { items: [], summary: { subtotal: n(values.subtotal), tax: n(values.tax), total: n(values.total), payments: n(values.payments), balanceDue: n(values.balance_due) } };
+    const items = totals.items || [];
+    const summary = totals.summary || {};
+
+    if (!items.length) {
+      try { showToast("Add at least one invoice line before saving.", true); } catch {}
+      return;
+    }
+
+    const invoiceData = typeof buildInvoiceData === "function"
+      ? buildInvoiceData(values, job, items, summary, invoiceNumber)
+      : { invoiceNumber, job, items, summary, poNumber: values.po_number || "" };
+    invoiceData.poNumber = values.po_number || "";
+
+    const html = typeof renderInvoiceHtml === "function" ? renderInvoiceHtml(invoiceData) : "";
+    const payload = {
+      job_id: values.job_id || null,
+      client_id: job?.client_id || null,
+      invoice_number: invoiceNumber,
+      invoice_date: values.invoice_date || (typeof today === "function" ? today() : new Date().toISOString().slice(0, 10)),
+      due_date: values.due_date || (typeof addDays === "function" ? addDays(values.invoice_date || today(), 30) : null),
+      subtotal: summary.subtotal ?? n(values.subtotal),
+      tax: summary.tax ?? n(values.tax),
+      status: values.status || "draft",
+      pdf_url: values.pdf_url || null,
+      google_drive_url: values.pdf_url || null,
+      bill_to: values.bill_to || null,
+      po_number: values.po_number || null,
+      terms: values.terms || "Net 30",
+      project: values.project || job?.job_name || null,
+      description: values.description || null,
+      tax_rate: n(values.tax_rate),
+      payments: summary.payments ?? summary.paymentCredits ?? n(values.payments),
+      line_items: items,
+      summary: {
+        ...summary,
+        taxRate: n(values.tax_rate),
+        payments: summary.payments ?? summary.paymentCredits ?? n(values.payments),
+        paymentCredits: summary.payments ?? summary.paymentCredits ?? n(values.payments),
+        sourceCostTrackerId: values.cost_tracker_id || null,
+        companyBlock: values.company_block || (typeof defaultCompanyBlock === "function" ? defaultCompanyBlock() : ""),
+        wiringBlock: values.wiring_block || (typeof defaultWiringBlock === "function" ? defaultWiringBlock() : ""),
+        poNumber: values.po_number || ""
+      },
+      html_snapshot: html,
+      download_filename: typeof safeFileName === "function" ? safeFileName(`${invoiceNumber}.pdf`) : `${invoiceNumber}.pdf`,
+      external_source: "dashboard_invoice_template",
+      external_id: `invoice:${invoiceNumber}`,
+      last_synced_at: new Date().toISOString()
+    };
+
+    try {
+      const saved = values.record_id
+        ? await updateRow("invoices", values.record_id, payload)
+        : await manualUpsert("invoices", payload, "external_id");
+
+      if (typeof mergeStateRow === "function") mergeStateRow("invoices", saved);
+      if (typeof hydrateSelects === "function") hydrateSelects();
+      if (typeof renderAll === "function") renderAll();
+      if (typeof setFormValue === "function") setFormValue(form, "record_id", saved.id || "");
+      try { showToast(values.record_id ? "Invoice updated and saved." : "Invoice saved to Supabase."); } catch {}
+    } catch (error) {
+      const message = String(error?.message || error || "");
+      if (/job_id.*null|violates not-null|null value in column "job_id"|invoices_job_id/i.test(message)) {
+        try { showToast("Invoice job is optional now. Run supabase_invoice_optional_job_fix.sql in Supabase SQL Editor, then try saving again.", true); } catch {}
+        return;
+      }
+      try { showToast(error.message || String(error), true); } catch {}
+    }
+  };
+  try { handleCreateInvoice = window.handleCreateInvoice; } catch {}
+})();
+
+
+/* Invoice comment-description autofill patch: cost tracker comments become invoice rows. */
+(function installInvoiceCommentRowsFromCostTrackerPatch() {
+  const qs = (selector, root = document) => root.querySelector(selector);
+  const qsa = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+  function hasText(value) {
+    return value !== undefined && value !== null && String(value).trim() !== "";
+  }
+
+  function toNumber(value) {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function toMoney(value) {
+    if (typeof roundMoney === "function") return roundMoney(value);
+    return Math.round((toNumber(value) + Number.EPSILON) * 100) / 100;
+  }
+
+  function summaryOf(tracker) {
+    if (!tracker) return {};
+    try {
+      if (typeof costTrackerSummary === "function") return costTrackerSummary(tracker) || {};
+    } catch {}
+
+    const raw = tracker.summary;
+    if (!raw) return {};
+    if (typeof raw === "object") return raw;
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function getTrackerComments(tracker) {
+    const summary = summaryOf(tracker);
+    const candidates = [
+      tracker?.notes,
+      tracker?.comments,
+      tracker?.comment,
+      summary.notes,
+      summary.comments,
+      summary.comment,
+      summary.costTrackerComments,
+      summary.cost_tracker_comments,
+      summary.invoiceDescription,
+      summary.invoice_description
+    ];
+
+    const found = candidates.find(hasText);
+    return found ? String(found).replace(/\r\n/g, "\n").trim() : "";
+  }
+
+  function splitCommentsIntoInvoiceRows(commentText) {
+    const text = String(commentText || "").replace(/\r\n/g, "\n").trim();
+    if (!text) return [];
+
+    const rows = [];
+    text.split(/\n+/).forEach((line) => {
+      const cleanedLine = line.replace(/\s+/g, " ").trim();
+      if (!cleanedLine) return;
+
+      const sentenceMatches = cleanedLine.match(/[^.!?]+[.!?]+(?=\s|$)|[^.!?]+$/g);
+      const pieces = sentenceMatches && sentenceMatches.length ? sentenceMatches : [cleanedLine];
+      pieces.forEach((piece) => {
+        const sentence = piece.replace(/\s+/g, " ").trim();
+        if (sentence) rows.push(sentence);
+      });
+    });
+
+    return rows;
+  }
+
+  function trackerTitle(tracker) {
+    try {
+      if (typeof getTrackerName === "function") return getTrackerName(tracker);
+    } catch {}
+    try {
+      if (typeof trackerName === "function") return trackerName(tracker);
+    } catch {}
+    const summary = summaryOf(tracker);
+    return tracker?.tracker_name || summary.trackerName || summary.tracker_name || "Insulation services";
+  }
+
+  function finalRateTotal(tracker) {
+    try {
+      if (typeof costTrackerRateTotalForInvoice === "function") return toMoney(costTrackerRateTotalForInvoice(tracker));
+    } catch {}
+    try {
+      if (window.costTrackerRateTotalForInvoice) return toMoney(window.costTrackerRateTotalForInvoice(tracker));
+    } catch {}
+
+    const summary = summaryOf(tracker);
+    const candidates = [
+      summary.rateTotalOverride,
+      summary.quotedPriceOverride,
+      summary.manualRateTotal,
+      summary.manualQuotedPrice,
+      summary.quotedPrice,
+      summary.quoted_price,
+      tracker?.quoted_price,
+      summary.rateTotal,
+      summary.rate_total
+    ];
+    for (const candidate of candidates) {
+      if (hasText(candidate)) return toMoney(candidate);
+    }
+    try {
+      if (typeof costTrackerQuoted === "function") return toMoney(costTrackerQuoted(tracker));
+    } catch {}
+    return 0;
+  }
+
+  function buildInvoiceRowsFromCostTrackerComments(tracker) {
+    const comments = getTrackerComments(tracker);
+    const sentences = splitCommentsIntoInvoiceRows(comments);
+    const subtotal = finalRateTotal(tracker);
+
+    const descriptions = sentences.length ? sentences : [trackerTitle(tracker)];
+
+    return descriptions.map((description, index) => ({
+      quantity: index === 0 ? 1 : "",
+      description,
+      rate: index === 0 ? subtotal : "",
+      amount: index === 0 ? subtotal : "",
+      source_total_type: "rate_total",
+      source_description_type: sentences.length ? "cost_tracker_comments" : "cost_tracker_name"
+    }));
+  }
+
+  function resetAutoInvoiceTotals(form) {
+    qsa('#invoiceForm [data-invoice-total-field]', form?.ownerDocument || document).forEach((input) => {
+      if (input.dataset.invoiceTotalField !== "payments") input.dataset.invoiceManual = "false";
+    });
+  }
+
+  function applyCommentRowsToInvoiceForm(tracker) {
+    const form = qs("#invoiceForm");
+    if (!form || !tracker) return;
+
+    const comments = getTrackerComments(tracker);
+    if (hasText(comments)) {
+      const descriptionBox = form.querySelector('[name="description"]');
+      if (descriptionBox) descriptionBox.value = comments;
+    }
+
+    try { if (typeof clearInvoiceLines === "function") clearInvoiceLines(); } catch {}
+
+    const rows = buildInvoiceRowsFromCostTrackerComments(tracker);
+    rows.forEach((row) => {
+      try { if (typeof addInvoiceLine === "function") addInvoiceLine(row); } catch {}
+    });
+
+    resetAutoInvoiceTotals(form);
+    try {
+      if (typeof recomputeInvoiceTotals === "function") recomputeInvoiceTotals({ force: true });
+      else if (window.recomputeInvoiceTotals) window.recomputeInvoiceTotals({ force: true });
+    } catch {}
+    try { window.fitInvoiceTemplateToViewport?.(); } catch {}
+  }
+
+  window.getCostTrackerCommentsForInvoice = getTrackerComments;
+  window.splitCostTrackerCommentsIntoInvoiceRows = splitCommentsIntoInvoiceRows;
+  window.buildInvoiceRowsFromCostTrackerComments = buildInvoiceRowsFromCostTrackerComments;
+
+  window.groupCostItemsForInvoice = function groupCostItemsForInvoiceCommentRows(tracker) {
+    return buildInvoiceRowsFromCostTrackerComments(tracker);
+  };
+  try { groupCostItemsForInvoice = window.groupCostItemsForInvoice; } catch {}
+
+  const previousFillInvoiceFromCostTracker = typeof fillInvoiceFromCostTracker === "function"
+    ? fillInvoiceFromCostTracker
+    : window.fillInvoiceFromCostTracker;
+
+  window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerWithCommentRows(tracker, options = {}) {
+    const result = previousFillInvoiceFromCostTracker
+      ? previousFillInvoiceFromCostTracker.call(this, tracker, options)
+      : undefined;
+    applyCommentRowsToInvoiceForm(tracker);
+    return result;
+  };
+  try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+
+  window.refreshInvoiceRowsFromSelectedCostTrackerComments = function refreshInvoiceRowsFromSelectedCostTrackerComments() {
+    const form = qs("#invoiceForm");
+    const trackerId = form?.querySelector('[name="cost_tracker_id"]')?.value || "";
+    const tracker = trackerId ? (state?.data?.costTrackers || []).find((row) => row.id === trackerId) : null;
+    if (tracker) applyCommentRowsToInvoiceForm(tracker);
+  };
+})();
+
+
+
+/* ==========================================================================
+   EASY CLEAR + SAVE BUTTONS PATCH
+   --------------------------------------------------------------------------
+   Adds form clear behavior for Jobs/Invoices and keeps the renamed Cost Tracker
+   clear button connected. This patch is intentionally final so it works even
+   if older handlers exist earlier in the file.
+   ========================================================================== */
+(function installEasyClearAndSaveButtonsPatch() {
+  function qs(selector, root) {
+    return (root || document).querySelector(selector);
+  }
+
+  function qsa(selector, root) {
+    return Array.from((root || document).querySelectorAll(selector));
+  }
+
+  function writeValue(form, name, value) {
+    const field = form?.querySelector(`[name="${name}"]`);
+    if (field) field.value = value == null ? "" : value;
+  }
+
+  function triggerInput(field) {
+    if (!field) return;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function clearFormFields(form, options = {}) {
+    if (!form) return;
+
+    qsa("input, textarea, select", form).forEach((field) => {
+      if (options.keepNames?.includes(field.name)) return;
+
+      if (field.tagName === "SELECT") {
+        field.selectedIndex = 0;
+      } else if (field.type === "checkbox" || field.type === "radio") {
+        field.checked = false;
+      } else {
+        field.value = "";
+      }
+
+      if (field.dataset) {
+        delete field.dataset.invoiceManual;
+      }
+
+      triggerInput(field);
+    });
+  }
+
+  function setJobFormToCreateMode() {
+    const title = qs("#jobFormTitle");
+    const submit = qs("#jobSubmitBtn") || qs('#jobForm button[type="submit"]');
+    const cancel = qs("#cancelJobEditBtn");
+
+    if (title) title.textContent = "Create Job";
+    if (submit) submit.textContent = "Create Job";
+    if (cancel) cancel.classList.add("hidden");
+  }
+
+  window.clearJobFormFields = function clearJobFormFields() {
+    const form = qs("#jobForm");
+    if (!form) return;
+
+    clearFormFields(form);
+    writeValue(form, "record_id", "");
+    writeValue(form, "total_job_days", "");
+    writeValue(form, "status", "active");
+    setJobFormToCreateMode();
+
+    try { showToast("Job form cleared."); } catch {}
+  };
+
+  function resetInvoiceDefaults(form) {
+    if (!form) return;
+
+    writeValue(form, "record_id", "");
+    writeValue(form, "pdf_url", "");
+    writeValue(form, "cost_tracker_id", "");
+    writeValue(form, "job_id", "");
+    writeValue(form, "invoice_number", "");
+    writeValue(form, "po_number", "");
+    writeValue(form, "terms", "Net 30");
+    writeValue(form, "status", "unsent");
+    writeValue(form, "tax_rate", "0");
+    writeValue(form, "payments", "0");
+
+    if (typeof today === "function") writeValue(form, "invoice_date", today());
+    if (typeof addDays === "function" && typeof today === "function") writeValue(form, "due_date", addDays(today(), 30));
+
+    if (typeof defaultCompanyBlock === "function") writeValue(form, "company_block", defaultCompanyBlock());
+    else writeValue(form, "company_block", "Pro Insulation MP\nP O Box 502\nBurleson, TX 76097\nPhone: 903-327-2243\nEIN # __________");
+
+    if (typeof defaultWiringBlock === "function") writeValue(form, "wiring_block", defaultWiringBlock());
+    else writeValue(form, "wiring_block", "Bank Name\nABA # __________\nPro Insulation MP\nAccount # __________");
+
+    ["subtotal", "tax", "total", "balance_due"].forEach((name) => writeValue(form, name, "0"));
+  }
+
+  window.clearInvoiceFormFields = function clearInvoiceFormFields() {
+    const form = qs("#invoiceForm");
+    if (!form) return;
+
+    clearFormFields(form);
+    resetInvoiceDefaults(form);
+
+    try {
+      if (typeof clearInvoiceLines === "function") clearInvoiceLines();
+    } catch {}
+
+    try {
+      if (typeof addInvoiceLine === "function") {
+        addInvoiceLine({ quantity: 1, description: "", rate: "", amount: "" });
+      }
+    } catch {}
+
+    qsa("#invoiceForm [data-invoice-total-field]").forEach((field) => {
+      if (field.dataset) field.dataset.invoiceManual = "false";
+    });
+
+    try {
+      if (typeof recomputeInvoiceTotals === "function") recomputeInvoiceTotals({ force: true });
+      else if (window.recomputeInvoiceTotals) window.recomputeInvoiceTotals({ force: true });
+    } catch {}
+
+    try { window.fitInvoiceTemplateToViewport?.(); } catch {}
+    try { showToast("Invoice form cleared."); } catch {}
+  };
+
+  function connectEasyButtons() {
+    const jobClearBtn = qs("#clearJobFormBtn");
+    if (jobClearBtn && !jobClearBtn.dataset.easyClearBound) {
+      jobClearBtn.dataset.easyClearBound = "true";
+      jobClearBtn.addEventListener("click", window.clearJobFormFields);
+    }
+
+    qsa("#clearInvoiceFormBtn, #clearInvoiceFormBottomBtn").forEach((button) => {
+      if (button.dataset.easyClearBound) return;
+      button.dataset.easyClearBound = "true";
+      button.addEventListener("click", window.clearInvoiceFormFields);
+    });
+
+    const costClear = qs("#resetCostTrackerBtn");
+    if (costClear) costClear.textContent = "Clear";
+
+    const bottomCostClear = qs("#costTrackerBottomClearBtn");
+    if (bottomCostClear && !bottomCostClear.dataset.easyClearBound) {
+      bottomCostClear.dataset.easyClearBound = "true";
+      bottomCostClear.addEventListener("click", () => {
+        const mainClear = qs("#resetCostTrackerBtn");
+        if (mainClear) mainClear.click();
+        else {
+          try { if (typeof resetCostTrackerForm === "function") resetCostTrackerForm(); } catch {}
+        }
+      });
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", connectEasyButtons);
+  } else {
+    connectEasyButtons();
+  }
+
+  document.addEventListener("DOMContentLoaded", connectEasyButtons);
 })();
