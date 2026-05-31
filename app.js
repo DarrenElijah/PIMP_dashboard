@@ -51,16 +51,115 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
+const DASHBOARD_BUILD_VERSION = "2026-05-31-r1";
+
+const DASHBOARD_REQUIRED_LIBRARIES = [
+  {
+    name: "Supabase",
+    requiredForStartup: true,
+    isReady: () => Boolean(window.supabase && window.supabase.createClient)
+  },
+  {
+    name: "jsPDF",
+    requiredForStartup: false,
+    isReady: () => Boolean((window.jspdf && window.jspdf.jsPDF) || window.jsPDF)
+  },
+  {
+    name: "html2canvas",
+    requiredForStartup: false,
+    isReady: () => Boolean(window.html2canvas)
+  },
+  {
+    name: "html2pdf",
+    requiredForStartup: false,
+    isReady: () => Boolean(window.html2pdf)
+  },
+  {
+    name: "XLSX",
+    requiredForStartup: false,
+    isReady: () => Boolean(window.XLSX)
+  }
+];
+
+function getMissingDashboardLibraries() {
+  return DASHBOARD_REQUIRED_LIBRARIES.filter((item) => {
+    try {
+      return !item.isReady();
+    } catch {
+      return true;
+    }
+  });
+}
+
+function setBootStatus(message, isError = false) {
+  const bootStatus = document.getElementById("bootStatus");
+  if (!bootStatus) return;
+  bootStatus.textContent = message;
+  bootStatus.classList.toggle("error", Boolean(isError));
+  bootStatus.classList.remove("hidden");
+}
+
+function hideBootStatus() {
+  const bootStatus = document.getElementById("bootStatus");
+  if (bootStatus) bootStatus.classList.add("hidden");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForDashboardLibraries(timeoutMs = 8000) {
+  const startedAt = Date.now();
+  let missing = getMissingDashboardLibraries();
+
+  while (missing.length && Date.now() - startedAt < timeoutMs) {
+    setBootStatus(`Loading dashboard tools... ${missing.map((item) => item.name).join(", ")}`);
+    await sleep(200);
+    missing = getMissingDashboardLibraries();
+  }
+
+  if (missing.length) {
+    const requiredMissing = missing.filter((item) => item.requiredForStartup);
+    const names = missing.map((item) => item.name).join(", ");
+    console.warn(`Dashboard libraries missing after startup wait: ${names}`);
+
+    if (requiredMissing.length) {
+      setBootStatus(`Could not load required dashboard connection tool: ${requiredMissing.map((item) => item.name).join(", ")}. Check the internet connection, then refresh.`, true);
+    } else {
+      setBootStatus(`Dashboard loaded, but these download tools did not load yet: ${names}. Refresh before downloading PDFs or Excel files.`, true);
+      window.setTimeout(hideBootStatus, 7000);
+    }
+  }
+
+  return missing;
+}
+
+
 document.addEventListener("DOMContentLoaded", init);
 
-function init() {
+async function init() {
+  if (state.__booted) return;
+  state.__booted = true;
+
+  const missingLibraries = await waitForDashboardLibraries();
+  const missingRequired = missingLibraries.filter((item) => item.requiredForStartup);
+
   bindEvents();
   initializeCostInvoiceBuilders();
   loadConfigIntoSettings();
+
+  if (missingRequired.length) {
+    state.supabase = null;
+    updateConnectionWarning();
+    showToast("Dashboard connection tool did not load. Check internet connection and refresh.", true);
+    return;
+  }
+
   initSupabase();
 
   if (state.supabase) {
-    checkSession();
+    await checkSession();
+    hideBootStatus();
   } else {
     updateConnectionWarning();
   }
@@ -122,22 +221,31 @@ function initSupabase() {
 
   if (!url || !anonKey) {
     state.supabase = null;
+    setBootStatus("Supabase URL or anon key is missing in app.js.", true);
     return;
   }
 
   if (!window.supabase || !window.supabase.createClient) {
-    showToast("Supabase library did not load. Check your internet connection.", true);
+    showToast("Supabase library did not load. Check your internet connection, then refresh.", true);
+    setBootStatus("Supabase library did not load. Check your internet connection, then refresh.", true);
     state.supabase = null;
     return;
   }
 
-  state.supabase = window.supabase.createClient(url, anonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
-    }
-  });
+  try {
+    state.supabase = window.supabase.createClient(url, anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  } catch (error) {
+    console.error("Unable to initialize Supabase:", error);
+    showToast("Unable to initialize Supabase. Check the project URL and anon key.", true);
+    setBootStatus("Unable to initialize Supabase. Check the project URL and anon key.", true);
+    state.supabase = null;
+  }
 }
 
 function updateConnectionWarning() {
@@ -1936,15 +2044,31 @@ function on(selector, eventName, handler) {
   if (node) node.addEventListener(eventName, handler);
 }
 
-function init() {
-  state.data.rateTemplates = [];
+async function init() {
+  if (state.__booted) return;
+  state.__booted = true;
+
+  state.data.rateTemplates = state.data.rateTemplates || [];
+
+  const missingLibraries = await waitForDashboardLibraries();
+  const missingRequired = missingLibraries.filter((item) => item.requiredForStartup);
+
   bindEvents();
   initializeCostInvoiceBuilders();
   loadConfigIntoSettings();
+
+  if (missingRequired.length) {
+    state.supabase = null;
+    updateConnectionWarning();
+    showToast("Dashboard connection tool did not load. Check internet connection and refresh.", true);
+    return;
+  }
+
   initSupabase();
 
   if (state.supabase) {
-    checkSession();
+    await checkSession();
+    hideBootStatus();
   } else {
     updateConnectionWarning();
   }
@@ -18154,4 +18278,109 @@ This removes it from the job documents list.`)) return;
   }
 
   document.addEventListener("DOMContentLoaded", connectEasyButtons);
+})();
+
+
+/* ==========================================================================
+   STATIC HOSTING RELIABILITY PATCH
+   --------------------------------------------------------------------------
+   This keeps the dashboard from behaving like it only works after a refresh.
+   It adds double-click protection for database forms, clears stale loading UI
+   when the browser restores the page from cache, and logs missing CDN tools.
+   ========================================================================== */
+(function installStaticHostingReliabilityPatch() {
+  const formIds = ["jobForm", "costTrackerForm", "invoiceForm", "employeeForm", "assignmentForm", "timesheetForm", "loginForm"];
+
+  function unlockForm(form) {
+    if (!form) return;
+    form.dataset.submitting = "false";
+    form.querySelectorAll('button[type="submit"]').forEach((button) => {
+      button.disabled = false;
+      if (button.dataset.originalText) {
+        button.textContent = button.dataset.originalText;
+      }
+    });
+  }
+
+  function lockForm(form) {
+    if (!form || form.dataset.submitting === "true") return false;
+    form.dataset.submitting = "true";
+    form.querySelectorAll('button[type="submit"]').forEach((button) => {
+      if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = "Saving...";
+    });
+    window.setTimeout(() => unlockForm(form), 12000);
+    return true;
+  }
+
+  function installSubmitGuards() {
+    formIds.forEach((id) => {
+      const form = document.getElementById(id);
+      if (!form || form.dataset.reliableSubmitGuard === "true") return;
+      form.dataset.reliableSubmitGuard = "true";
+      form.addEventListener("submit", (event) => {
+        if (!lockForm(form)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      }, true);
+    });
+  }
+
+  function installFormUnlockers() {
+    const originalShowToast = window.showToast;
+    if (typeof originalShowToast === "function" && !originalShowToast.__reliableWrapped) {
+      window.showToast = function reliableShowToast(message, isError = false) {
+        const result = originalShowToast.apply(this, arguments);
+        formIds.forEach((id) => unlockForm(document.getElementById(id)));
+        return result;
+      };
+      window.showToast.__reliableWrapped = true;
+    }
+  }
+
+  function installDynamicActionFallbacks() {
+    if (document.documentElement.dataset.dynamicFallbacksInstalled === "true") return;
+    document.documentElement.dataset.dynamicFallbacksInstalled = "true";
+
+    document.addEventListener("click", (event) => {
+      const jumpButton = event.target.closest?.("[data-view-jump]");
+      if (jumpButton && typeof showView === "function") {
+        showView(jumpButton.dataset.viewJump);
+      }
+
+      const navButton = event.target.closest?.(".nav-btn[data-view]");
+      if (navButton && typeof showView === "function") {
+        showView(navButton.dataset.view);
+      }
+    });
+  }
+
+  function checkDownloadTools() {
+    const missing = getMissingDashboardLibraries()
+      .filter((item) => !item.requiredForStartup)
+      .map((item) => item.name);
+    if (missing.length) {
+      console.warn(`Optional dashboard download tools missing: ${missing.join(", ")}`);
+    }
+  }
+
+  function install() {
+    installSubmitGuards();
+    installFormUnlockers();
+    installDynamicActionFallbacks();
+    checkDownloadTools();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", install);
+  } else {
+    install();
+  }
+
+  window.addEventListener("pageshow", () => {
+    hideBootStatus();
+    formIds.forEach((id) => unlockForm(document.getElementById(id)));
+  });
 })();
