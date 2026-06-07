@@ -7683,7 +7683,7 @@ function printDocumentCss() {
     const jobPart = data.customer_afe_no || data.job?.job_number || "unassigned";
     const datePart = data.work_date || today();
     const ticketPart = data.ticket_number ? `_${data.ticket_number}` : "";
-    return safeFileName(`timesheet_${jobPart}_${datePart}${ticketPart}.pdf`);
+    return cleanFileNameForTimesheet(`timesheet_${jobPart}_${datePart}${ticketPart}.pdf`);
   }
 
   function openTimesheetPreview(html) {
@@ -13823,21 +13823,53 @@ async function openUploadedDocument(docId, download = false) {
     `;
   }
 
-  function timesheetRows(groups) {
-    if (!groups.length) {
+  function timesheetRows(groups, jobId = "") {
+    const list = Array.isArray(groups) ? groups : [];
+    if (!list.length) {
       return `<p class="muted job-detail-empty">No timesheets have been saved for this job yet.</p>`;
     }
+
+    const resolvedJobId = jobId || list[0]?.entries?.[0]?.job_id || "";
+    const folderId = `job-details-timesheet-folder:${resolvedJobId || list[0]?.id || "timesheets"}`;
+    const expandedSet = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+    window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedSet;
+    const isOpen = expandedSet.has(folderId);
+    const job = findJob(resolvedJobId);
+    const totalHours = list.reduce((sum, group) => sum + Number(group.totalHours || 0), 0);
+    const totalEmployees = list.reduce((sum, group) => sum + Number(group.employeeCount || 0), 0);
+    const dates = list.map((group) => group.date).filter(Boolean).sort();
+    const dateRangeText = dates.length > 1 ? `${dateText(dates[0])} to ${dateText(dates[dates.length - 1])}` : dateText(dates[0] || "");
+    const folderTitle = `${job ? jobLabel(job) : "Job"} Timesheets`;
+
     return `
-      <div class="job-detail-mini-list">
-        ${groups.map((group) => `
-          <article class="job-detail-mini-row">
-            <div>
-              <strong>${html(dateText(group.date))}</strong>
-              <span>${group.employeeCount} employee row${group.employeeCount === 1 ? "" : "s"} • ${Number(group.totalHours || 0)} total hours</span>
-            </div>
-            <button class="link-btn" data-download-timesheet-group="${attr(group.id)}" type="button">Download</button>
-          </article>
-        `).join("")}
+      <div class="job-timesheet-folder-card ${isOpen ? "open" : ""}" data-job-timesheet-folder-card="${attr(folderId)}">
+        <button class="job-timesheet-folder-summary" data-toggle-job-detail-timesheet-folder="${attr(folderId)}" type="button" aria-expanded="${isOpen ? "true" : "false"}">
+          <span class="job-timesheet-folder-icon">📁</span>
+          <span class="job-timesheet-folder-title">
+            <strong>${html(folderTitle)}</strong>
+            <small>${list.length} daily sheet${list.length === 1 ? "" : "s"} • ${html(dateRangeText)}</small>
+          </span>
+          <span class="job-timesheet-folder-stats">
+            <strong>${html(Number(totalHours || 0).toString())}</strong>
+            <small>hours</small>
+          </span>
+          <span class="job-timesheet-folder-chevron">${isOpen ? "▲" : "▼"}</span>
+        </button>
+        <div class="job-timesheet-folder-body ${isOpen ? "" : "hidden"}">
+          <div class="job-timesheet-folder-summary-line">${html(Number(totalEmployees || 0).toString())} employee line${totalEmployees === 1 ? "" : "s"} across this job.</div>
+          ${list.map((group) => `
+            <article class="job-timesheet-folder-row">
+              <div class="job-timesheet-folder-main">
+                <strong>${html(dateText(group.date))}</strong>
+                <span>${html(Number(group.employeeCount || 0).toString())} employee line${group.employeeCount === 1 ? "" : "s"} • ${html(Number(group.totalHours || 0).toString())} total hours</span>
+              </div>
+              <div class="job-timesheet-folder-actions">
+                <button class="link-btn" data-view-timesheet-group="${attr(group.id)}" type="button">View</button>
+                <button class="link-btn" data-download-timesheet-group="${attr(group.id)}" type="button">Download</button>
+              </div>
+            </article>
+          `).join("")}
+        </div>
       </div>
     `;
   }
@@ -13901,9 +13933,7 @@ async function openUploadedDocument(docId, download = false) {
       ${guideButton("invoices", job.id, "Create Editable Invoice")}
     ` : "");
 
-    const timesheetActions = timesheetGroups.length ? `
-      ${guideButton("timesheets", job.id, "Open Timesheets")}
-    ` : (latestTimesheetDoc ? `
+    const timesheetActions = timesheetGroups.length ? "" : (latestTimesheetDoc ? `
       <button class="link-btn" data-open-uploaded-doc="${attr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Open File</button>
       <button class="link-btn" data-download-uploaded-doc="${attr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Download File</button>
       ${guideButton("timesheets", job.id, "Create Editable Timesheet")}
@@ -13960,10 +13990,10 @@ async function openUploadedDocument(docId, download = false) {
             <div class="job-details-split-grid">
               <section class="job-detail-section">
                 <div class="job-detail-section-header">
-                  <h5>All Timesheets for this Job</h5>
+                  <h5>Timesheets Folder</h5>
                   ${guideButton("timesheets", job.id, "+ Timesheet")}
                 </div>
-                ${timesheetRows(timesheetGroups)}
+                ${timesheetRows(timesheetGroups, job.id)}
               </section>
 
               <section class="job-detail-section">
@@ -20503,21 +20533,55 @@ This removes it from the job documents list.`)) return;
     `;
   }
 
-  function timesheetList(groups) {
-    if (!groups.length) {
+  function timesheetList(groups, jobId = "") {
+    const list = Array.isArray(groups) ? groups : [];
+    if (!list.length) {
       return '<p class="muted job-detail-empty">No timesheets have been saved for this job yet.</p>';
     }
+
+    const resolvedJobId = jobId || list[0]?.entries?.[0]?.job_id || "";
+    const folderId = `job-details-timesheet-folder:${resolvedJobId || list[0]?.id || "timesheets"}`;
+    const expandedSet = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+    window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedSet;
+    const isOpen = expandedSet.has(folderId);
+    const job = jobById(resolvedJobId);
+    const totalHours = list.reduce((sum, group) => sum + Number(group.totalHours || 0), 0);
+    const totalEmployees = list.reduce((sum, group) => sum + Number(group.employeeCount || 0), 0);
+    const dates = list.map((group) => group.date).filter(Boolean).sort();
+    const dateRangeText = dates.length > 1 ? `${safeDate(dates[0])} to ${safeDate(dates[dates.length - 1])}` : safeDate(dates[0] || "");
+    const folderTitle = `${job ? `${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}` : "Job"} Timesheets`;
+
     return `
-      <div class="job-detail-mini-list">
-        ${groups.map((group) => `
-          <article class="job-detail-mini-row">
-            <div>
-              <strong>${safeHtml(safeDate(group.date))}</strong>
-              <span>${group.employeeCount} employee row${group.employeeCount === 1 ? "" : "s"} • ${safeNumber(group.totalHours)} total hours</span>
-            </div>
-            <button class="link-btn" data-download-timesheet-group="${safeAttr(group.id)}" type="button">Download</button>
-          </article>
-        `).join("")}
+      <div class="job-timesheet-folder-card ${isOpen ? "open" : ""}" data-job-timesheet-folder-card="${safeAttr(folderId)}">
+        <button class="job-timesheet-folder-summary" data-toggle-job-detail-timesheet-folder="${safeAttr(folderId)}" type="button" aria-expanded="${isOpen ? "true" : "false"}">
+          <span class="job-timesheet-folder-icon">📁</span>
+          <span class="job-timesheet-folder-title">
+            <strong>${safeHtml(folderTitle)}</strong>
+            <small>${list.length} daily sheet${list.length === 1 ? "" : "s"} • ${safeHtml(dateRangeText)}</small>
+          </span>
+          <span class="job-timesheet-folder-stats">
+            <strong>${safeHtml(safeNumber(totalHours))}</strong>
+            <small>hours</small>
+          </span>
+          <span class="job-timesheet-folder-chevron">${isOpen ? "▲" : "▼"}</span>
+        </button>
+        <div class="job-timesheet-folder-body ${isOpen ? "" : "hidden"}">
+          <div class="job-timesheet-folder-summary-line">${safeHtml(safeNumber(totalEmployees))} employee line${totalEmployees === 1 ? "" : "s"} across this job.</div>
+          ${list.map((group) => `
+            <article class="job-timesheet-folder-row">
+              <div class="job-timesheet-folder-main">
+                <strong>${safeHtml(safeDate(group.date))}</strong>
+                <span>${safeHtml(safeNumber(group.employeeCount))} employee line${group.employeeCount === 1 ? "" : "s"} • ${safeHtml(safeNumber(group.totalHours))} total hours</span>
+              </div>
+              <div class="job-timesheet-folder-actions">
+                <button class="link-btn" data-edit-timesheet-daily="${safeAttr(group.id)}" type="button">Edit</button>
+                <button class="link-btn" data-view-timesheet-group="${safeAttr(group.id)}" type="button">View</button>
+                <button class="link-btn" data-download-timesheet-group="${safeAttr(group.id)}" type="button">Download</button>
+                <button class="link-btn danger-text" data-delete-timesheet-daily="${safeAttr(group.id)}" type="button">Delete</button>
+              </div>
+            </article>
+          `).join("")}
+        </div>
       </div>
     `;
   }
@@ -20590,9 +20654,7 @@ This removes it from the job documents list.`)) return;
       <button class="link-btn" data-open-invoice-for-job="${safeAttr(job.id)}" type="button">Create Editable Invoice</button>
     ` : "");
 
-    const timesheetActions = timesheetGroups.length ? `
-      <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">Open Timesheets</button>
-    ` : (latestTimesheetDoc ? `
+    const timesheetActions = timesheetGroups.length ? "" : (latestTimesheetDoc ? `
       <button class="link-btn" data-open-uploaded-doc="${safeAttr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Open File</button>
       <button class="link-btn" data-download-uploaded-doc="${safeAttr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Download File</button>
       <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">Create Editable Timesheet</button>
@@ -20641,10 +20703,10 @@ This removes it from the job documents list.`)) return;
         <div class="job-details-split-grid">
           <section class="job-detail-section">
             <div class="job-detail-section-header">
-              <h5>All Timesheets for this Job</h5>
+              <h5>Timesheets Folder</h5>
               <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">+ Timesheet</button>
             </div>
-            ${timesheetList(timesheetGroups)}
+            ${timesheetList(timesheetGroups, job.id)}
           </section>
 
           <section class="job-detail-section">
@@ -23419,3 +23481,1481 @@ This removes it from the job documents list.`)) return;
   setTimeout(initialize, 1000);
 })();
 
+
+
+/* ========================================================================
+   TOP NAVIGATION + JOB DETAILS TIMESHEET FOLDER + VIEW LABEL PATCH
+   ------------------------------------------------------------------------
+   - Moves navigation behavior into a top-menu layout through CSS.
+   - Condenses Job Details timesheets into one folder with daily sheet actions.
+   - Adds Edit / View / Download actions for each saved daily timesheet.
+   - Replaces visible Preview labels with View without renaming existing IDs.
+   ======================================================================== */
+(function installTopNavTimesheetFolderAndViewLabelsPatch() {
+  const expandedJobDetailsFolders = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+  window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedJobDetailsFolders;
+
+  function qs(selector, root = document) { return root.querySelector(selector); }
+  function qsa(selector, root = document) { return Array.from(root.querySelectorAll(selector)); }
+  function html(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return html(value);
+  }
+  function num(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  function fmtDate(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    return value || "-";
+  }
+  function cleanNum(value) {
+    try { if (typeof cleanNumberDisplay === "function") return cleanNumberDisplay(value); } catch {}
+    const rounded = Math.round((num(value) + Number.EPSILON) * 100) / 100;
+    return String(rounded).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1").replace(/\.0$/, "");
+  }
+  function parseJson(value, fallback) {
+    if (!value) return fallback;
+    if (Array.isArray(value) || (typeof value === "object" && value !== null)) return value;
+    try { return JSON.parse(value) ?? fallback; } catch { return fallback; }
+  }
+  function employeeName(employeeId, fallback = "") {
+    try {
+      const employee = typeof findEmployee === "function" ? findEmployee(employeeId) : (state?.data?.employees || []).find((row) => row.id === employeeId);
+      return employee?.full_name || employee?.name || employee?.email || fallback || "Employee";
+    } catch {
+      return fallback || "Employee";
+    }
+  }
+  function timesheetGroupId(entry) {
+    return entry?.timesheet_group_id || entry?.id || `legacy:${entry?.job_id || "job"}:${entry?.work_date || "date"}`;
+  }
+  function savedDailyTimesheetsForJob(jobId) {
+    const groups = new Map();
+    (state?.data?.timesheets || [])
+      .filter((entry) => String(entry.job_id || "") === String(jobId || ""))
+      .forEach((entry) => {
+        const id = timesheetGroupId(entry);
+        if (!groups.has(id)) groups.set(id, { id, rows: [], first: entry });
+        groups.get(id).rows.push(entry);
+      });
+
+    return Array.from(groups.values()).map((group) => {
+      const first = group.first || {};
+      const storedLines = parseJson(first.line_items, null);
+      const lines = Array.isArray(storedLines) && storedLines.length
+        ? storedLines
+        : group.rows.map((row) => ({
+            employee_id: row.employee_id || "",
+            employee_name: row.employee_name || employeeName(row.employee_id, ""),
+            classification: row.classification || "",
+            hours: num(row.hours),
+            tr: Boolean(row.tr || num(row.travel_hours) > 0),
+            pd: Boolean(row.pd || num(row.per_diem) > 0),
+            notes: row.notes || ""
+          }));
+      const totalHours = lines.reduce((sum, line) => sum + num(line.hours), 0);
+      return {
+        id: group.id,
+        first,
+        date: first.work_date || first.date || "",
+        ticket: first.ticket_number || "",
+        status: first.status || "submitted",
+        description: first.description_of_services || "",
+        employeeCount: lines.length,
+        totalHours,
+        lines,
+        filename: first.download_filename || ""
+      };
+    }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }
+  function dateRange(dailySheets) {
+    const dates = dailySheets.map((sheet) => sheet.date).filter(Boolean).sort();
+    if (!dates.length) return "No dates";
+    if (dates[0] === dates[dates.length - 1]) return fmtDate(dates[0]);
+    return `${fmtDate(dates[0])} to ${fmtDate(dates[dates.length - 1])}`;
+  }
+  function jobLabel(jobId) {
+    try {
+      const job = typeof findJob === "function" ? findJob(jobId) : (state?.data?.jobs || []).find((row) => row.id === jobId);
+      const parts = [job?.job_number || "Job", job?.job_name || ""].filter(Boolean);
+      return parts.join(" — ");
+    } catch {
+      return "Timesheets";
+    }
+  }
+  function buildJobTimesheetFolderHtml(jobId) {
+    const dailySheets = savedDailyTimesheetsForJob(jobId);
+    if (!dailySheets.length) {
+      return '<p class="muted job-detail-empty">No timesheets have been saved for this job yet.</p>';
+    }
+
+    const folderId = `job-details-timesheet-folder:${jobId}`;
+    const isOpen = expandedJobDetailsFolders.has(folderId);
+    const totalHours = dailySheets.reduce((sum, sheet) => sum + num(sheet.totalHours), 0);
+    const totalEmployees = dailySheets.reduce((sum, sheet) => sum + num(sheet.employeeCount), 0);
+    const dailyRows = dailySheets.map((sheet) => `
+      <article class="job-timesheet-folder-row">
+        <div class="job-timesheet-folder-main">
+          <strong>${html(fmtDate(sheet.date))}</strong>
+          <span>${html(cleanNum(sheet.employeeCount))} employee line${sheet.employeeCount === 1 ? "" : "s"} • ${html(cleanNum(sheet.totalHours))} total hours${sheet.ticket ? ` • Ticket ${html(sheet.ticket)}` : ""}</span>
+        </div>
+        <div class="job-timesheet-folder-actions">
+          <button class="link-btn" data-edit-timesheet-daily="${attr(sheet.id)}" type="button">Edit</button>
+          <button class="link-btn" data-view-timesheet-daily="${attr(sheet.id)}" type="button">View</button>
+          <button class="link-btn" data-download-timesheet-daily="${attr(sheet.id)}" type="button">Download</button>
+          <button class="link-btn danger-text" data-delete-timesheet-daily="${attr(sheet.id)}" type="button">Delete</button>
+        </div>
+      </article>
+    `).join("");
+
+    return `
+      <div class="job-timesheet-folder-card ${isOpen ? "open" : ""}" data-job-timesheet-folder-card="${attr(folderId)}">
+        <button class="job-timesheet-folder-summary" data-toggle-job-detail-timesheet-folder="${attr(folderId)}" type="button" aria-expanded="${isOpen ? "true" : "false"}">
+          <span class="job-timesheet-folder-icon">📁</span>
+          <span class="job-timesheet-folder-title">
+            <strong>${html(jobLabel(jobId))} Timesheets</strong>
+            <small>${dailySheets.length} daily sheet${dailySheets.length === 1 ? "" : "s"} • ${html(dateRange(dailySheets))}</small>
+          </span>
+          <span class="job-timesheet-folder-stats">
+            <strong>${html(cleanNum(totalHours))}</strong>
+            <small>hours</small>
+          </span>
+          <span class="job-timesheet-folder-chevron">${isOpen ? "▲" : "▼"}</span>
+        </button>
+        <div class="job-timesheet-folder-body ${isOpen ? "" : "hidden"}">
+          <div class="job-timesheet-folder-summary-line">${html(cleanNum(totalEmployees))} employee line${totalEmployees === 1 ? "" : "s"} across this job.</div>
+          ${dailyRows}
+        </div>
+      </div>
+    `;
+  }
+  function getJobIdFromOpenJobDetailsModal() {
+    const body = qs("#jobDetailsModalBody");
+    if (!body) return "";
+    return body.querySelector("[data-doc-guide-job]")?.dataset.docGuideJob ||
+      body.querySelector("[data-open-cost-for-job]")?.dataset.openCostForJob ||
+      body.querySelector("[data-open-invoice-for-job]")?.dataset.openInvoiceForJob ||
+      "";
+  }
+  function updateJobDetailsTimesheetFolder() {
+    const body = qs("#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody");
+    if (!body) return;
+    const jobId = getJobIdFromOpenJobDetailsModal();
+    if (!jobId) return;
+    const headers = qsa(".job-detail-section-header h5", body);
+    const header = headers.find((h5) => /(all\s+timesheets\s+for\s+this\s+job|timesheets\s+folder)/i.test(h5.textContent || ""));
+    const section = header?.closest(".job-detail-section");
+    if (!section) return;
+    header.textContent = "Timesheets Folder";
+    const existingList = section.querySelector(".job-detail-mini-list, .job-detail-empty, .job-timesheet-folder-card");
+    if (existingList) existingList.outerHTML = buildJobTimesheetFolderHtml(jobId);
+    replacePreviewTextWithView(section);
+  }
+  function replacePreviewTextWithView(root = document) {
+    qsa("button, h3, h4, h5, p, span, th, td, strong", root).forEach((element) => {
+      if (element.childNodes.length === 1 && element.childNodes[0]?.nodeType === Node.TEXT_NODE) {
+        element.textContent = (element.textContent || "").replace(/\bPreview\b/g, "View");
+      }
+    });
+    const previewInvoiceButton = qs("#previewInvoiceBtn");
+    if (previewInvoiceButton && /^\s*Preview\s*$/i.test(previewInvoiceButton.textContent || "")) previewInvoiceButton.textContent = "View";
+    qsa("[data-view-timesheet-daily], [data-view-timesheet-group]").forEach((button) => {
+      if (/preview/i.test(button.textContent || "")) button.textContent = "View";
+    });
+  }
+  function refreshTimesheetTableLabels() {
+    const table = qs("#timesheetsTable");
+    if (table) replacePreviewTextWithView(table);
+  }
+  const previousRenderTimesheets = typeof window.renderTimesheets === "function" ? window.renderTimesheets : (typeof renderTimesheets === "function" ? renderTimesheets : null);
+  if (previousRenderTimesheets && !previousRenderTimesheets.__jobDetailsFolderViewLabelWrapped) {
+    const wrappedRenderTimesheets = function renderTimesheetsWithViewLabelsAndJobDetailsRefresh() {
+      const result = previousRenderTimesheets.apply(this, arguments);
+      refreshTimesheetTableLabels();
+      updateJobDetailsTimesheetFolder();
+      return result;
+    };
+    wrappedRenderTimesheets.__jobDetailsFolderViewLabelWrapped = true;
+    window.renderTimesheets = wrappedRenderTimesheets;
+    try { renderTimesheets = window.renderTimesheets; } catch {}
+  }
+  document.addEventListener("click", (event) => {
+    const toggle = event.target.closest?.("[data-toggle-job-detail-timesheet-folder-legacy-disabled]");
+    if (toggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      const folderId = toggle.dataset.toggleJobDetailTimesheetFolder;
+      if (expandedJobDetailsFolders.has(folderId)) expandedJobDetailsFolders.delete(folderId);
+      else expandedJobDetailsFolders.add(folderId);
+      updateJobDetailsTimesheetFolder();
+      return;
+    }
+    window.setTimeout(() => {
+      updateJobDetailsTimesheetFolder();
+      replacePreviewTextWithView();
+    }, 80);
+  }, true);
+  const bodyObserver = new MutationObserver(() => {
+    window.clearTimeout(bodyObserver.timer);
+    bodyObserver.timer = window.setTimeout(() => {
+      updateJobDetailsTimesheetFolder();
+      replacePreviewTextWithView();
+    }, 40);
+  });
+  function startObserver() {
+    const target = qs("#jobDetailsModalBody") || document.body;
+    try { bodyObserver.observe(target, { childList: true, subtree: true }); } catch {}
+    replacePreviewTextWithView();
+    refreshTimesheetTableLabels();
+    updateJobDetailsTimesheetFolder();
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startObserver);
+  else startObserver();
+  window.setTimeout(startObserver, 250);
+  window.setTimeout(startObserver, 1000);
+})();
+
+
+/* ========================================================================
+   FINAL JOB DETAILS TIMESHEET FOLDER TOGGLE + MODAL NAV OVERLAY PATCH
+   ------------------------------------------------------------------------
+   - Makes the Timesheets folder inside Job Details open and close reliably.
+   - Keeps the folder state when Job Details refreshes.
+   - Ensures top navigation never sits above modal windows.
+   ======================================================================== */
+(function installFinalTimesheetFolderToggleAndModalStackingPatch() {
+  const beforeOpenByFolder = new Map();
+  const expandedFolders = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+  window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedFolders;
+
+  function findToggle(target) {
+    return target && target.closest ? target.closest('[data-toggle-job-detail-timesheet-folder-legacy-disabled]') : null;
+  }
+
+  function allFolderCards() {
+    return Array.from(document.querySelectorAll('[data-job-timesheet-folder-card]'));
+  }
+
+  function findFolderCard(folderId) {
+    return allFolderCards().find((card) => card.dataset.jobTimesheetFolderCard === folderId) || null;
+  }
+
+  function isFolderOpen(folderId) {
+    const card = findFolderCard(folderId);
+    if (!card) return expandedFolders.has(folderId);
+    const body = card.querySelector('.job-timesheet-folder-body');
+    const button = card.querySelector('[data-toggle-job-detail-timesheet-folder]');
+    if (button && button.getAttribute('aria-expanded') === 'true') return true;
+    if (body && !body.classList.contains('hidden')) return true;
+    return card.classList.contains('open');
+  }
+
+  function setFolderOpen(folderId, shouldOpen) {
+    const card = findFolderCard(folderId);
+    if (!card) return;
+    const body = card.querySelector('.job-timesheet-folder-body');
+    const button = card.querySelector('[data-toggle-job-detail-timesheet-folder]');
+    const chevron = card.querySelector('.job-timesheet-folder-chevron');
+
+    card.classList.toggle('open', shouldOpen);
+    if (body) body.classList.toggle('hidden', !shouldOpen);
+    if (button) button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+    if (chevron) chevron.textContent = shouldOpen ? '▲' : '▼';
+
+    if (shouldOpen) expandedFolders.add(folderId);
+    else expandedFolders.delete(folderId);
+  }
+
+  document.addEventListener('pointerdown', (event) => {
+    const toggle = findToggle(event.target);
+    if (!toggle) return;
+    const folderId = toggle.dataset.toggleJobDetailTimesheetFolder;
+    if (!folderId) return;
+    beforeOpenByFolder.set(folderId, isFolderOpen(folderId));
+  }, true);
+
+  document.addEventListener('click', (event) => {
+    const toggle = findToggle(event.target);
+    if (!toggle) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+
+    const folderId = toggle.dataset.toggleJobDetailTimesheetFolder;
+    if (!folderId) return;
+
+    const before = beforeOpenByFolder.has(folderId)
+      ? beforeOpenByFolder.get(folderId)
+      : isFolderOpen(folderId);
+
+    // An earlier compatibility patch may already toggle/re-render the folder.
+    // Only toggle directly when the visual state did not change.
+    window.setTimeout(() => {
+      const after = isFolderOpen(folderId);
+      if (after === before) setFolderOpen(folderId, !before);
+      else {
+        if (after) expandedFolders.add(folderId);
+        else expandedFolders.delete(folderId);
+      }
+      beforeOpenByFolder.delete(folderId);
+    }, 0);
+  }, true);
+
+  function keepModalWindowsAboveTopNav() {
+    const modalOpen = Boolean(
+      document.querySelector('.job-modal-overlay:not(.hidden), .job-details-modal-overlay:not(.hidden), .template-modal-overlay:not(.hidden)')
+    );
+    document.body.classList.toggle('any-dashboard-modal-open', modalOpen);
+  }
+
+  const observer = new MutationObserver(() => {
+    window.clearTimeout(observer.timer);
+    observer.timer = window.setTimeout(keepModalWindowsAboveTopNav, 20);
+  });
+
+  function start() {
+    try { observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] }); } catch {}
+    keepModalWindowsAboveTopNav();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else start();
+})();
+
+
+/* ========================================================================
+   FINAL JOB DETAILS CREATE TIMESHEET POPUP + NO-FLASH PATCH
+   ------------------------------------------------------------------------
+   - Create Timesheet / + Timesheet inside Job Details opens the existing
+     timesheet form in a popup locked to that job.
+   - The user stays on the Jobs page and the Job Details window remains open.
+   - The top Timesheets card no longer shows Open Timesheets when saved days
+     already exist.
+   - The Timesheets Folder section is not rebuilt here.
+   ======================================================================== */
+(function installFinalJobDetailsTimesheetPopupNoNavigationNoFlashPatch() {
+  const OVERLAY_ID = "jobTimesheetModalOverlay";
+  const BODY_ID = "jobTimesheetModalBody";
+  let originalParent = null;
+  let originalNextSibling = null;
+  let placeholder = null;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function safeText(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function todayValue() {
+    try { if (typeof today === "function") return today(); } catch {}
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function jobByIdSafe(jobId) {
+    try {
+      if (typeof findJob === "function") {
+        const found = findJob(jobId);
+        if (found) return found;
+      }
+    } catch {}
+    try {
+      return (state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || "")) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function ensureOverlay() {
+    let overlay = qs(`#${OVERLAY_ID}`);
+    if (overlay) return overlay;
+
+    overlay = document.createElement("div");
+    overlay.id = OVERLAY_ID;
+    overlay.className = "job-timesheet-modal-overlay hidden";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <div class="job-timesheet-modal-card" role="dialog" aria-modal="true" aria-labelledby="jobTimesheetModalTitle">
+        <div class="job-timesheet-modal-header">
+          <div>
+            <p class="eyebrow">Create Timesheet</p>
+            <h3 id="jobTimesheetModalTitle">Timesheet</h3>
+            <p class="tiny">This timesheet is connected to the selected job. Save it here without leaving Job Details.</p>
+          </div>
+          <button class="icon-btn job-timesheet-modal-close" type="button" aria-label="Close timesheet popup">×</button>
+        </div>
+        <div class="job-timesheet-modal-body" id="${BODY_ID}"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  function moveTimesheetFormIntoPopup() {
+    const form = qs("#timesheetForm");
+    const body = qs(`#${BODY_ID}`);
+    if (!form || !body) return false;
+
+    if (!originalParent) {
+      originalParent = form.parentNode;
+      originalNextSibling = form.nextSibling;
+      placeholder = document.createComment("timesheet form original position");
+      originalParent.insertBefore(placeholder, form);
+    }
+
+    form.classList.add("job-timesheet-modal-form");
+    body.appendChild(form);
+    return true;
+  }
+
+  function restoreTimesheetForm() {
+    const form = qs("#timesheetForm");
+    if (!form || !originalParent) return;
+    form.classList.remove("job-timesheet-modal-form");
+    originalParent.insertBefore(form, originalNextSibling || placeholder || null);
+    if (placeholder?.parentNode) placeholder.parentNode.removeChild(placeholder);
+    placeholder = null;
+    originalParent = null;
+    originalNextSibling = null;
+  }
+
+  function setFormField(form, name, value) {
+    qsa(`[name="${name}"]`, form).forEach((field) => {
+      if (field.type === "checkbox") field.checked = Boolean(value);
+      else field.value = value ?? "";
+    });
+  }
+
+  function ensureEmployeeRows() {
+    const tbody = qs("#timesheetEmployeeRows");
+    const addBtn = qs("#addTimesheetEmployeeBtn");
+    if (!tbody || !addBtn) return;
+    if (!tbody.children.length) {
+      for (let index = 0; index < 5; index += 1) addBtn.click();
+    }
+  }
+
+  function prepareTimesheetFormForJob(jobId) {
+    const form = qs("#timesheetForm");
+    const job = jobByIdSafe(jobId);
+    if (!form || !job) return;
+
+    try { form.reset(); } catch {}
+    setFormField(form, "timesheet_group_id", "");
+    setFormField(form, "work_date", todayValue());
+    setFormField(form, "ticket_number", "");
+    setFormField(form, "description_of_services", "");
+
+    const jobSelect = form.querySelector('select[name="job_id"]');
+    if (jobSelect) {
+      jobSelect.value = jobId;
+      jobSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    setFormField(form, "job_id", jobId);
+    setFormField(form, "customer", job.company_name || "");
+    setFormField(form, "customer_afe_no", job.job_number || "");
+    setFormField(form, "pms_job_number", job.job_number || "");
+    setFormField(form, "location", job.location || "");
+    setFormField(form, "description_of_services", "");
+    ensureEmployeeRows();
+
+    const summary = qs("#timesheetJobSummary", form);
+    if (summary) {
+      summary.innerHTML = `
+        <strong>${safeText(job.job_number || "No #")} — ${safeText(job.job_name || "Untitled Job")}</strong>
+        <span>${safeText(job.company_name || "No customer")} • ${safeText(job.location || "No location")} • Daily sheet date: ${safeText(todayValue())}</span>
+      `;
+    }
+  }
+
+  function closePopup() {
+    const overlay = qs(`#${OVERLAY_ID}`);
+    if (!overlay) return;
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("job-timesheet-modal-open");
+    restoreTimesheetForm();
+  }
+
+  function openPopupForJob(jobId) {
+    const job = jobByIdSafe(jobId);
+    if (!job) {
+      try { if (typeof showToast === "function") showToast("That job could not be found. Refresh the dashboard and try again.", true); } catch {}
+      return;
+    }
+
+    const overlay = ensureOverlay();
+    if (!moveTimesheetFormIntoPopup()) {
+      try { if (typeof showToast === "function") showToast("Timesheet form could not be opened. Refresh and try again.", true); } catch {}
+      return;
+    }
+
+    prepareTimesheetFormForJob(jobId);
+
+    const title = qs("#jobTimesheetModalTitle", overlay);
+    if (title) title.textContent = `${job.job_number || "No #"} — ${job.job_name || "Timesheet"}`;
+
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("job-timesheet-modal-open");
+    window.setTimeout(() => overlay.querySelector("input, select, textarea, button")?.focus?.(), 30);
+  }
+
+  function removeOpenTimesheetsButtons(root = document) {
+    qsa('.job-document-status-card, .job-documents-status-card, .job-detail-section, #jobDetailsModalBody', root).forEach((container) => {
+      qsa('[data-doc-guide="timesheets"]', container).forEach((button) => {
+        if (/open\s+timesheets/i.test(button.textContent || "")) button.remove();
+      });
+    });
+  }
+
+  function buttonShouldOpenTimesheetPopup(button) {
+    if (!button) return false;
+
+    const label = String(button.textContent || "").trim();
+    const isTimesheetGuide = button.matches('[data-doc-guide="timesheets"][data-doc-guide-job]');
+    const isTimesheetButton = button.matches('[data-new-timesheet-for-job], [data-create-timesheet-for-job]');
+    if (!isTimesheetGuide && !isTimesheetButton) return false;
+
+    if (/open\s+timesheets/i.test(label)) return false;
+    if (/download|view|edit/i.test(label)) return false;
+
+    return /timesheet/i.test(label);
+  }
+
+  window.addEventListener("click", (event) => {
+    const close = event.target.closest?.(".job-timesheet-modal-close");
+    if (close) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      closePopup();
+      return;
+    }
+
+    const overlay = qs(`#${OVERLAY_ID}`);
+    if (overlay && event.target === overlay) {
+      event.preventDefault();
+      closePopup();
+      return;
+    }
+
+    const button = event.target.closest?.('[data-doc-guide="timesheets"][data-doc-guide-job], [data-new-timesheet-for-job], [data-create-timesheet-for-job]');
+    if (!button) return;
+
+    const label = String(button.textContent || "");
+    if (/open\s+timesheets/i.test(label)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      button.remove();
+      return;
+    }
+
+    if (!buttonShouldOpenTimesheetPopup(button)) return;
+
+    const jobId = button.dataset.docGuideJob || button.dataset.newTimesheetForJob || button.dataset.createTimesheetForJob || "";
+    if (!jobId) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    openPopupForJob(jobId);
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const overlay = qs(`#${OVERLAY_ID}:not(.hidden)`);
+    if (overlay) closePopup();
+  });
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id !== "timesheetForm") return;
+    if (!qs(`#${OVERLAY_ID}:not(.hidden)`)) return;
+
+    window.setTimeout(() => {
+      removeOpenTimesheetsButtons();
+      try { if (typeof renderAll === "function") renderAll(); } catch {}
+    }, 500);
+  }, true);
+
+  const cleanupObserver = new MutationObserver(() => removeOpenTimesheetsButtons());
+  function start() {
+    removeOpenTimesheetsButtons();
+    try { cleanupObserver.observe(document.body, { childList: true, subtree: true }); } catch {}
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+})();
+
+
+
+/* ========================================================================
+   FINAL JOB DETAILS TIMESHEET FOLDER ACTIONS PATCH
+   ------------------------------------------------------------------------
+   - Keeps the Timesheets Folder open/close behavior inside Job Details.
+   - Adds View, Edit, and Delete actions to each saved daily timesheet.
+   - Edit opens the timesheet popup for that job instead of moving the user
+     to the Timesheets page.
+   ======================================================================== */
+(function installJobDetailsTimesheetFolderActionsPatch() {
+  const TIMESHEET_TABLE = "timesheets";
+  const POPUP_OVERLAY_ID = "jobTimesheetModalOverlay";
+  const POPUP_BODY_ID = "jobTimesheetModalBody";
+  const expandedFolders = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+  window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedFolders;
+
+  let movedFormParent = null;
+  let movedFormNextSibling = null;
+  let movedFormPlaceholder = null;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function esc(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return esc(value);
+  }
+
+  function num(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function cleanNum(value) {
+    const n = num(value);
+    return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, "");
+  }
+
+  function fmtDate(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    return value || "-";
+  }
+
+  function todayValue() {
+    try { if (typeof today === "function") return today(); } catch {}
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function findJobSafe(jobId) {
+    try { if (typeof findJob === "function") return findJob(jobId); } catch {}
+    try { return (state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || "")) || null; } catch {}
+    return null;
+  }
+
+  function parseJson(value, fallback) {
+    if (!value) return fallback;
+    if (Array.isArray(value) || typeof value === "object") return value;
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+
+  function timesheetGroupKey(entry) {
+    return String(entry?.timesheet_group_id || entry?.id || "");
+  }
+
+  function lineItemsFromGroup(rows) {
+    const first = rows[0] || {};
+    const savedLines = parseJson(first.line_items, null);
+    if (Array.isArray(savedLines) && savedLines.length) return savedLines;
+    return rows.map((row) => ({
+      employee_id: row.employee_id || "",
+      employee_identifier: row.employee_identifier || "",
+      employee_name: row.employee_name || "",
+      classification: row.classification || "",
+      hours: num(row.hours),
+      tr: Boolean(row.tr || num(row.travel_hours) > 0),
+      pd: Boolean(row.pd || num(row.per_diem) > 0),
+      notes: row.notes || ""
+    }));
+  }
+
+  function getDailySheetsForJob(jobId) {
+    const groups = new Map();
+    try {
+      (state?.data?.timesheets || [])
+        .filter((entry) => String(entry.job_id || "") === String(jobId || ""))
+        .forEach((entry) => {
+          const key = timesheetGroupKey(entry);
+          if (!key) return;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(entry);
+        });
+    } catch {}
+
+    return Array.from(groups.entries()).map(([id, rows]) => {
+      const first = rows[0] || {};
+      const job = findJobSafe(first.job_id || jobId);
+      const lines = lineItemsFromGroup(rows);
+      const totalHours = lines.reduce((sum, line) => sum + num(line.hours), 0);
+      return {
+        id,
+        rows,
+        first,
+        job,
+        lines,
+        date: first.work_date || first.date || "",
+        customer: first.customer || job?.company_name || "",
+        jobNumber: first.job_number || job?.job_number || "",
+        pmsJobNumber: first.pms_job_number || job?.job_number || "",
+        location: first.location || job?.location || "",
+        ticket: first.ticket_number || "",
+        description: first.description_of_services || "",
+        status: first.status || "submitted",
+        html: first.html_snapshot || "",
+        filename: first.download_filename || "",
+        employeeCount: lines.length,
+        totalHours
+      };
+    }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }
+
+  function getDailyById(dailyId) {
+    const allRows = state?.data?.timesheets || [];
+    const direct = allRows.find((entry) => String(entry.id || "") === String(dailyId || ""));
+    const jobId = direct?.job_id || "";
+    const sheets = jobId
+      ? getDailySheetsForJob(jobId)
+      : Array.from(new Set(allRows.map((entry) => entry.job_id).filter(Boolean))).flatMap((id) => getDailySheetsForJob(id));
+    return sheets.find((sheet) => String(sheet.id || "") === String(dailyId || "")) || null;
+  }
+
+  function dateRange(sheets) {
+    const dates = sheets.map((sheet) => sheet.date).filter(Boolean).sort();
+    if (!dates.length) return "No dates";
+    if (dates[0] === dates[dates.length - 1]) return fmtDate(dates[0]);
+    return `${fmtDate(dates[0])} to ${fmtDate(dates[dates.length - 1])}`;
+  }
+
+  function jobLabel(jobId) {
+    const job = findJobSafe(jobId);
+    return [job?.job_number || "Job", job?.job_name || ""].filter(Boolean).join(" — ");
+  }
+
+  function timesheetHtmlForDaily(daily) {
+    if (daily?.html) return daily.html;
+    const rows = [...(daily?.lines || [])].slice(0, 21);
+    while (rows.length < 21) rows.push({});
+    const body = rows.map((line) => `
+      <tr>
+        <td>${esc(line.employee_identifier || "")}</td>
+        <td>${esc(line.employee_name || "")}</td>
+        <td>${esc(line.classification || "")}</td>
+        <td class="hours-cell">${line.hours ? cleanNum(line.hours) : ""}</td>
+        <td class="check-cell">${line.tr ? "✓" : ""}</td>
+        <td class="check-cell">${line.pd ? "✓" : ""}</td>
+        <td>${esc(line.notes || "")}</td>
+        <td></td>
+      </tr>
+    `).join("");
+
+    return `
+      <article class="timesheet-template-document timesheet-print-document">
+        <div class="timesheet-top-rule"></div>
+        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-logo-wrap"><img src="${window.PIMP_LOGO_DATA_URL || 'NEW_logo.png'}" alt="PIMP" /><strong>PIMP</strong></div>
+        <div class="ts-label ts-customer-label">Customer:</div>
+        <div class="ts-cell ts-customer-value">${esc(daily.customer)}</div>
+        <div class="ts-label ts-afe-label">Customer AFE / No:</div>
+        <div class="ts-cell ts-afe-value">${esc(daily.jobNumber)}</div>
+        <div class="ts-label ts-pms-label">PMS Job Number:</div>
+        <div class="ts-cell ts-pms-value">${esc(daily.pmsJobNumber || daily.jobNumber)}</div>
+        <div class="ts-label ts-date-label">Date :</div>
+        <div class="ts-cell ts-date-value">${fmtDate(daily.date)}</div>
+        <div class="ts-label ts-location-label">Location:</div>
+        <div class="ts-cell ts-location-value">${esc(daily.location)}</div>
+        <div class="ts-label ts-ticket-label">Ticket Number:</div>
+        <div class="ts-cell ts-ticket-value">${esc(daily.ticket)}</div>
+        <div class="ts-label ts-description-label">Description of Services:</div>
+        <div class="ts-cell ts-description-value static-multiline">${esc(daily.description)}</div>
+        <table class="timesheet-employee-grid">
+          <thead><tr><th>Emp ID</th><th>Emp Name</th><th>Classification</th><th>Hours</th><th>TR</th><th>PD</th><th></th><th></th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </article>
+    `;
+  }
+
+  function cleanFileNameForTimesheet(value) {
+    try {
+      const globalSafeFileName = window.safeFileName || null;
+      if (typeof globalSafeFileName === "function") return globalSafeFileName(value);
+    } catch {}
+    return String(value || "timesheet.pdf").replace(/[\\/:*?"<>|]+/g, "-");
+  }
+
+  function filenameForDaily(daily) {
+    if (daily?.filename) return daily.filename;
+    const jobPart = daily?.jobNumber || "timesheet";
+    const datePart = daily?.date || todayValue();
+    const ticketPart = daily?.ticket ? `_${daily.ticket}` : "";
+    return cleanFileNameForTimesheet(`timesheet_${jobPart}_${datePart}${ticketPart}.pdf`);
+  }
+
+  async function downloadDailyPdf(daily) {
+    const html = timesheetHtmlForDaily(daily);
+    if (!window.html2pdf) {
+      try { if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet"); } catch {}
+      try { if (typeof showToast === "function") showToast("PDF library was unavailable. The print/save PDF window opened instead.", true); } catch {}
+      return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "pdf-workbench timesheet-pdf-workbench";
+    wrapper.innerHTML = html;
+    document.body.appendChild(wrapper);
+    try {
+      await window.html2pdf()
+        .set({
+          margin: 0,
+          filename: filenameForDaily(daily),
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
+        })
+        .from(wrapper.querySelector(".timesheet-template-document") || wrapper)
+        .save();
+      try { if (typeof showToast === "function") showToast("Timesheet PDF downloaded."); } catch {}
+    } catch {
+      try { if (typeof showToast === "function") showToast("Timesheet PDF download failed. Refresh and try again.", true); } catch {}
+    } finally {
+      wrapper.remove();
+    }
+  }
+
+  function openPreview(daily) {
+    if (!daily) return;
+    const existing = qs("#timesheetPreviewDialog");
+    if (existing) existing.remove();
+
+    const dialog = document.createElement("dialog");
+    dialog.id = "timesheetPreviewDialog";
+    dialog.className = "settings-dialog timesheet-preview-dialog";
+    dialog.innerHTML = `
+      <div class="settings-card timesheet-preview-card">
+        <div class="panel-header">
+          <h3>Timesheet View</h3>
+          <div class="action-group">
+            <button class="btn ghost" data-job-detail-preview-edit-timesheet="${attr(daily.id)}" type="button">Edit</button>
+            <button class="btn ghost" data-job-detail-preview-download-timesheet="${attr(daily.id)}" type="button">Download PDF</button>
+            <button class="btn danger" id="closeTimesheetPreviewBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div id="timesheetPreviewContent" class="timesheet-preview-content">${timesheetHtmlForDaily(daily)}</div>
+      </div>
+    `;
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    qs("#closeTimesheetPreviewBtn", dialog)?.addEventListener("click", () => dialog.close());
+    dialog.addEventListener("click", async (event) => {
+      const editId = event.target.closest?.("[data-job-detail-preview-edit-timesheet]")?.dataset.jobDetailPreviewEditTimesheet;
+      const downloadId = event.target.closest?.("[data-job-detail-preview-download-timesheet]")?.dataset.jobDetailPreviewDownloadTimesheet;
+      if (editId) {
+        event.preventDefault();
+        dialog.close();
+        openEditPopup(editId);
+      }
+      if (downloadId) {
+        event.preventDefault();
+        const target = getDailyById(downloadId);
+        if (target) await downloadDailyPdf(target);
+      }
+    });
+    dialog.addEventListener("close", () => dialog.remove());
+  }
+
+  function folderSignature(jobId) {
+    const dailySheets = getDailySheetsForJob(jobId);
+    const folderId = `job-details-timesheet-folder:${jobId}`;
+    return [
+      String(jobId || ""),
+      expandedFolders.has(folderId) ? "open" : "closed",
+      String(dailySheets.length),
+      dailySheets.map((sheet) => `${sheet.id}:${sheet.date}:${sheet.employeeCount}:${sheet.totalHours}`).join("|")
+    ].join("::");
+  }
+
+  function buildFolderHtml(jobId) {
+    const dailySheets = getDailySheetsForJob(jobId);
+    if (!dailySheets.length) {
+      const signature = folderSignature(jobId);
+      return `<p class="muted job-detail-empty" data-job-folder-actions-patched="true" data-folder-state-signature="${attr(signature)}">No timesheets have been saved for this job yet.</p>`;
+    }
+
+    const folderId = `job-details-timesheet-folder:${jobId}`;
+    const signature = folderSignature(jobId);
+    const isOpen = expandedFolders.has(folderId);
+    const totalHours = dailySheets.reduce((sum, sheet) => sum + num(sheet.totalHours), 0);
+    const totalEmployees = dailySheets.reduce((sum, sheet) => sum + num(sheet.employeeCount), 0);
+
+    const dailyRows = dailySheets.map((sheet) => `
+      <article class="job-timesheet-folder-row">
+        <div class="job-timesheet-folder-main">
+          <strong>${esc(fmtDate(sheet.date))}</strong>
+          <span>${esc(cleanNum(sheet.employeeCount))} employee line${sheet.employeeCount === 1 ? "" : "s"} • ${esc(cleanNum(sheet.totalHours))} total hours${sheet.ticket ? ` • Ticket ${esc(sheet.ticket)}` : ""}</span>
+        </div>
+        <div class="job-timesheet-folder-actions">
+          <button class="link-btn" data-edit-timesheet-daily="${attr(sheet.id)}" type="button">Edit</button>
+          <button class="link-btn" data-view-timesheet-daily="${attr(sheet.id)}" type="button">View</button>
+          <button class="link-btn" data-download-timesheet-daily="${attr(sheet.id)}" type="button">Download</button>
+          <button class="link-btn danger-text" data-delete-timesheet-daily="${attr(sheet.id)}" type="button">Delete</button>
+        </div>
+      </article>
+    `).join("");
+
+    return `
+      <div class="job-timesheet-folder-card ${isOpen ? "open" : ""}" data-job-timesheet-folder-card="${attr(folderId)}" data-job-folder-actions-patched="true" data-folder-state-signature="${attr(signature)}">
+        <button class="job-timesheet-folder-summary" data-toggle-job-detail-timesheet-folder="${attr(folderId)}" type="button" aria-expanded="${isOpen ? "true" : "false"}">
+          <span class="job-timesheet-folder-icon">📁</span>
+          <span class="job-timesheet-folder-title">
+            <strong>${esc(jobLabel(jobId))} Timesheets</strong>
+            <small>${dailySheets.length} daily sheet${dailySheets.length === 1 ? "" : "s"} • ${esc(dateRange(dailySheets))}</small>
+          </span>
+          <span class="job-timesheet-folder-stats">
+            <strong>${esc(cleanNum(totalHours))}</strong>
+            <small>hours</small>
+          </span>
+          <span class="job-timesheet-folder-chevron">${isOpen ? "▲" : "▼"}</span>
+        </button>
+        <div class="job-timesheet-folder-body ${isOpen ? "" : "hidden"}">
+          <div class="job-timesheet-folder-summary-line">${esc(cleanNum(totalEmployees))} employee line${totalEmployees === 1 ? "" : "s"} across this job.</div>
+          ${dailyRows}
+        </div>
+      </div>
+    `;
+  }
+
+  function getOpenJobDetailsBody() {
+    return qs("#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody");
+  }
+
+  function getJobIdFromJobDetails(body = getOpenJobDetailsBody()) {
+    if (!body) return "";
+    return body.querySelector("[data-doc-guide-job]")?.dataset.docGuideJob ||
+      body.querySelector("[data-open-cost-for-job]")?.dataset.openCostForJob ||
+      body.querySelector("[data-open-invoice-for-job]")?.dataset.openInvoiceForJob ||
+      body.querySelector("[data-create-timesheet-for-job]")?.dataset.createTimesheetForJob ||
+      "";
+  }
+
+  function refreshJobDetailsFolder() {
+    const body = getOpenJobDetailsBody();
+    if (!body) return;
+    const jobId = getJobIdFromJobDetails(body);
+    if (!jobId) return;
+
+    const headers = qsa(".job-detail-section-header h5", body);
+    const header = headers.find((h5) => /timesheets\s+folder|all\s+timesheets\s+for\s+this\s+job/i.test(h5.textContent || ""));
+    const section = header?.closest(".job-detail-section");
+    if (!section) return;
+
+    header.textContent = "Timesheets Folder";
+    const target = section.querySelector(".job-timesheet-folder-card, .job-detail-mini-list, .job-detail-empty");
+    const signature = folderSignature(jobId);
+    if (
+      target &&
+      target.getAttribute("data-job-folder-actions-patched") === "true" &&
+      target.getAttribute("data-folder-state-signature") === signature
+    ) {
+      return;
+    }
+
+    if (target) target.outerHTML = buildFolderHtml(jobId);
+    else section.insertAdjacentHTML("beforeend", buildFolderHtml(jobId));
+  }
+
+  function ensureOverlay() {
+    let overlay = qs(`#${POPUP_OVERLAY_ID}`);
+    if (overlay) return overlay;
+    overlay = document.createElement("div");
+    overlay.id = POPUP_OVERLAY_ID;
+    overlay.className = "job-timesheet-modal-overlay hidden";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <div class="job-timesheet-modal-card" role="dialog" aria-modal="true" aria-labelledby="jobTimesheetModalTitle">
+        <div class="job-timesheet-modal-header">
+          <div>
+            <p class="eyebrow">Edit Timesheet</p>
+            <h3 id="jobTimesheetModalTitle">Timesheet</h3>
+            <p class="tiny">Edit this saved daily timesheet without leaving Job Details.</p>
+          </div>
+          <button class="icon-btn job-timesheet-modal-close" type="button" aria-label="Close timesheet popup">×</button>
+        </div>
+        <div class="job-timesheet-modal-body" id="${POPUP_BODY_ID}"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  function moveFormIntoPopup() {
+    const form = qs("#timesheetForm");
+    const body = qs(`#${POPUP_BODY_ID}`);
+    if (!form || !body) return false;
+
+    if (!movedFormParent) {
+      movedFormParent = form.parentNode;
+      movedFormNextSibling = form.nextSibling;
+      movedFormPlaceholder = document.createComment("timesheet form original position for job details edit");
+      movedFormParent.insertBefore(movedFormPlaceholder, form);
+    }
+
+    form.classList.add("job-timesheet-modal-form");
+    body.appendChild(form);
+    return true;
+  }
+
+  function restoreFormIfMoved() {
+    const form = qs("#timesheetForm");
+    if (!form || !movedFormParent) return;
+    form.classList.remove("job-timesheet-modal-form");
+    movedFormParent.insertBefore(form, movedFormNextSibling || movedFormPlaceholder || null);
+    if (movedFormPlaceholder?.parentNode) movedFormPlaceholder.parentNode.removeChild(movedFormPlaceholder);
+    movedFormParent = null;
+    movedFormNextSibling = null;
+    movedFormPlaceholder = null;
+  }
+
+  function setField(form, name, value) {
+    qsa(`[name="${name}"]`, form).forEach((field) => {
+      if (field.type === "checkbox") field.checked = Boolean(value);
+      else field.value = value ?? "";
+      try { field.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+    });
+  }
+
+  function setEmployeeRows(lines) {
+    const tbody = qs("#timesheetEmployeeRows");
+    const addButton = qs("#addTimesheetEmployeeBtn");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const usefulLines = lines && lines.length ? lines : [{}];
+    usefulLines.forEach((line) => {
+      if (addButton) addButton.click();
+      let row = tbody.lastElementChild;
+      if (!row) {
+        row = document.createElement("tr");
+        row.className = "timesheet-employee-row";
+        row.innerHTML = `
+          <td><input data-ts-field="employee_identifier" /></td>
+          <td><select data-ts-field="employee_id" class="timesheet-employee-select"><option value="">Select employee...</option></select><input data-ts-field="employee_name" /></td>
+          <td><input data-ts-field="classification" /></td>
+          <td><input data-ts-field="hours" type="number" min="0" step="0.25" /></td>
+          <td><input data-ts-field="tr" type="checkbox" /></td>
+          <td><input data-ts-field="pd" type="checkbox" /></td>
+          <td><input data-ts-field="notes" /></td>
+          <td class="timesheet-row-actions"><button class="icon-btn remove-timesheet-row" type="button" aria-label="Remove employee row">×</button></td>
+        `;
+        tbody.appendChild(row);
+      }
+
+      const setRowField = (field, value) => {
+        const input = row.querySelector(`[data-ts-field="${field}"]`);
+        if (!input) return;
+        if (input.type === "checkbox") input.checked = Boolean(value);
+        else input.value = value ?? "";
+      };
+
+      setRowField("employee_id", line.employee_id || "");
+      setRowField("employee_identifier", line.employee_identifier || "");
+      setRowField("employee_name", line.employee_name || "");
+      setRowField("classification", line.classification || "");
+      setRowField("hours", line.hours || "");
+      setRowField("tr", line.tr);
+      setRowField("pd", line.pd);
+      setRowField("notes", line.notes || "");
+    });
+  }
+
+  function setSubmitModeEditing(form) {
+    const submit = form?.querySelector('button[type="submit"]');
+    if (submit) submit.textContent = "Update Timesheet";
+  }
+
+  function updateSummary(form, daily) {
+    const summary = qs("#timesheetJobSummary", form);
+    if (!summary) return;
+    const job = daily.job || findJobSafe(daily.first?.job_id);
+    summary.innerHTML = `
+      <strong>${esc(job?.job_number || daily.jobNumber || "No #")} — ${esc(job?.job_name || "Saved Timesheet")}</strong>
+      <span>${esc(daily.customer || job?.company_name || "No customer")} • ${esc(daily.location || job?.location || "No location")} • Editing date: ${esc(fmtDate(daily.date))}</span>
+    `;
+  }
+
+  function fillFormForDaily(daily) {
+    const form = qs("#timesheetForm");
+    if (!form || !daily) return;
+    try { form.reset(); } catch {}
+
+    const jobId = daily.first?.job_id || daily.job?.id || "";
+    setField(form, "timesheet_group_id", daily.id);
+    setField(form, "job_id", jobId);
+    setField(form, "customer", daily.customer || daily.job?.company_name || "");
+    setField(form, "customer_afe_no", daily.jobNumber || daily.job?.job_number || "");
+    setField(form, "pms_job_number", daily.pmsJobNumber || daily.job?.job_number || "");
+    setField(form, "location", daily.location || daily.job?.location || "");
+    setField(form, "work_date", daily.date || todayValue());
+    setField(form, "ticket_number", daily.ticket || "");
+    setField(form, "description_of_services", daily.description || "");
+    setField(form, "status", daily.status || "submitted");
+    setEmployeeRows(daily.lines || []);
+    setSubmitModeEditing(form);
+    updateSummary(form, daily);
+  }
+
+  function openEditPopup(dailyId) {
+    const daily = getDailyById(dailyId);
+    if (!daily) {
+      try { if (typeof showToast === "function") showToast("I could not find that saved timesheet. Refresh and try again.", true); } catch {}
+      return;
+    }
+
+    const overlay = ensureOverlay();
+    if (!moveFormIntoPopup()) {
+      try { if (typeof showToast === "function") showToast("Timesheet form could not be opened. Refresh and try again.", true); } catch {}
+      return;
+    }
+
+    fillFormForDaily(daily);
+
+    const eyebrow = qs(".job-timesheet-modal-header .eyebrow", overlay);
+    const title = qs("#jobTimesheetModalTitle", overlay);
+    const subtitle = qs(".job-timesheet-modal-header .tiny", overlay);
+    if (eyebrow) eyebrow.textContent = "Edit Timesheet";
+    if (title) title.textContent = `${daily.jobNumber || daily.job?.job_number || "Timesheet"} — ${fmtDate(daily.date)}`;
+    if (subtitle) subtitle.textContent = "Edit this saved daily timesheet without leaving Job Details.";
+
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("job-timesheet-modal-open");
+    window.setTimeout(() => overlay.querySelector("input, select, textarea, button")?.focus?.(), 30);
+  }
+
+  async function deleteDaily(dailyId) {
+    const daily = getDailyById(dailyId);
+    if (!daily || !state?.supabase) return;
+    if (!window.confirm("Delete this saved daily timesheet?")) return;
+
+    try {
+      if (daily.first?.timesheet_group_id) {
+        const { error } = await state.supabase.from(TIMESHEET_TABLE).delete().eq("timesheet_group_id", daily.first.timesheet_group_id);
+        if (error) throw error;
+      } else {
+        const ids = (daily.rows || []).map((row) => row.id).filter(Boolean);
+        if (ids.length) {
+          const { error } = await state.supabase.from(TIMESHEET_TABLE).delete().in("id", ids);
+          if (error) throw error;
+        }
+      }
+
+      state.data.timesheets = (state.data.timesheets || []).filter((entry) => timesheetGroupKey(entry) !== String(dailyId));
+      try { if (typeof renderTimesheets === "function") renderTimesheets(); } catch {}
+      refreshJobDetailsFolder();
+      try { if (typeof showToast === "function") showToast("Timesheet deleted."); } catch {}
+    } catch (error) {
+      try { if (typeof showToast === "function") showToast(error.message || String(error), true); } catch {}
+    }
+  }
+
+  document.addEventListener("click", async (event) => {
+    const jobDetailsBody = getOpenJobDetailsBody();
+    const insideJobDetails = Boolean(jobDetailsBody && event.target.closest?.("#jobDetailsModalBody"));
+    if (!insideJobDetails) return;
+
+    const toggle = event.target.closest?.("[data-toggle-job-detail-timesheet-folder]");
+    if (toggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+      const folderId = toggle.dataset.toggleJobDetailTimesheetFolder;
+      if (!folderId) return;
+
+      const card = toggle.closest("[data-job-timesheet-folder-card]");
+      const body = card?.querySelector(".job-timesheet-folder-body");
+      const chevron = card?.querySelector(".job-timesheet-folder-chevron");
+      const willOpen = !expandedFolders.has(folderId);
+
+      if (willOpen) expandedFolders.add(folderId);
+      else expandedFolders.delete(folderId);
+
+      card?.classList.toggle("open", willOpen);
+      body?.classList.toggle("hidden", !willOpen);
+      toggle.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      if (chevron) chevron.textContent = willOpen ? "▲" : "▼";
+
+      refreshJobDetailsFolder();
+      return;
+    }
+
+    const editId = event.target.closest?.("[data-edit-timesheet-daily]")?.dataset.editTimesheetDaily;
+    if (editId) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      openEditPopup(editId);
+      return;
+    }
+
+    const viewDailyId = event.target.closest?.("[data-view-timesheet-daily]")?.dataset.viewTimesheetDaily;
+    const viewGroupId = event.target.closest?.("[data-view-timesheet-group]")?.dataset.viewTimesheetGroup;
+    const viewId = viewDailyId || viewGroupId;
+    if (viewId) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      const daily = getDailyById(viewId);
+      if (daily) openPreview(daily);
+      return;
+    }
+
+    const deleteDailyId = event.target.closest?.("[data-delete-timesheet-daily]")?.dataset.deleteTimesheetDaily;
+    const deleteGroupId = event.target.closest?.("[data-delete-timesheet-group]")?.dataset.deleteTimesheetGroup;
+    const deleteId = deleteDailyId || deleteGroupId;
+    if (deleteId) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      await deleteDaily(deleteId);
+      return;
+    }
+
+    const downloadDailyId = event.target.closest?.("[data-download-timesheet-daily]")?.dataset.downloadTimesheetDaily;
+    const downloadGroupId = event.target.closest?.("[data-download-timesheet-group]")?.dataset.downloadTimesheetGroup;
+    const downloadId = downloadDailyId || downloadGroupId;
+    if (downloadId) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      const daily = getDailyById(downloadId);
+      if (daily) await downloadDailyPdf(daily);
+    }
+  }, true);
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id !== "timesheetForm") return;
+    if (!qs(`#${POPUP_OVERLAY_ID}:not(.hidden)`)) return;
+
+    window.setTimeout(() => {
+      try { if (typeof loadAllData === "function") loadAllData(); } catch {}
+      window.setTimeout(refreshJobDetailsFolder, 500);
+    }, 300);
+  }, true);
+
+  const popupObserver = new MutationObserver(() => {
+    const overlay = qs(`#${POPUP_OVERLAY_ID}`);
+    if (overlay?.classList.contains("hidden")) restoreFormIfMoved();
+  });
+
+  const folderObserver = new MutationObserver(() => {
+    window.clearTimeout(folderObserver.timer);
+    folderObserver.timer = window.setTimeout(refreshJobDetailsFolder, 50);
+  });
+
+  function start() {
+    const overlay = ensureOverlay();
+    try { popupObserver.observe(overlay, { attributes: true, attributeFilter: ["class"] }); } catch {}
+    try { folderObserver.observe(document.body, { childList: true, subtree: true }); } catch {}
+    refreshJobDetailsFolder();
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+
+  window.PIMP_refreshJobDetailsTimesheetFolder = refreshJobDetailsFolder;
+})();
+
+
+/* ========================================================================
+   FINAL PATCH: JOB DETAILS TIMESHEET FOLDER COLLAPSE CONTROL
+   ------------------------------------------------------------------------
+   Older duplicate folder-toggle listeners are disabled above so the Job
+   Details folder opens/collapses once per click and keeps its state.
+   ======================================================================== */
+
+
+/* ========================================================================
+   FINAL PATCH: SMALL JOB DETAILS TIMESHEET FOLDER OPEN/CLOSE BUTTON
+   ------------------------------------------------------------------------
+   Adds a clear small Open Folder / Close Folder button in the Timesheets
+   Folder header inside the Job Details popup. The button only controls the
+   timesheet folder in that same popup and keeps the existing folder layout.
+   ======================================================================== */
+(function installSmallJobDetailsTimesheetFolderButtonPatch() {
+  const expandedFolders = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+  window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedFolders;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function getOpenJobDetailsBody() {
+    return qs("#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody");
+  }
+
+  function getTimesheetFolderSection(body = getOpenJobDetailsBody()) {
+    if (!body) return null;
+    const headers = qsa(".job-detail-section-header h5", body);
+    const header = headers.find((h5) => /timesheets\s+folder|all\s+timesheets\s+for\s+this\s+job/i.test(h5.textContent || ""));
+    return header ? header.closest(".job-detail-section") : null;
+  }
+
+  function getFolderCard(section) {
+    return section ? qs("[data-job-timesheet-folder-card]", section) : null;
+  }
+
+  function isFolderOpen(card) {
+    if (!card) return false;
+    const body = qs(".job-timesheet-folder-body", card);
+    const toggle = qs("[data-toggle-job-detail-timesheet-folder]", card);
+    return card.classList.contains("open") || (body && !body.classList.contains("hidden")) || toggle?.getAttribute("aria-expanded") === "true";
+  }
+
+  function getFolderId(card) {
+    if (!card) return "";
+    return card.getAttribute("data-job-timesheet-folder-card") || qs("[data-toggle-job-detail-timesheet-folder]", card)?.dataset.toggleJobDetailTimesheetFolder || "";
+  }
+
+  function setFolderOpen(card, shouldOpen) {
+    if (!card) return;
+
+    const folderId = getFolderId(card);
+    if (folderId) {
+      if (shouldOpen) expandedFolders.add(folderId);
+      else expandedFolders.delete(folderId);
+    }
+
+    const body = qs(".job-timesheet-folder-body", card);
+    const summaryToggle = qs("[data-toggle-job-detail-timesheet-folder]", card);
+    const chevron = qs(".job-timesheet-folder-chevron", card);
+
+    card.classList.toggle("open", shouldOpen);
+    if (body) body.classList.toggle("hidden", !shouldOpen);
+    if (summaryToggle) summaryToggle.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    if (chevron) chevron.textContent = shouldOpen ? "▲" : "▼";
+  }
+
+  function updateSmallButtonState(button, section) {
+    const card = getFolderCard(section);
+    const open = isFolderOpen(card);
+    button.textContent = open ? "Close Folder" : "Open Folder";
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.disabled = !card;
+    button.classList.toggle("is-open", open);
+    button.title = card ? (open ? "Collapse timesheets folder" : "Open timesheets folder") : "No saved timesheets for this job yet";
+  }
+
+  function ensureSmallButton() {
+    const body = getOpenJobDetailsBody();
+    const section = getTimesheetFolderSection(body);
+    if (!section) return;
+
+    const header = qs(".job-detail-section-header", section);
+    if (!header) return;
+
+    const title = qs("h5", header);
+    if (title) title.textContent = "Timesheets Folder";
+
+    let actions = qs(".job-detail-section-header-actions", header);
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.className = "job-detail-section-header-actions";
+
+      const existingButtons = qsa(":scope > button, :scope > .link-btn, :scope > .btn", header);
+      existingButtons.forEach((button) => actions.appendChild(button));
+      header.appendChild(actions);
+    }
+
+    let button = qs("[data-job-details-folder-toggle-button]", actions);
+    if (!button) {
+      button = document.createElement("button");
+      button.className = "btn ghost job-details-folder-toggle-btn";
+      button.type = "button";
+      button.setAttribute("data-job-details-folder-toggle-button", "true");
+      button.setAttribute("aria-controls", "job details timesheets folder");
+      actions.insertBefore(button, actions.firstChild);
+    }
+
+    updateSmallButtonState(button, section);
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-job-details-folder-toggle-button]");
+    if (button && button.closest("#jobDetailsModalBody")) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+      const section = button.closest(".job-detail-section");
+      const card = getFolderCard(section);
+      if (!card) return;
+
+      setFolderOpen(card, !isFolderOpen(card));
+      updateSmallButtonState(button, section);
+      return;
+    }
+
+    if (event.target.closest?.("#jobDetailsModalBody [data-toggle-job-detail-timesheet-folder]")) {
+      window.setTimeout(ensureSmallButton, 0);
+      window.setTimeout(ensureSmallButton, 80);
+    }
+  }, true);
+
+  const observer = new MutationObserver(() => {
+    window.clearTimeout(observer.timer);
+    observer.timer = window.setTimeout(ensureSmallButton, 40);
+  });
+
+  function start() {
+    try { observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "aria-expanded"] }); } catch {}
+    ensureSmallButton();
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+
+  window.PIMP_syncJobDetailsTimesheetFolderButton = ensureSmallButton;
+})();
