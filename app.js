@@ -51,115 +51,16 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-const DASHBOARD_BUILD_VERSION = "2026-05-31-r1";
-
-const DASHBOARD_REQUIRED_LIBRARIES = [
-  {
-    name: "Supabase",
-    requiredForStartup: true,
-    isReady: () => Boolean(window.supabase && window.supabase.createClient)
-  },
-  {
-    name: "jsPDF",
-    requiredForStartup: false,
-    isReady: () => Boolean((window.jspdf && window.jspdf.jsPDF) || window.jsPDF)
-  },
-  {
-    name: "html2canvas",
-    requiredForStartup: false,
-    isReady: () => Boolean(window.html2canvas)
-  },
-  {
-    name: "html2pdf",
-    requiredForStartup: false,
-    isReady: () => Boolean(window.html2pdf)
-  },
-  {
-    name: "XLSX",
-    requiredForStartup: false,
-    isReady: () => Boolean(window.XLSX)
-  }
-];
-
-function getMissingDashboardLibraries() {
-  return DASHBOARD_REQUIRED_LIBRARIES.filter((item) => {
-    try {
-      return !item.isReady();
-    } catch {
-      return true;
-    }
-  });
-}
-
-function setBootStatus(message, isError = false) {
-  const bootStatus = document.getElementById("bootStatus");
-  if (!bootStatus) return;
-  bootStatus.textContent = message;
-  bootStatus.classList.toggle("error", Boolean(isError));
-  bootStatus.classList.remove("hidden");
-}
-
-function hideBootStatus() {
-  const bootStatus = document.getElementById("bootStatus");
-  if (bootStatus) bootStatus.classList.add("hidden");
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function waitForDashboardLibraries(timeoutMs = 8000) {
-  const startedAt = Date.now();
-  let missing = getMissingDashboardLibraries();
-
-  while (missing.length && Date.now() - startedAt < timeoutMs) {
-    setBootStatus(`Loading dashboard tools... ${missing.map((item) => item.name).join(", ")}`);
-    await sleep(200);
-    missing = getMissingDashboardLibraries();
-  }
-
-  if (missing.length) {
-    const requiredMissing = missing.filter((item) => item.requiredForStartup);
-    const names = missing.map((item) => item.name).join(", ");
-    console.warn(`Dashboard libraries missing after startup wait: ${names}`);
-
-    if (requiredMissing.length) {
-      setBootStatus(`Could not load required dashboard connection tool: ${requiredMissing.map((item) => item.name).join(", ")}. Check the internet connection, then refresh.`, true);
-    } else {
-      setBootStatus(`Dashboard loaded, but these download tools did not load yet: ${names}. Refresh before downloading PDFs or Excel files.`, true);
-      window.setTimeout(hideBootStatus, 7000);
-    }
-  }
-
-  return missing;
-}
-
-
 document.addEventListener("DOMContentLoaded", init);
 
-async function init() {
-  if (state.__booted) return;
-  state.__booted = true;
-
-  const missingLibraries = await waitForDashboardLibraries();
-  const missingRequired = missingLibraries.filter((item) => item.requiredForStartup);
-
+function init() {
   bindEvents();
   initializeCostInvoiceBuilders();
   loadConfigIntoSettings();
-
-  if (missingRequired.length) {
-    state.supabase = null;
-    updateConnectionWarning();
-    showToast("Dashboard connection tool did not load. Check internet connection and refresh.", true);
-    return;
-  }
-
   initSupabase();
 
   if (state.supabase) {
-    await checkSession();
-    hideBootStatus();
+    checkSession();
   } else {
     updateConnectionWarning();
   }
@@ -221,31 +122,22 @@ function initSupabase() {
 
   if (!url || !anonKey) {
     state.supabase = null;
-    setBootStatus("Supabase URL or anon key is missing in app.js.", true);
     return;
   }
 
   if (!window.supabase || !window.supabase.createClient) {
-    showToast("Supabase library did not load. Check your internet connection, then refresh.", true);
-    setBootStatus("Supabase library did not load. Check your internet connection, then refresh.", true);
+    showToast("Supabase library did not load. Check your internet connection.", true);
     state.supabase = null;
     return;
   }
 
-  try {
-    state.supabase = window.supabase.createClient(url, anonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
-    });
-  } catch (error) {
-    console.error("Unable to initialize Supabase:", error);
-    showToast("Unable to initialize Supabase. Check the project URL and anon key.", true);
-    setBootStatus("Unable to initialize Supabase. Check the project URL and anon key.", true);
-    state.supabase = null;
-  }
+  state.supabase = window.supabase.createClient(url, anonKey, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
 }
 
 function updateConnectionWarning() {
@@ -2044,31 +1936,15 @@ function on(selector, eventName, handler) {
   if (node) node.addEventListener(eventName, handler);
 }
 
-async function init() {
-  if (state.__booted) return;
-  state.__booted = true;
-
-  state.data.rateTemplates = state.data.rateTemplates || [];
-
-  const missingLibraries = await waitForDashboardLibraries();
-  const missingRequired = missingLibraries.filter((item) => item.requiredForStartup);
-
+function init() {
+  state.data.rateTemplates = [];
   bindEvents();
   initializeCostInvoiceBuilders();
   loadConfigIntoSettings();
-
-  if (missingRequired.length) {
-    state.supabase = null;
-    updateConnectionWarning();
-    showToast("Dashboard connection tool did not load. Check internet connection and refresh.", true);
-    return;
-  }
-
   initSupabase();
 
   if (state.supabase) {
-    await checkSession();
-    hideBootStatus();
+    checkSession();
   } else {
     updateConnectionWarning();
   }
@@ -18280,107 +18156,5266 @@ This removes it from the job documents list.`)) return;
   document.addEventListener("DOMContentLoaded", connectEasyButtons);
 })();
 
+/* ========================================================================
+   JOB CREATE / EDIT POPUP MODAL PATCH
+   ------------------------------------------------------------------------
+   Final override for the Jobs page:
+   - The job form stays hidden until Create Job or Edit is clicked.
+   - The same popup is used for creating and editing jobs.
+   - The popup closes after a successful create/update, Cancel Edit, X close,
+     outside click, or Escape.
+   ======================================================================== */
+(function installJobCreateEditPopupModalPatch() {
+  function qs(selector, root) {
+    return (root || document).querySelector(selector);
+  }
 
-/* ==========================================================================
-   STATIC HOSTING RELIABILITY PATCH
-   --------------------------------------------------------------------------
-   This keeps the dashboard from behaving like it only works after a refresh.
-   It adds double-click protection for database forms, clears stale loading UI
-   when the browser restores the page from cache, and logs missing CDN tools.
-   ========================================================================== */
-(function installStaticHostingReliabilityPatch() {
-  const formIds = ["jobForm", "costTrackerForm", "invoiceForm", "employeeForm", "assignmentForm", "timesheetForm", "loginForm"];
+  function qsa(selector, root) {
+    return Array.from((root || document).querySelectorAll(selector));
+  }
 
-  function unlockForm(form) {
+  function setValue(form, name, value) {
+    const field = form?.querySelector(`[name="${name}"]`);
+    if (field) field.value = value == null ? "" : value;
+  }
+
+  function setCreateLabels() {
+    const title = qs("#jobFormTitle");
+    const submit = qs("#jobSubmitBtn");
+    const cancel = qs("#cancelJobEditBtn");
+    if (title) title.textContent = "Create Job";
+    if (submit) submit.textContent = "Create Job";
+    if (cancel) cancel.classList.add("hidden");
+  }
+
+  function ensureJobModalMarkup() {
+    const jobsView = qs("#jobsView");
+    const form = qs("#jobForm");
+    if (!jobsView || !form) return null;
+
+    let overlay = qs("#jobModalOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "jobModalOverlay";
+      overlay.className = "job-modal-overlay hidden";
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.innerHTML = `
+        <div class="job-modal-card" role="dialog" aria-modal="true" aria-labelledby="jobFormTitle">
+          <div class="job-modal-header">
+            <div>
+              <p class="eyebrow">Job Details</p>
+              <h3 id="jobFormTitle">Create Job</h3>
+            </div>
+            <button class="icon-btn job-modal-close" id="closeJobModalBtn" type="button" aria-label="Close create job popup">×</button>
+          </div>
+        </div>
+      `;
+      jobsView.appendChild(overlay);
+    }
+
+    const card = qs(".job-modal-card", overlay);
+    if (card && form.parentElement !== card) {
+      form.classList.remove("panel", "form-panel");
+      form.classList.add("job-modal-form");
+      card.appendChild(form);
+    }
+
+    const title = qs("#jobFormTitle");
+    if (title && !card?.contains(title)) {
+      const headerTitle = qs(".job-modal-header h3", overlay);
+      if (headerTitle) headerTitle.id = "jobFormTitle";
+    }
+
+    if (!qs("#openJobModalBtn")) {
+      const header = qs("#jobsView .table-panel-header") || qs("#jobsView");
+      const button = document.createElement("button");
+      button.className = "btn primary";
+      button.id = "openJobModalBtn";
+      button.type = "button";
+      button.textContent = "+ Create Job";
+      header?.appendChild(button);
+    }
+
+    return overlay;
+  }
+
+  function resetJobFormForCreate() {
+    const form = qs("#jobForm");
     if (!form) return;
-    form.dataset.submitting = "false";
-    form.querySelectorAll('button[type="submit"]').forEach((button) => {
-      button.disabled = false;
-      if (button.dataset.originalText) {
-        button.textContent = button.dataset.originalText;
+    form.reset();
+    setValue(form, "record_id", "");
+    setValue(form, "pending_cost_tracker_id", "");
+    setValue(form, "total_job_days", "");
+    setValue(form, "status", "active");
+    setCreateLabels();
+  }
+
+  function openJobModal(options = {}) {
+    const overlay = ensureJobModalMarkup();
+    const form = qs("#jobForm");
+    if (!overlay || !form) return;
+
+    if (options.reset === true) resetJobFormForCreate();
+    if (typeof showView === "function") showView("jobs");
+
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("job-modal-open");
+
+    const focusTarget = form.querySelector("input:not([type='hidden']), select, textarea, button");
+    if (options.focus !== false && focusTarget) {
+      setTimeout(() => focusTarget.focus({ preventScroll: true }), 30);
+    }
+  }
+
+  function closeJobModal() {
+    const overlay = qs("#jobModalOverlay");
+    if (!overlay) return;
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("job-modal-open");
+  }
+
+  function isJobFormCleared(form) {
+    if (!form) return false;
+    const jobNumber = form.querySelector('[name="job_number"]')?.value?.trim() || "";
+    const jobName = form.querySelector('[name="job_name"]')?.value?.trim() || "";
+    const company = form.querySelector('[name="company_name"]')?.value?.trim() || "";
+    const recordId = form.querySelector('[name="record_id"]')?.value?.trim() || "";
+    return !jobNumber && !jobName && !company && !recordId;
+  }
+
+  const previousResetJobFormMode = typeof resetJobFormMode === "function" ? resetJobFormMode : null;
+  window.resetJobFormMode = function resetJobFormModeWithModalClose(options = {}) {
+    if (previousResetJobFormMode) previousResetJobFormMode.apply(this, arguments);
+    else {
+      const form = qs("#jobForm");
+      setValue(form, "record_id", "");
+      setValue(form, "total_job_days", "");
+      setCreateLabels();
+    }
+
+    if (options.close !== false) closeJobModal();
+  };
+  try { resetJobFormMode = window.resetJobFormMode; } catch {}
+
+  const previousLoadJobIntoForm = typeof loadJobIntoForm === "function" ? loadJobIntoForm : null;
+  window.loadJobIntoForm = function loadJobIntoFormAndOpenModal(job) {
+    if (previousLoadJobIntoForm) previousLoadJobIntoForm.apply(this, arguments);
+    else if (job) {
+      const form = qs("#jobForm");
+      if (form) {
+        form.reset();
+        setValue(form, "record_id", job.id || "");
+        setValue(form, "company_name", job.company_name || "");
+        setValue(form, "contact_name", job.contact_name || "");
+        setValue(form, "job_number", job.job_number || "");
+        setValue(form, "job_name", job.job_name || "");
+        setValue(form, "location", job.location || "");
+        setValue(form, "status", job.status || "active");
+        setValue(form, "start_date", job.start_date || "");
+        setValue(form, "end_date", job.end_date || job.start_date || "");
+        const totalDays = job.total_job_days || (typeof calculateJobDays === "function" ? calculateJobDays(job.start_date, job.end_date) : "");
+        setValue(form, "total_job_days", totalDays || "");
       }
-    });
+      const title = qs("#jobFormTitle");
+      const submit = qs("#jobSubmitBtn");
+      const cancel = qs("#cancelJobEditBtn");
+      if (title) title.textContent = "Edit Job";
+      if (submit) submit.textContent = "Save Job";
+      if (cancel) cancel.classList.remove("hidden");
+    }
+
+    openJobModal({ reset: false });
+  };
+  try { loadJobIntoForm = window.loadJobIntoForm; } catch {}
+
+  const previousLoadJobFormForTracker = typeof loadJobFormForTracker === "function" ? loadJobFormForTracker : null;
+  if (previousLoadJobFormForTracker) {
+    window.loadJobFormForTracker = function loadJobFormForTrackerAndOpenModal(trackerId) {
+      previousLoadJobFormForTracker.apply(this, arguments);
+      openJobModal({ reset: false });
+    };
+    try { loadJobFormForTracker = window.loadJobFormForTracker; } catch {}
   }
 
-  function lockForm(form) {
-    if (!form || form.dataset.submitting === "true") return false;
-    form.dataset.submitting = "true";
-    form.querySelectorAll('button[type="submit"]').forEach((button) => {
-      if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
-      button.disabled = true;
-      button.textContent = "Saving...";
-    });
-    window.setTimeout(() => unlockForm(form), 12000);
-    return true;
+  const previousHandleCreateJob = typeof handleCreateJob === "function" ? handleCreateJob : null;
+  if (previousHandleCreateJob) {
+    window.handleCreateJob = async function handleCreateJobAndCloseModal(event) {
+      const form = event?.currentTarget || qs("#jobForm");
+      await previousHandleCreateJob.apply(this, arguments);
+      if (isJobFormCleared(form)) closeJobModal();
+    };
+    try { handleCreateJob = window.handleCreateJob; } catch {}
   }
 
-  function installSubmitGuards() {
-    formIds.forEach((id) => {
-      const form = document.getElementById(id);
-      if (!form || form.dataset.reliableSubmitGuard === "true") return;
-      form.dataset.reliableSubmitGuard = "true";
-      form.addEventListener("submit", (event) => {
-        if (!lockForm(form)) {
-          event.preventDefault();
-          event.stopImmediatePropagation();
-        }
-      }, true);
+  function bindJobModalEvents() {
+    ensureJobModalMarkup();
+
+    qsa("#openJobModalBtn, #quickCreateJobBtn").forEach((button) => {
+      if (button.dataset.jobModalOpenBound) return;
+      button.dataset.jobModalOpenBound = "true";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        openJobModal({ reset: true });
+      });
     });
+
+    const closeButton = qs("#closeJobModalBtn");
+    if (closeButton && !closeButton.dataset.jobModalCloseBound) {
+      closeButton.dataset.jobModalCloseBound = "true";
+      closeButton.addEventListener("click", closeJobModal);
+    }
+
+    const cancelEditButton = qs("#cancelJobEditBtn");
+    if (cancelEditButton && !cancelEditButton.dataset.jobModalCancelCloseBound) {
+      cancelEditButton.dataset.jobModalCancelCloseBound = "true";
+      cancelEditButton.addEventListener("click", closeJobModal);
+    }
+
+    const overlay = qs("#jobModalOverlay");
+    if (overlay && !overlay.dataset.jobModalOverlayBound) {
+      overlay.dataset.jobModalOverlayBound = "true";
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) closeJobModal();
+      });
+    }
   }
 
-  function installFormUnlockers() {
-    const originalShowToast = window.showToast;
-    if (typeof originalShowToast === "function" && !originalShowToast.__reliableWrapped) {
-      window.showToast = function reliableShowToast(message, isError = false) {
-        const result = originalShowToast.apply(this, arguments);
-        formIds.forEach((id) => unlockForm(document.getElementById(id)));
-        return result;
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !qs("#jobModalOverlay")?.classList.contains("hidden")) {
+      closeJobModal();
+    }
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindJobModalEvents);
+  } else {
+    bindJobModalEvents();
+  }
+
+  window.openJobModal = openJobModal;
+  window.closeJobModal = closeJobModal;
+})();
+
+/* ========================================================================
+   FINAL BUSINESS DAYS + COST TRACKER EQUIPMENT / ZERO DISPLAY PATCH
+   ------------------------------------------------------------------------
+   - Job Total Days now counts weekdays only and skips Saturday/Sunday.
+   - Cost Tracker table shows Equipment cost combined into Labor and removes
+     the separate Equipment column.
+   - Equipment footer now shows Qty, Hours, and Days totals.
+   - Cost tracker input boxes and row totals stay blank when the value is 0.
+   ======================================================================== */
+(function installBusinessDaysEquipmentAndBlankZeroPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function n(value) {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function moneyValue(value) {
+    return typeof money === "function" ? money(value) : `$${n(value).toFixed(2)}`;
+  }
+
+  function cleanDisplay(value) {
+    if (typeof cleanNumberDisplay === "function") return cleanNumberDisplay(value);
+    const rounded = Math.round((n(value) + Number.EPSILON) * 100) / 100;
+    return String(rounded).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1").replace(/\.0$/, "");
+  }
+
+  function hasValue(value) {
+    return value !== undefined && value !== null && String(value).trim() !== "";
+  }
+
+  function isZeroLike(value) {
+    if (!hasValue(value)) return false;
+    const text = String(value).trim().replace(/,/g, "").replace(/^\$/, "");
+    if (text === "") return false;
+    const parsed = Number(text);
+    return Number.isFinite(parsed) && parsed === 0;
+  }
+
+  function blankZero(value) {
+    return isZeroLike(value) ? "" : (value ?? "");
+  }
+
+  function escapeValue(value) {
+    return typeof escapeAttr === "function"
+      ? escapeAttr(value)
+      : String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+  }
+
+  function setTextBlankZero(selector, value, formatter = cleanDisplay) {
+    const node = qs(selector);
+    if (!node) return;
+    node.textContent = n(value) === 0 ? "" : formatter(value);
+  }
+
+  function setMoneyTextBlankZero(selector, value) {
+    setTextBlankZero(selector, value, moneyValue);
+  }
+
+  function parseLocalDate(value) {
+    if (!value) return null;
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  window.calculateJobDays = function calculateJobWeekdaysOnly(startDate, endDate) {
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate || startDate);
+    if (!start || !end || end < start) return 0;
+
+    let total = 0;
+    const cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) total += 1;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return total;
+  };
+  try { calculateJobDays = window.calculateJobDays; } catch {}
+
+  window.syncJobTotalDaysField = function syncJobTotalDaysFieldWeekdaysOnly() {
+    const form = qs("#jobForm");
+    if (!form) return;
+    const start = form.querySelector('[name="start_date"]')?.value || "";
+    const end = form.querySelector('[name="end_date"]')?.value || start;
+    const total = window.calculateJobDays(start, end);
+    if (typeof setFormValue === "function") setFormValue(form, "total_job_days", total || "");
+    else {
+      const field = form.querySelector('[name="total_job_days"]');
+      if (field) field.value = total || "";
+    }
+  };
+  try { syncJobTotalDaysField = window.syncJobTotalDaysField; } catch {}
+
+  window.sheetInput = function sheetInputBlankZero(field, value, type = "text", step = "", className = "") {
+    const safeType = type === "number" ? "number" : type === "date" ? "date" : "text";
+    const displayValue = safeType === "number" ? blankZero(value) : (value ?? "");
+    const stepAttr = safeType === "number" && step ? ` step="${escapeValue(step)}"` : "";
+    const classAttr = className ? ` class="sheet-input ${escapeValue(className)}"` : ' class="sheet-input"';
+    return `<input${classAttr} data-field="${escapeValue(field)}" type="${safeType}"${stepAttr} value="${escapeValue(displayValue)}" />`;
+  };
+  try { sheetInput = window.sheetInput; } catch {}
+
+  const previousCalculateCostLine = typeof calculateCostLine === "function" ? calculateCostLine : null;
+  if (previousCalculateCostLine) {
+    window.calculateCostLine = function calculateCostLineWithEquipmentHours(category, fields, options = {}) {
+      const result = previousCalculateCostLine(category, fields, options) || {};
+      if (category !== "equipment") return result;
+
+      const rawQty = fields?.__raw?.qty;
+      const qty = hasValue(rawQty) ? n(fields.qty) : 0;
+      const hours = hasValue(fields?.__raw?.hours) ? n(fields.hours) : 0;
+      const days = hasValue(fields?.__raw?.days) ? n(fields.days) : 0;
+      const equipmentHours = qty > 0 ? qty * hours : 0;
+      const equipmentDays = qty > 0 ? qty * days : 0;
+
+      return {
+        ...result,
+        effective_hours: equipmentHours,
+        equipment_hours: equipmentHours,
+        equipment_days: equipmentDays
       };
-      window.showToast.__reliableWrapped = true;
-    }
+    };
+    try { calculateCostLine = window.calculateCostLine; } catch {}
   }
 
-  function installDynamicActionFallbacks() {
-    if (document.documentElement.dataset.dynamicFallbacksInstalled === "true") return;
-    document.documentElement.dataset.dynamicFallbacksInstalled = "true";
+  window.updateSheetRowTotals = function updateSheetRowTotalsBlankZeros(row, calculated = {}) {
+    const cost = row?.querySelector?.('[data-total="cost_total"]');
+    const quoted = row?.querySelector?.('[data-total="quoted_total"]');
+    const qtyValue = row?.querySelector?.('[data-field="qty"]')?.value ?? "";
+    const hasQty = String(qtyValue).trim() !== "" && !isZeroLike(qtyValue);
+    const rowIsBlank = !hasQty && n(calculated.cost_total) === 0 && n(calculated.quoted_total) === 0;
 
-    document.addEventListener("click", (event) => {
-      const jumpButton = event.target.closest?.("[data-view-jump]");
-      if (jumpButton && typeof showView === "function") {
-        showView(jumpButton.dataset.viewJump);
-      }
+    if (cost) cost.textContent = rowIsBlank || n(calculated.cost_total) === 0 ? "" : moneyValue(calculated.cost_total);
+    if (quoted) quoted.textContent = rowIsBlank || n(calculated.quoted_total) === 0 ? "" : moneyValue(calculated.quoted_total);
+  };
+  try { updateSheetRowTotals = window.updateSheetRowTotals; } catch {}
 
-      const navButton = event.target.closest?.(".nav-btn[data-view]");
-      if (navButton && typeof showView === "function") {
-        showView(navButton.dataset.view);
-      }
+  function blankZeroSheetInputs() {
+    qsa('#costTrackerForm .sheet-cost-row input[type="number"][data-field]').forEach((input) => {
+      if (isZeroLike(input.value)) input.value = "";
     });
   }
 
-  function checkDownloadTools() {
-    const missing = getMissingDashboardLibraries()
-      .filter((item) => !item.requiredForStartup)
-      .map((item) => item.name);
-    if (missing.length) {
-      console.warn(`Optional dashboard download tools missing: ${missing.join(", ")}`);
-    }
+  const previousRecomputeCostTrackerTotals = typeof recomputeCostTrackerTotals === "function" ? recomputeCostTrackerTotals : null;
+  if (previousRecomputeCostTrackerTotals) {
+    window.recomputeCostTrackerTotals = function recomputeCostTrackerTotalsWithEquipmentFooterAndBlankZeros() {
+      blankZeroSheetInputs();
+      const result = previousRecomputeCostTrackerTotals.apply(this, arguments);
+      const items = Array.isArray(result?.items) ? result.items : [];
+
+      const laborRows = items.filter((item) => item.category === "labor");
+      const equipmentRows = items.filter((item) => item.category === "equipment");
+
+      const laborQty = laborRows.reduce((sum, row) => sum + n(row.qty), 0);
+      const laborHours = laborRows.reduce((sum, row) => sum + n(row.effective_hours ?? row.hours), 0);
+      const laborOt = laborRows.reduce((sum, row) => sum + n(row.ot_hours), 0);
+
+      const equipmentQty = equipmentRows.reduce((sum, row) => sum + n(row.qty), 0);
+      const equipmentHours = equipmentRows.reduce((sum, row) => {
+        const qty = n(row.qty);
+        const hours = n(row.hours);
+        return sum + (qty > 0 ? qty * hours : 0);
+      }, 0);
+      const equipmentDays = equipmentRows.reduce((sum, row) => {
+        const qty = n(row.qty);
+        const days = n(row.days);
+        return sum + (qty > 0 ? qty * days : 0);
+      }, 0);
+
+      setTextBlankZero("#sheetLaborQty", laborQty);
+      setTextBlankZero("#sheetLaborHours", laborHours);
+      setTextBlankZero("#sheetLaborOtHours", laborOt);
+      setTextBlankZero("#sheetEquipmentQty", equipmentQty);
+      setTextBlankZero("#sheetEquipmentHours", equipmentHours);
+      setTextBlankZero("#sheetEquipmentDays", equipmentDays);
+
+      // Keep section cost/rate totals readable, but leave them blank when they are truly zero.
+      const byCategory = result?.summary?.byCategory || {};
+      setMoneyTextBlankZero("#sheetLaborCost", byCategory.labor?.cost || 0);
+      setMoneyTextBlankZero("#sheetLaborRate", byCategory.labor?.quoted || 0);
+      setMoneyTextBlankZero("#sheetEquipmentCost", byCategory.equipment?.cost || 0);
+      setMoneyTextBlankZero("#sheetEquipmentRate", byCategory.equipment?.quoted || 0);
+      setMoneyTextBlankZero("#sheetMaterialsCost", byCategory.materials?.cost || 0);
+      setMoneyTextBlankZero("#sheetMaterialsRate", byCategory.materials?.quoted || 0);
+      setMoneyTextBlankZero("#sheetSubcontractorCost", byCategory.subcontractors?.cost || 0);
+      setMoneyTextBlankZero("#sheetSubcontractorRate", byCategory.subcontractors?.quoted || 0);
+      setMoneyTextBlankZero("#sheetMiscCost", byCategory.misc?.cost || 0);
+      setMoneyTextBlankZero("#sheetMiscRate", byCategory.misc?.quoted || 0);
+
+      blankZeroSheetInputs();
+      return result;
+    };
+    try { recomputeCostTrackerTotals = window.recomputeCostTrackerTotals; } catch {}
   }
 
-  function install() {
-    installSubmitGuards();
-    installFormUnlockers();
-    installDynamicActionFallbacks();
-    checkDownloadTools();
+  function firstDefined(...values) {
+    for (const value of values) {
+      if (value !== undefined && value !== null && String(value).trim?.() !== "") return value;
+    }
+    return 0;
+  }
+
+  function trackerSummary(row) {
+    try { return typeof costTrackerSummary === "function" ? costTrackerSummary(row) : {}; } catch { return {}; }
+  }
+
+  function displayedLaborWithEquipment(row) {
+    const summary = trackerSummary(row);
+    const labor = firstDefined(row?.labor_cost, summary.laborCost, summary.labor_cost);
+    const equipment = firstDefined(row?.equipment_cost, summary.equipmentCost, summary.equipment_cost);
+    return n(labor) + n(equipment);
+  }
+
+  function normalizeCostTrackerTableHeader() {
+    const table = qs(".cost-trackers-table");
+    const headerRow = table?.querySelector("thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = `
+      <th>Name</th>
+      <th>Job</th>
+      <th>Labor</th>
+      <th>Material</th>
+      <th>Subcontractor</th>
+      <th>Total Cost</th>
+      <th>Quoted</th>
+      <th>Profit</th>
+      <th>Margin</th>
+      <th>Actions</th>
+    `;
+  }
+
+  window.renderCostTrackers = function renderCostTrackersEquipmentMergedIntoLabor() {
+    const rows = typeof filtered === "function"
+      ? filtered(state.data.costTrackers, ["tracker_name", "notes", "status"])
+      : (state?.data?.costTrackers || []);
+    const table = qs("#costTrackersTable");
+    const count = qs("#costTrackersCount");
+    if (!table || !count) return;
+
+    normalizeCostTrackerTableHeader();
+    count.textContent = rows.length;
+
+    table.innerHTML = rows.map((row) => {
+      const job = typeof findJob === "function" ? findJob(row.job_id) : null;
+      const trackerName = typeof getTrackerName === "function" ? getTrackerName(row) : (row.tracker_name || row.name || "Cost Tracker");
+      const jobLabel = job
+        ? `<strong>${escapeValue(job.job_number || "-")}</strong><br><span class="muted">${escapeValue(job.job_name || "")}</span>`
+        : `<strong>Unassigned</strong><br><span class="muted">Assign below or create a job</span>`;
+      const assignControl = typeof buildInlineJobAssignmentControl === "function" ? buildInlineJobAssignmentControl(row) : "";
+      const margin = typeof costTrackerMargin === "function" ? costTrackerMargin(row) : 0;
+      const formattedMargin = typeof formatPercent === "function" ? formatPercent(margin) : `${(margin * 100).toFixed(2)}%`;
+
+      return `
+        <tr class="${row.job_id ? "" : "is-unassigned"}">
+          <td data-label="Name" class="title-cell"><strong>${escapeValue(trackerName)}</strong><br><span class="muted">${row.job_id ? "Assigned tracker" : "Saved without job"}</span></td>
+          <td data-label="Job / Assignment" class="assignment-cell">
+            ${jobLabel}
+            ${assignControl}
+          </td>
+          <td data-label="Labor" class="money-cell">${moneyValue(displayedLaborWithEquipment(row))}</td>
+          <td data-label="Material" class="money-cell">${moneyValue(row.material_cost)}</td>
+          <td data-label="Subcontractor" class="money-cell">${moneyValue(row.subcontractor_cost)}</td>
+          <td data-label="Total Cost" class="money-cell total-money">${moneyValue(typeof costTrackerTotal === "function" ? costTrackerTotal(row) : row.total_cost)}</td>
+          <td data-label="Quoted" class="money-cell">${moneyValue(typeof costTrackerQuoted === "function" ? costTrackerQuoted(row) : row.quoted_price)}</td>
+          <td data-label="Profit" class="money-cell">${moneyValue(typeof costTrackerProfit === "function" ? costTrackerProfit(row) : 0)}</td>
+          <td data-label="Margin" class="money-cell">${formattedMargin}</td>
+          <td data-label="Actions" class="table-actions">
+            <button class="link-btn" data-edit-cost="${escapeValue(row.id)}" type="button">Edit</button>
+            <button class="link-btn" data-preview-cost="${escapeValue(row.id)}" type="button">Preview</button>
+            <button class="link-btn" data-download-cost="${escapeValue(row.id)}" type="button">Download</button>
+            ${row.job_id ? `<button class="link-btn" data-invoice-from-cost="${escapeValue(row.id)}" type="button">Invoice</button>` : ""}
+            <button class="link-btn danger-text" data-delete-type="costTrackers" data-delete-id="${escapeValue(row.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(10) : '<tr><td colspan="10" class="muted">No records found.</td></tr>');
+  };
+  try { renderCostTrackers = window.renderCostTrackers; } catch {}
+
+  function bindDateInputs() {
+    qsa('#jobForm [name="start_date"], #jobForm [name="end_date"]').forEach((input) => {
+      if (input.dataset.businessDaysBound) return;
+      input.dataset.businessDaysBound = "true";
+      input.addEventListener("input", window.syncJobTotalDaysField);
+      input.addEventListener("change", window.syncJobTotalDaysField);
+    });
+  }
+
+  function initializePatch() {
+    normalizeCostTrackerTableHeader();
+    bindDateInputs();
+    blankZeroSheetInputs();
+    try { window.syncJobTotalDaysField(); } catch {}
+    try { window.recomputeCostTrackerTotals(); } catch {}
+    try { window.renderCostTrackers(); } catch {}
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", install);
+    document.addEventListener("DOMContentLoaded", initializePatch);
   } else {
-    install();
+    initializePatch();
   }
 
-  window.addEventListener("pageshow", () => {
-    hideBootStatus();
-    formIds.forEach((id) => unlockForm(document.getElementById(id)));
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.('#costTrackerForm .sheet-cost-row input[type="number"][data-field]') && isZeroLike(event.target.value)) {
+      event.target.value = "";
+    }
   });
 })();
+
+
+
+/* ========================================================================
+   FINAL TIMESHEET JOB FOLDERS + EDIT PATCH
+   ------------------------------------------------------------------------
+   - The Saved Timesheets table now condenses all sheets for the same job into
+     one folder row.
+   - Opening a folder shows the daily sheets for that job.
+   - Edit loads a saved daily sheet back into the timesheet form; saving it
+     replaces the old rows for that same timesheet group.
+   ======================================================================== */
+(function installTimesheetJobFoldersAndEditingPatch() {
+  const TIMESHEET_TABLE = "timesheets";
+  const expandedFolders = window.PIMP_EXPANDED_TIMESHEET_FOLDERS || new Set();
+  window.PIMP_EXPANDED_TIMESHEET_FOLDERS = expandedFolders;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function n(value) {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function esc(value) {
+    if (typeof escapeHtml === "function") return escapeHtml(value);
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function escAttr(value) {
+    if (typeof escapeAttr === "function") return escapeAttr(value);
+    return esc(value);
+  }
+
+  function fmtDate(value) {
+    return typeof formatDate === "function" ? formatDate(value) : (value || "-");
+  }
+
+  function cleanNum(value) {
+    if (typeof cleanNumberDisplay === "function") return cleanNumberDisplay(value);
+    const rounded = Math.round((n(value) + Number.EPSILON) * 100) / 100;
+    return String(rounded).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1").replace(/\.0$/, "");
+  }
+
+  function safeFile(value) {
+    if (typeof safeFileName === "function") return safeFileName(value);
+    return String(value || "timesheet.pdf").replace(/[^a-z0-9_.-]+/gi, "_");
+  }
+
+  function currentTimesheetSearchTerm() {
+    return (qs("#timesheetsSearch")?.value || "").toLowerCase().trim();
+  }
+
+  function parseJson(value, fallback) {
+    if (!value) return fallback;
+    if (Array.isArray(value) || (typeof value === "object" && value !== null)) return value;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function employeeLabel(employee) {
+    return employee?.full_name || employee?.name || employee?.email || "Unnamed Employee";
+  }
+
+  function employeeIdentifier(employee) {
+    return employee?.employee_id || employee?.emp_id || employee?.external_id || employee?.id?.slice?.(0, 8) || "";
+  }
+
+  function findEmployeeSafe(id) {
+    return typeof findEmployee === "function" ? findEmployee(id) : (state.data.employees || []).find((employee) => employee.id === id);
+  }
+
+  function findJobSafe(id) {
+    return typeof findJob === "function" ? findJob(id) : (state.data.jobs || []).find((job) => job.id === id);
+  }
+
+  function timesheetGroupKey(entry) {
+    return entry?.timesheet_group_id || entry?.id || `legacy:${entry?.job_id || "unassigned"}:${entry?.work_date || "no-date"}`;
+  }
+
+  function buildLineFromRow(row) {
+    const employee = findEmployeeSafe(row.employee_id);
+    return {
+      employee_id: row.employee_id || "",
+      employee_identifier: row.employee_identifier || employeeIdentifier(employee),
+      employee_name: row.employee_name || employeeLabel(employee),
+      classification: row.classification || employee?.role || "",
+      hours: n(row.hours),
+      tr: Boolean(row.tr || n(row.travel_hours) > 0),
+      pd: Boolean(row.pd || n(row.per_diem) > 0),
+      notes: row.notes || ""
+    };
+  }
+
+  function savedDailyTimesheetGroups() {
+    const groups = new Map();
+    (state.data.timesheets || []).forEach((entry) => {
+      const key = timesheetGroupKey(entry);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          rows: [],
+          first: entry,
+          lineItems: parseJson(entry.line_items, null),
+          summary: parseJson(entry.summary, {})
+        });
+      }
+      groups.get(key).rows.push(entry);
+    });
+
+    return Array.from(groups.values()).map((group) => {
+      const first = group.first || {};
+      const job = findJobSafe(first.job_id);
+      const lines = Array.isArray(group.lineItems) && group.lineItems.length
+        ? group.lineItems.map((line) => ({
+            employee_id: line.employee_id || "",
+            employee_identifier: line.employee_identifier || "",
+            employee_name: line.employee_name || employeeLabel(findEmployeeSafe(line.employee_id)),
+            classification: line.classification || "",
+            hours: n(line.hours),
+            tr: Boolean(line.tr),
+            pd: Boolean(line.pd),
+            notes: line.notes || ""
+          }))
+        : group.rows.map(buildLineFromRow);
+      const totalHours = lines.reduce((sum, line) => sum + n(line.hours), 0);
+
+      return {
+        id: group.id,
+        rows: group.rows,
+        first,
+        job,
+        lines,
+        summary: group.summary || {},
+        date: first.work_date || "",
+        customer: first.customer || job?.company_name || "",
+        jobNumber: first.job_number || job?.job_number || "",
+        jobName: job?.job_name || "",
+        jobId: first.job_id || "",
+        location: first.location || job?.location || "",
+        ticket: first.ticket_number || "",
+        description: first.description_of_services || "",
+        status: first.status || "submitted",
+        totalHours,
+        employeeCount: lines.length,
+        html: first.html_snapshot || "",
+        filename: first.download_filename || ""
+      };
+    }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }
+
+  function jobFolderKey(daily) {
+    return daily.jobId || `job-number:${daily.jobNumber || "unassigned"}`;
+  }
+
+  function savedTimesheetJobFolders() {
+    const folders = new Map();
+    savedDailyTimesheetGroups().forEach((daily) => {
+      const key = jobFolderKey(daily);
+      if (!folders.has(key)) {
+        folders.set(key, {
+          id: key,
+          job: daily.job,
+          jobId: daily.jobId,
+          jobNumber: daily.jobNumber,
+          jobName: daily.jobName,
+          customer: daily.customer,
+          location: daily.location,
+          dailySheets: []
+        });
+      }
+
+      const folder = folders.get(key);
+      folder.dailySheets.push(daily);
+      folder.job = folder.job || daily.job;
+      folder.jobNumber = folder.jobNumber || daily.jobNumber;
+      folder.jobName = folder.jobName || daily.jobName;
+      folder.customer = folder.customer || daily.customer;
+      folder.location = folder.location || daily.location;
+    });
+
+    return Array.from(folders.values()).map((folder) => {
+      const dates = folder.dailySheets.map((daily) => daily.date).filter(Boolean).sort();
+      const totalHours = folder.dailySheets.reduce((sum, daily) => sum + n(daily.totalHours), 0);
+      const employeeCount = folder.dailySheets.reduce((sum, daily) => sum + n(daily.employeeCount), 0);
+      const latest = [...folder.dailySheets].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0] || {};
+      return {
+        ...folder,
+        dateStart: dates[0] || "",
+        dateEnd: dates[dates.length - 1] || "",
+        totalHours,
+        employeeCount,
+        latestTicket: latest.ticket || "",
+        latestDate: latest.date || ""
+      };
+    }).sort((a, b) => String(b.latestDate || "").localeCompare(String(a.latestDate || "")));
+  }
+
+  function folderDateRange(folder) {
+    if (!folder.dateStart && !folder.dateEnd) return "-";
+    if (folder.dateStart === folder.dateEnd) return fmtDate(folder.dateStart);
+    return `${fmtDate(folder.dateStart)} to ${fmtDate(folder.dateEnd)}`;
+  }
+
+  function folderMatchesSearch(folder, term) {
+    if (!term) return true;
+    const folderText = [
+      folder.jobNumber,
+      folder.jobName,
+      folder.customer,
+      folder.location,
+      folder.latestTicket,
+      folderDateRange(folder)
+    ].join(" ").toLowerCase();
+    if (folderText.includes(term)) return true;
+
+    return folder.dailySheets.some((daily) => [
+      daily.date,
+      daily.customer,
+      daily.jobNumber,
+      daily.jobName,
+      daily.location,
+      daily.ticket,
+      daily.description,
+      daily.lines.map((line) => `${line.employee_name} ${line.classification} ${line.notes}`).join(" ")
+    ].join(" ").toLowerCase().includes(term));
+  }
+
+  function normalizeTimesheetHeader() {
+    const headerRow = qs(".timesheets-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = `
+      <th>Folder / Date</th>
+      <th>Customer</th>
+      <th>Job / Dates</th>
+      <th>Location</th>
+      <th>Timesheets / Employees</th>
+      <th>Total Hours</th>
+      <th>Ticket #</th>
+      <th>Actions</th>
+    `;
+  }
+
+  window.renderTimesheets = function renderTimesheetsAsJobFolders() {
+    const table = qs("#timesheetsTable");
+    const count = qs("#timesheetsCount");
+    if (!table || !count) return;
+
+    normalizeTimesheetHeader();
+    const term = currentTimesheetSearchTerm();
+    const folders = savedTimesheetJobFolders().filter((folder) => folderMatchesSearch(folder, term));
+    count.textContent = folders.length;
+
+    table.innerHTML = folders.map((folder) => {
+      const isOpen = expandedFolders.has(folder.id) || Boolean(term);
+      const dailyRows = isOpen ? folder.dailySheets.map((daily) => `
+        <tr class="timesheet-folder-child-row">
+          <td data-label="Date"><span class="timesheet-child-arrow">↳</span>${fmtDate(daily.date)}</td>
+          <td data-label="Customer">${esc(daily.customer || folder.customer || "-")}</td>
+          <td data-label="Job">${esc(daily.jobNumber || folder.jobNumber || "-")}<br><span class="muted">${esc(daily.jobName || folder.jobName || "Daily sheet")}</span></td>
+          <td data-label="Location">${esc(daily.location || folder.location || "-")}</td>
+          <td data-label="Employees" class="money-cell">${cleanNum(daily.employeeCount)}</td>
+          <td data-label="Total Hours" class="money-cell">${cleanNum(daily.totalHours)}</td>
+          <td data-label="Ticket #">${esc(daily.ticket || "-")}</td>
+          <td data-label="Actions" class="table-actions timesheet-child-actions">
+            <button class="link-btn" data-edit-timesheet-daily="${escAttr(daily.id)}" type="button">Edit</button>
+            <button class="link-btn" data-view-timesheet-daily="${escAttr(daily.id)}" type="button">Preview</button>
+            <button class="link-btn" data-download-timesheet-daily="${escAttr(daily.id)}" type="button">Download</button>
+            <button class="link-btn danger-text" data-delete-timesheet-daily="${escAttr(daily.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `).join("") : "";
+
+      const label = folder.jobNumber || "Unassigned Job";
+      const openText = isOpen ? "Close Folder" : "Open Folder";
+      return `
+        <tr class="timesheet-folder-row">
+          <td data-label="Folder / Date" class="title-cell">
+            <strong><span class="timesheet-folder-icon">📁</span>${esc(label)}</strong>
+            <br><span class="muted">${esc(folder.jobName || "Timesheet folder")}</span>
+          </td>
+          <td data-label="Customer">${esc(folder.customer || "-")}</td>
+          <td data-label="Job / Dates">${esc(folder.jobNumber || "-")}<br><span class="muted">${folderDateRange(folder)}</span></td>
+          <td data-label="Location">${esc(folder.location || "-")}</td>
+          <td data-label="Timesheets / Employees" class="money-cell">${folder.dailySheets.length} sheet${folder.dailySheets.length === 1 ? "" : "s"}<br><span class="muted">${cleanNum(folder.employeeCount)} employee line${folder.employeeCount === 1 ? "" : "s"}</span></td>
+          <td data-label="Total Hours" class="money-cell total-money">${cleanNum(folder.totalHours)}</td>
+          <td data-label="Ticket #">${esc(folder.latestTicket || "-")}</td>
+          <td data-label="Actions" class="table-actions timesheet-folder-actions">
+            <button class="link-btn" data-toggle-timesheet-folder="${escAttr(folder.id)}" type="button">${openText}</button>
+            ${folder.jobId ? `<button class="link-btn" data-new-timesheet-for-job="${escAttr(folder.jobId)}" type="button">New Sheet</button>` : ""}
+          </td>
+        </tr>
+        ${dailyRows}
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8" class="muted">No records found.</td></tr>');
+  };
+  try { renderTimesheets = window.renderTimesheets; } catch {}
+
+  function form() {
+    return qs("#timesheetForm");
+  }
+
+  function setField(name, value) {
+    const timesheetForm = form();
+    if (!timesheetForm) return;
+    qsa(`[name="${name}"]`, timesheetForm).forEach((input) => { input.value = value ?? ""; });
+  }
+
+  function getField(name) {
+    return qs(`[name="${name}"]`, form())?.value || "";
+  }
+
+  function employeeOptions(selectedId = "") {
+    return [
+      '<option value="">Select employee...</option>',
+      ...(state.data.employees || []).map((employee) => {
+        const selected = employee.id === selectedId ? " selected" : "";
+        return `<option value="${escAttr(employee.id)}"${selected}>${esc(employeeLabel(employee))}</option>`;
+      })
+    ].join("");
+  }
+
+  function addEmployeeRow(defaults = {}) {
+    const tbody = qs("#timesheetEmployeeRows");
+    if (!tbody) return;
+
+    const row = document.createElement("tr");
+    row.className = "timesheet-employee-row";
+    row.innerHTML = `
+      <td><input data-ts-field="employee_identifier" value="${escAttr(defaults.employee_identifier || "")}" placeholder="ID" /></td>
+      <td>
+        <select data-ts-field="employee_id" class="timesheet-employee-select">${employeeOptions(defaults.employee_id || "")}</select>
+        <input data-ts-field="employee_name" value="${escAttr(defaults.employee_name || "")}" placeholder="Employee name" />
+      </td>
+      <td><input data-ts-field="classification" value="${escAttr(defaults.classification || "")}" placeholder="Classification" /></td>
+      <td><input data-ts-field="hours" type="number" min="0" step="0.25" value="${escAttr(defaults.hours ?? "")}" /></td>
+      <td><input data-ts-field="tr" type="checkbox" ${defaults.tr ? "checked" : ""} /></td>
+      <td><input data-ts-field="pd" type="checkbox" ${defaults.pd ? "checked" : ""} /></td>
+      <td><input data-ts-field="notes" value="${escAttr(defaults.notes || "")}" placeholder="Optional" /></td>
+      <td class="timesheet-row-actions"><button class="icon-btn remove-timesheet-row" type="button" aria-label="Remove employee row">×</button></td>
+    `;
+    tbody.appendChild(row);
+  }
+
+  function setEmployeeRows(lines = []) {
+    const tbody = qs("#timesheetEmployeeRows");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    const rows = Array.isArray(lines) && lines.length ? lines : [{}, {}, {}, {}, {}];
+    rows.forEach(addEmployeeRow);
+  }
+
+  function setTimesheetSubmitMode(isEditing) {
+    const button = qs('#timesheetForm button[type="submit"]');
+    if (button) button.textContent = isEditing ? "Update Timesheet" : "Save Timesheet";
+  }
+
+  function getDailyById(dailyId) {
+    return savedDailyTimesheetGroups().find((daily) => daily.id === dailyId);
+  }
+
+  function dataFromDaily(daily) {
+    const job = daily.job || findJobSafe(daily.jobId);
+    return {
+      job_id: daily.jobId || "",
+      job,
+      work_date: daily.date || (typeof today === "function" ? today() : ""),
+      customer: daily.customer || job?.company_name || "",
+      customer_afe_no: daily.jobNumber || job?.job_number || "",
+      pms_job_number: job?.job_number || daily.jobNumber || "",
+      location: daily.location || job?.location || "",
+      ticket_number: daily.ticket || "",
+      description_of_services: daily.description || "",
+      status: daily.status || "submitted",
+      lines: daily.lines || [],
+      summary: {
+        employee_count: daily.employeeCount || 0,
+        total_hours: daily.totalHours || 0
+      }
+    };
+  }
+
+  function updateJobSummary(job, workDate = "") {
+    const summary = qs("#timesheetJobSummary");
+    if (!summary) return;
+    if (!job) {
+      summary.innerHTML = `
+        <strong>No job selected</strong>
+        <span>Choose a job above. The timecard below will fill customer, job number, location, and date automatically.</span>
+      `;
+      return;
+    }
+    summary.innerHTML = `
+      <strong>${esc(job.job_number || "No #")} — ${esc(job.job_name || "Untitled Job")}</strong>
+      <span>${esc(job.company_name || "No customer")} • ${esc(job.location || "No location")} • Editing date: ${esc(fmtDate(workDate || (typeof today === "function" ? today() : "")))}</span>
+    `;
+  }
+
+  function loadDailyIntoForm(dailyId) {
+    const daily = getDailyById(dailyId);
+    if (!daily) {
+      if (typeof showToast === "function") showToast("I could not find that saved timesheet. Refresh and try again.", true);
+      return;
+    }
+
+    const data = dataFromDaily(daily);
+    const timesheetForm = form();
+    if (!timesheetForm) return;
+
+    if (typeof showView === "function") showView("timesheets");
+    setField("timesheet_group_id", daily.id);
+    setField("job_id", data.job_id);
+    setField("customer", data.customer);
+    setField("customer_afe_no", data.customer_afe_no);
+    setField("pms_job_number", data.pms_job_number);
+    setField("location", data.location);
+    setField("work_date", data.work_date);
+    setField("ticket_number", data.ticket_number);
+    setField("description_of_services", data.description_of_services);
+    setEmployeeRows(data.lines);
+    setTimesheetSubmitMode(true);
+    updateJobSummary(data.job, data.work_date);
+
+    timesheetForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (typeof showToast === "function") showToast("Timesheet loaded for editing. Make changes, then click Update Timesheet.");
+  }
+
+  function startNewSheetForJob(jobId) {
+    const job = findJobSafe(jobId);
+    if (typeof showView === "function") showView("timesheets");
+    setField("timesheet_group_id", "");
+    setField("job_id", jobId || "");
+    setField("customer", job?.company_name || "");
+    setField("customer_afe_no", job?.job_number || "");
+    setField("pms_job_number", job?.job_number || "");
+    setField("location", job?.location || "");
+    setField("work_date", typeof today === "function" ? today() : "");
+    setField("ticket_number", "");
+    setField("description_of_services", "");
+    setEmployeeRows([{}, {}, {}, {}, {}]);
+    setTimesheetSubmitMode(false);
+    updateJobSummary(job, getField("work_date"));
+    form()?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function buildTimesheetHtmlFromData(data) {
+    const rows = [...(data.lines || [])].slice(0, 21);
+    while (rows.length < 21) rows.push({});
+    const body = rows.map((line) => `
+      <tr>
+        <td>${esc(line.employee_identifier || "")}</td>
+        <td>${esc(line.employee_name || "")}</td>
+        <td>${esc(line.classification || "")}</td>
+        <td class="hours-cell">${line.hours ? cleanNum(line.hours) : ""}</td>
+        <td class="check-cell">${line.tr ? "✓" : ""}</td>
+        <td class="check-cell">${line.pd ? "✓" : ""}</td>
+        <td>${esc(line.notes || "")}</td>
+        <td></td>
+      </tr>
+    `).join("");
+
+    return `
+      <article class="timesheet-template-document timesheet-print-document">
+        <div class="timesheet-top-rule"></div>
+        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-logo-wrap"><img src="${window.PIMP_LOGO_DATA_URL || 'NEW_logo.png'}" alt="PIMP" /><strong>PIMP</strong></div>
+        <div class="ts-label ts-customer-label">Customer:</div>
+        <div class="ts-cell ts-customer-value">${esc(data.customer)}</div>
+        <div class="ts-label ts-afe-label">Customer AFE / No:</div>
+        <div class="ts-cell ts-afe-value">${esc(data.customer_afe_no)}</div>
+        <div class="ts-label ts-pms-label">PMS Job Number:</div>
+        <div class="ts-cell ts-pms-value">${esc(data.pms_job_number)}</div>
+        <div class="ts-label ts-date-label">Date :</div>
+        <div class="ts-cell ts-date-value">${fmtDate(data.work_date)}</div>
+        <div class="ts-label ts-location-label">Location:</div>
+        <div class="ts-cell ts-location-value">${esc(data.location)}</div>
+        <div class="ts-label ts-ticket-label">Ticket Number:</div>
+        <div class="ts-cell ts-ticket-value">${esc(data.ticket_number)}</div>
+        <div class="ts-label ts-description-label">Description of Services:</div>
+        <div class="ts-cell ts-description-value static-multiline">${esc(data.description_of_services)}</div>
+        <table class="timesheet-employee-grid">
+          <thead><tr><th>Emp ID</th><th>Emp Name</th><th>Classification</th><th>Hours</th><th>TR</th><th>PD</th><th></th><th></th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </article>
+    `;
+  }
+
+  function htmlForDaily(daily) {
+    return daily?.html || buildTimesheetHtmlFromData(dataFromDaily(daily));
+  }
+
+  function fileNameForDaily(daily) {
+    if (daily?.filename) return daily.filename;
+    const jobPart = daily?.jobNumber || "timesheet";
+    const datePart = daily?.date || (typeof today === "function" ? today() : "date");
+    const ticketPart = daily?.ticket ? `_${daily.ticket}` : "";
+    return safeFile(`timesheet_${jobPart}_${datePart}${ticketPart}.pdf`);
+  }
+
+  function openPreview(html, daily) {
+    const existing = qs("#timesheetPreviewDialog");
+    if (existing) existing.remove();
+
+    const dialog = document.createElement("dialog");
+    dialog.id = "timesheetPreviewDialog";
+    dialog.className = "settings-dialog timesheet-preview-dialog";
+    dialog.innerHTML = `
+      <div class="settings-card timesheet-preview-card">
+        <div class="panel-header">
+          <h3>Timesheet Preview</h3>
+          <div class="action-group">
+            <button class="btn ghost" id="editTimesheetFromPreviewBtn" type="button">Edit</button>
+            <button class="btn ghost" id="downloadTimesheetPreviewBtn" type="button">Download PDF</button>
+            <button class="btn danger" id="closeTimesheetPreviewBtn" type="button">Close</button>
+          </div>
+        </div>
+        <div id="timesheetPreviewContent" class="timesheet-preview-content">${html}</div>
+      </div>
+    `;
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    qs("#closeTimesheetPreviewBtn", dialog)?.addEventListener("click", () => dialog.close());
+    qs("#downloadTimesheetPreviewBtn", dialog)?.addEventListener("click", () => downloadPdf(html, fileNameForDaily(daily)));
+    qs("#editTimesheetFromPreviewBtn", dialog)?.addEventListener("click", () => {
+      dialog.close();
+      loadDailyIntoForm(daily.id);
+    });
+    dialog.addEventListener("close", () => dialog.remove());
+  }
+
+  async function downloadPdf(html, filename) {
+    if (!window.html2pdf) {
+      if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet");
+      if (typeof showToast === "function") showToast("PDF library was unavailable. The print/save PDF window opened instead.", true);
+      return;
+    }
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "pdf-workbench timesheet-pdf-workbench";
+    wrapper.innerHTML = html;
+    document.body.appendChild(wrapper);
+
+    try {
+      await window.html2pdf()
+        .set({
+          margin: 0,
+          filename: safeFile(filename || "timesheet.pdf"),
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
+        })
+        .from(wrapper.querySelector(".timesheet-template-document") || wrapper)
+        .save();
+      if (typeof showToast === "function") showToast("Timesheet PDF downloaded.");
+    } catch (error) {
+      if (typeof showToast === "function") showToast("Timesheet PDF download failed. Refresh and try again.", true);
+    } finally {
+      wrapper.remove();
+    }
+  }
+
+  async function deleteDaily(dailyId) {
+    const daily = getDailyById(dailyId);
+    if (!daily || !state.supabase) return;
+    if (!window.confirm("Delete this saved daily timesheet?")) return;
+
+    try {
+      if (daily.first?.timesheet_group_id) {
+        const { error } = await state.supabase.from(TIMESHEET_TABLE).delete().eq("timesheet_group_id", daily.first.timesheet_group_id);
+        if (error) throw error;
+      } else {
+        const ids = (daily.rows || []).map((row) => row.id).filter(Boolean);
+        if (ids.length) {
+          const { error } = await state.supabase.from(TIMESHEET_TABLE).delete().in("id", ids);
+          if (error) throw error;
+        }
+      }
+
+      state.data.timesheets = (state.data.timesheets || []).filter((entry) => timesheetGroupKey(entry) !== dailyId);
+      window.renderTimesheets();
+      if (typeof showToast === "function") showToast("Timesheet deleted.");
+    } catch (error) {
+      if (typeof showToast === "function") showToast(error.message || String(error), true);
+    }
+  }
+
+  function bindTimesheetFolderPatch() {
+    normalizeTimesheetHeader();
+    setTimesheetSubmitMode(Boolean(getField("timesheet_group_id")));
+    try { window.renderTimesheets(); } catch {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindTimesheetFolderPatch);
+  } else {
+    bindTimesheetFolderPatch();
+  }
+
+  document.addEventListener("click", async (event) => {
+    const toggleId = event.target.closest?.("[data-toggle-timesheet-folder]")?.dataset.toggleTimesheetFolder;
+    const editId = event.target.closest?.("[data-edit-timesheet-daily]")?.dataset.editTimesheetDaily;
+    const viewId = event.target.closest?.("[data-view-timesheet-daily]")?.dataset.viewTimesheetDaily;
+    const downloadId = event.target.closest?.("[data-download-timesheet-daily]")?.dataset.downloadTimesheetDaily;
+    const deleteId = event.target.closest?.("[data-delete-timesheet-daily]")?.dataset.deleteTimesheetDaily;
+    const newJobId = event.target.closest?.("[data-new-timesheet-for-job]")?.dataset.newTimesheetForJob;
+
+    if (toggleId) {
+      if (expandedFolders.has(toggleId)) expandedFolders.delete(toggleId);
+      else expandedFolders.add(toggleId);
+      window.renderTimesheets();
+    }
+
+    if (newJobId) {
+      startNewSheetForJob(newJobId);
+    }
+
+    if (editId) {
+      loadDailyIntoForm(editId);
+    }
+
+    if (viewId) {
+      const daily = getDailyById(viewId);
+      if (daily) openPreview(htmlForDaily(daily), daily);
+    }
+
+    if (downloadId) {
+      const daily = getDailyById(downloadId);
+      if (daily) await downloadPdf(htmlForDaily(daily), fileNameForDaily(daily));
+    }
+
+    if (deleteId) {
+      await deleteDaily(deleteId);
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest?.("#newTimesheetDayBtn")) {
+      window.setTimeout(() => setTimesheetSubmitMode(false), 0);
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    if (event.target.closest?.('#timesheetForm select[name="job_id"], #timesheetForm [name="work_date"]')) {
+      setTimesheetSubmitMode(false);
+    }
+  }, true);
+})();
+
+/* ========================================================================
+   FINAL COST TRACKER + INVOICE POPUP WORKFLOW PATCH
+   ------------------------------------------------------------------------
+   - Keeps the Cost Tracker and Invoice templates hidden by default.
+   - Opens the existing templates in popup windows when creating, selecting,
+     or editing a cost tracker/invoice.
+   - Applies the same popup behavior to buttons from Jobs, Dashboard,
+     Cost Trackers, and Invoices tables.
+   ======================================================================== */
+(function installCostTrackerInvoicePopupWorkflowFinal() {
+  const MODAL_READY_ATTR = "data-popup-template-ready";
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function safeShowToast(message, isError = false) {
+    try { if (typeof showToast === "function") showToast(message, isError); } catch {}
+  }
+
+  function safeShowView(viewName) {
+    try { if (typeof showView === "function") showView(viewName); } catch {}
+  }
+
+  function safeMoney(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    const n = Number(value || 0);
+    return `$${Number.isFinite(n) ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}`;
+  }
+
+  function safeNumber(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function safeEscape(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '\"': "&quot;", "'": "&#039;"
+    }[char]));
+  }
+
+  function safeAttr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return safeEscape(value);
+  }
+
+  function safeDate(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    return value || "-";
+  }
+
+  function setField(form, name, value) {
+    const field = form?.querySelector(`[name="${name}"]`);
+    if (!field) return;
+    field.value = value ?? "";
+    try { field.dispatchEvent(new Event("input", { bubbles: true })); } catch {}
+    try { field.dispatchEvent(new Event("change", { bubbles: true })); } catch {}
+  }
+
+  function getJob(jobId) {
+    try { if (typeof findJob === "function") return findJob(jobId); } catch {}
+    return (state?.data?.jobs || []).find((job) => job.id === jobId) || null;
+  }
+
+  function getTrackerName(tracker) {
+    try { if (typeof getTrackerName === "function") return getTrackerName(tracker); } catch {}
+    let summary = {};
+    try { summary = typeof tracker?.summary === "string" ? JSON.parse(tracker.summary) : (tracker?.summary || {}); } catch {}
+    return tracker?.tracker_name || tracker?.cost_tracker_name || summary.trackerName || summary.costTrackerName || "Cost Tracker";
+  }
+
+  function getLatestTrackerForJob(jobId) {
+    return (state?.data?.costTrackers || [])
+      .filter((tracker) => tracker.job_id === jobId)
+      .sort((a, b) => {
+        const aTime = Date.parse(a.updated_at || a.last_synced_at || a.created_at || "") || 0;
+        const bTime = Date.parse(b.updated_at || b.last_synced_at || b.created_at || "") || 0;
+        return bTime - aTime;
+      })[0] || null;
+  }
+
+  function getLatestInvoiceForJob(jobId) {
+    return (state?.data?.invoices || [])
+      .filter((invoice) => invoice.job_id === jobId)
+      .sort((a, b) => {
+        const aTime = Date.parse(a.updated_at || a.last_synced_at || a.invoice_date || a.created_at || "") || 0;
+        const bTime = Date.parse(b.updated_at || b.last_synced_at || b.invoice_date || b.created_at || "") || 0;
+        return bTime - aTime;
+      })[0] || null;
+  }
+
+  function ensureRecordHiddenInput(form) {
+    if (!form || form.querySelector('[name="record_id"]')) return;
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = "record_id";
+    form.prepend(input);
+  }
+
+  function updateCostTrackerPageLabels() {
+    qsa("#costTrackersTable").forEach((table) => {
+      const headers = table.closest("table")?.querySelectorAll("thead th") || [];
+      headers.forEach((th) => {
+        const text = th.textContent.trim().toLowerCase();
+        if (text === "total cost") th.textContent = "Cost Total";
+        if (text === "quoted") th.textContent = "Rate Total";
+      });
+    });
+
+    qsa("#statQuoted").forEach((node) => {
+      const card = node.closest(".stat-card");
+      const label = card?.querySelector("span");
+      if (label && label.textContent.trim().toLowerCase() === "quoted total") label.textContent = "Rate Total";
+    });
+
+    qsa("#statCost").forEach((node) => {
+      const card = node.closest(".stat-card");
+      const label = card?.querySelector("span");
+      if (label && label.textContent.trim().toLowerCase() === "total cost") label.textContent = "Cost Total";
+    });
+  }
+
+  function createTemplateModal(options) {
+    const form = qs(options.formSelector);
+    if (!form || form.getAttribute(MODAL_READY_ATTR) === "true") return;
+
+    ensureRecordHiddenInput(form);
+    form.setAttribute(MODAL_READY_ATTR, "true");
+    form.classList.add("template-popup-form");
+
+    const originalParent = form.parentElement;
+    const originalNext = form.nextElementSibling;
+
+    const intro = document.createElement("section");
+    intro.className = `panel template-page-start ${options.kind}-page-start`;
+    intro.innerHTML = options.startHtml;
+
+    const overlay = document.createElement("div");
+    overlay.id = options.overlayId;
+    overlay.className = `template-modal-overlay hidden ${options.kind}-modal-overlay`;
+    overlay.setAttribute("aria-hidden", "true");
+
+    const card = document.createElement("div");
+    card.className = `template-modal-card ${options.kind}-modal-card`;
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-labelledby", options.titleId);
+
+    card.innerHTML = `
+      <div class="template-modal-header">
+        <div>
+          <p class="eyebrow">${safeEscape(options.eyebrow)}</p>
+          <h3 id="${safeAttr(options.titleId)}">${safeEscape(options.title)}</h3>
+          <p class="tiny template-modal-subtitle">${safeEscape(options.subtitle)}</p>
+        </div>
+        <button class="icon-btn template-modal-close" type="button" data-close-template-modal="${safeAttr(options.kind)}" aria-label="Close ${safeAttr(options.title)} popup">×</button>
+      </div>
+      <div class="template-modal-body"></div>
+    `;
+
+    overlay.appendChild(card);
+    card.querySelector(".template-modal-body").appendChild(form);
+
+    if (originalParent) {
+      originalParent.insertBefore(intro, originalNext || originalParent.firstChild);
+      originalParent.insertBefore(overlay, intro.nextSibling);
+    } else {
+      document.body.appendChild(intro);
+      document.body.appendChild(overlay);
+    }
+  }
+
+  function buildJobOptions(kind) {
+    const jobs = state?.data?.jobs || [];
+    const label = kind === "invoice" ? "Select a job to create/open an invoice..." : "Select a job to create/open a cost tracker...";
+    return [
+      `<option value="">${safeEscape(label)}</option>`,
+      ...jobs.map((job) => `<option value="${safeAttr(job.id)}">${safeEscape(`${job.job_number || "No #"} — ${job.job_name || "Untitled"}`)}</option>`)
+    ].join("");
+  }
+
+  function refreshPopupPageControls() {
+    const costSelect = qs("#costTrackerPageJobSelect");
+    if (costSelect) {
+      const current = costSelect.value;
+      costSelect.innerHTML = buildJobOptions("cost");
+      if (current) costSelect.value = current;
+    }
+
+    const invoiceSelect = qs("#invoicePageJobSelect");
+    if (invoiceSelect) {
+      const current = invoiceSelect.value;
+      invoiceSelect.innerHTML = buildJobOptions("invoice");
+      if (current) invoiceSelect.value = current;
+    }
+
+    updateCostTrackerPageLabels();
+  }
+
+  function openTemplateModal(kind, title) {
+    const overlay = qs(kind === "cost" ? "#costTrackerTemplateModalOverlay" : "#invoiceTemplateModalOverlay");
+    if (!overlay) return;
+    const heading = overlay.querySelector(".template-modal-header h3");
+    if (heading && title) heading.textContent = title;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("template-modal-open");
+    const firstInput = overlay.querySelector("input:not([type='hidden']), select, textarea, button");
+    setTimeout(() => firstInput?.focus?.(), 30);
+  }
+
+  function closeTemplateModal(kind) {
+    const overlay = qs(kind === "cost" ? "#costTrackerTemplateModalOverlay" : "#invoiceTemplateModalOverlay");
+    if (!overlay) return;
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+    if (!qs(".template-modal-overlay:not(.hidden)")) document.body.classList.remove("template-modal-open");
+  }
+
+  const previousLoadCostTrackerIntoForm = typeof window.loadCostTrackerIntoForm === "function"
+    ? window.loadCostTrackerIntoForm
+    : (typeof loadCostTrackerIntoForm === "function" ? loadCostTrackerIntoForm : null);
+
+  const previousLoadCostTrackerForJob = typeof window.loadCostTrackerForJob === "function"
+    ? window.loadCostTrackerForJob
+    : (typeof loadCostTrackerForJob === "function" ? loadCostTrackerForJob : null);
+
+  const previousFillInvoiceFromCostTracker = typeof window.fillInvoiceFromCostTracker === "function"
+    ? window.fillInvoiceFromCostTracker
+    : (typeof fillInvoiceFromCostTracker === "function" ? fillInvoiceFromCostTracker : null);
+
+  const previousLoadInvoiceIntoForm = typeof window.loadInvoiceIntoForm === "function"
+    ? window.loadInvoiceIntoForm
+    : (typeof loadInvoiceIntoForm === "function" ? loadInvoiceIntoForm : null);
+
+  const previousLoadInvoiceForJob = typeof window.loadInvoiceForJob === "function"
+    ? window.loadInvoiceForJob
+    : (typeof loadInvoiceForJob === "function" ? loadInvoiceForJob : null);
+
+  function makeBlankCostTrackerForJob(jobId, options = {}) {
+    const form = qs("#costTrackerForm");
+    const job = getJob(jobId);
+    if (!form) return;
+
+    if (typeof resetCostTrackerForm === "function") resetCostTrackerForm(false);
+    else form.reset();
+
+    if (job) {
+      setField(form, "job_id", job.id);
+      setField(form, "cost_tracker_name", `${job.job_number || "Job"} Cost Tracker`);
+      const totalDays = job.total_job_days || (typeof calculateJobDays === "function" ? calculateJobDays(job.start_date, job.end_date) : "");
+      setField(form, "total_job_days", totalDays || "");
+      try { if (typeof populateCostTrackerFromTemplateForJob === "function") populateCostTrackerFromTemplateForJob(job); } catch {}
+      try { if (typeof updateCostSheetHeaderFromJob === "function") updateCostSheetHeaderFromJob(job); } catch {}
+    } else if (options.unassigned) {
+      setField(form, "job_id", "");
+      setField(form, "cost_tracker_name", "Unassigned Cost Tracker");
+      try { if (typeof updateCostSheetHeaderFromSelectedJob === "function") updateCostSheetHeaderFromSelectedJob(); } catch {}
+    }
+
+    try { if (typeof setDefaultCostTrackerDate === "function") setDefaultCostTrackerDate(); } catch {}
+    try { if (typeof recomputeCostTrackerTotals === "function") recomputeCostTrackerTotals(); } catch {}
+  }
+
+  function makeBlankInvoiceForJob(jobId) {
+    const form = qs("#invoiceForm");
+    const job = getJob(jobId);
+    if (!form) return;
+
+    form.reset();
+    try { if (typeof clearInvoiceLineRows === "function") clearInvoiceLineRows(); } catch {}
+    try { if (typeof setDefaultInvoiceDates === "function") setDefaultInvoiceDates(); } catch {}
+
+    if (job) {
+      setField(form, "job_id", job.id);
+      setField(form, "invoice_number", typeof generateInvoiceNumber === "function" ? generateInvoiceNumber(job.job_number) : "");
+      setField(form, "bill_to", [job.company_name, job.contact_name ? `Attn: ${job.contact_name}` : "", job.location].filter(Boolean).join("\n"));
+      setField(form, "project", `${job.job_number || ""}${job.job_name ? ` — ${job.job_name}` : ""}`.trim());
+    }
+
+    try { if (typeof recomputeInvoiceTotals === "function") recomputeInvoiceTotals(); } catch {}
+  }
+
+  function loadCostTrackerForJobPopup(jobId, announce = true) {
+    safeShowView("costTrackers");
+    const tracker = getLatestTrackerForJob(jobId);
+    if (tracker && previousLoadCostTrackerIntoForm) {
+      previousLoadCostTrackerIntoForm.call(window, tracker, { source: "popup" });
+      openTemplateModal("cost", `Edit Cost Tracker — ${getTrackerName(tracker)}`);
+      if (announce) safeShowToast("Cost tracker opened in a popup window.");
+      return;
+    }
+
+    if (previousLoadCostTrackerForJob) {
+      try { previousLoadCostTrackerForJob.call(window, jobId, false); } catch { makeBlankCostTrackerForJob(jobId); }
+    } else {
+      makeBlankCostTrackerForJob(jobId);
+    }
+
+    openTemplateModal("cost", "Create Cost Tracker");
+    if (announce) safeShowToast("No saved cost tracker was found. A new cost tracker template opened for this job.");
+  }
+
+  function loadInvoiceForJobPopup(jobId, announce = true) {
+    safeShowView("invoices");
+    const invoice = getLatestInvoiceForJob(jobId);
+    if (invoice && previousLoadInvoiceIntoForm) {
+      previousLoadInvoiceIntoForm.call(window, invoice);
+      openTemplateModal("invoice", `Edit Invoice — ${invoice.invoice_number || "Invoice"}`);
+      if (announce) safeShowToast("Invoice opened in a popup window.");
+      return;
+    }
+
+    const tracker = getLatestTrackerForJob(jobId);
+    if (tracker && previousFillInvoiceFromCostTracker) {
+      previousFillInvoiceFromCostTracker.call(window, tracker, { keepInvoiceNumber: false });
+      openTemplateModal("invoice", "Create Invoice from Cost Tracker");
+      if (announce) safeShowToast("A new invoice opened using this job’s cost tracker.");
+      return;
+    }
+
+    if (previousLoadInvoiceForJob) {
+      try { previousLoadInvoiceForJob.call(window, jobId, false); } catch { makeBlankInvoiceForJob(jobId); }
+    } else {
+      makeBlankInvoiceForJob(jobId);
+    }
+
+    openTemplateModal("invoice", "Create Invoice");
+    if (announce) safeShowToast("No saved invoice or cost tracker was found. A blank invoice opened for this job.");
+  }
+
+  window.loadCostTrackerIntoForm = function loadCostTrackerIntoPopupFinal(tracker, options = {}) {
+    const result = previousLoadCostTrackerIntoForm ? previousLoadCostTrackerIntoForm.call(this, tracker, options) : undefined;
+    openTemplateModal("cost", `Edit Cost Tracker — ${getTrackerName(tracker)}`);
+    return result;
+  };
+  try { loadCostTrackerIntoForm = window.loadCostTrackerIntoForm; } catch {}
+
+  window.loadCostTrackerForJob = function loadCostTrackerForJobPopupFinal(jobId, announce = true) {
+    loadCostTrackerForJobPopup(jobId, announce);
+  };
+  try { loadCostTrackerForJob = window.loadCostTrackerForJob; } catch {}
+
+  window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerPopupFinal(tracker, options = {}) {
+    const result = previousFillInvoiceFromCostTracker ? previousFillInvoiceFromCostTracker.call(this, tracker, options) : undefined;
+    openTemplateModal("invoice", `Create Invoice — ${getTrackerName(tracker)}`);
+    return result;
+  };
+  try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+
+  window.loadInvoiceIntoForm = function loadInvoiceIntoPopupFinal(invoice) {
+    const result = previousLoadInvoiceIntoForm ? previousLoadInvoiceIntoForm.call(this, invoice) : undefined;
+    openTemplateModal("invoice", `Edit Invoice — ${invoice?.invoice_number || "Invoice"}`);
+    return result;
+  };
+  try { loadInvoiceIntoForm = window.loadInvoiceIntoForm; } catch {}
+
+  window.loadInvoiceForJob = function loadInvoiceForJobPopupFinal(jobId, announce = true) {
+    loadInvoiceForJobPopup(jobId, announce);
+  };
+  try { loadInvoiceForJob = window.loadInvoiceForJob; } catch {}
+
+  function setupPopupPages() {
+    createTemplateModal({
+      kind: "cost",
+      formSelector: "#costTrackerForm",
+      overlayId: "costTrackerTemplateModalOverlay",
+      titleId: "costTrackerPopupTitle",
+      eyebrow: "Cost Tracker Window",
+      title: "Cost Tracker",
+      subtitle: "The template stays hidden until you create, open, or edit a cost tracker.",
+      startHtml: `
+        <div class="template-page-start-copy">
+          <p class="eyebrow">Cost Trackers</p>
+          <h3>Open a cost tracker when you need it</h3>
+          <p class="tiny">The full bid sheet is hidden until a job is selected, a new tracker is created, or an existing tracker is edited.</p>
+        </div>
+        <div class="template-page-actions">
+          <label>Choose Job
+            <select id="costTrackerPageJobSelect" class="job-select"></select>
+          </label>
+          <button class="btn primary" id="openSelectedJobCostTrackerBtn" type="button">Open Selected Job Cost Tracker</button>
+          <button class="btn ghost" id="newUnassignedCostTrackerBtn" type="button">New Unassigned Cost Tracker</button>
+        </div>
+      `
+    });
+
+    createTemplateModal({
+      kind: "invoice",
+      formSelector: "#invoiceForm",
+      overlayId: "invoiceTemplateModalOverlay",
+      titleId: "invoicePopupTitle",
+      eyebrow: "Invoice Window",
+      title: "Invoice",
+      subtitle: "The invoice template stays hidden until you create, open, or edit an invoice.",
+      startHtml: `
+        <div class="template-page-start-copy">
+          <p class="eyebrow">Invoices</p>
+          <h3>Open an invoice when you need it</h3>
+          <p class="tiny">The full invoice template is hidden until a job, cost tracker, or saved invoice is selected.</p>
+        </div>
+        <div class="template-page-actions">
+          <label>Choose Job
+            <select id="invoicePageJobSelect" class="job-select"></select>
+          </label>
+          <button class="btn primary" id="openSelectedJobInvoiceBtn" type="button">Open Selected Job Invoice</button>
+          <button class="btn ghost" id="newBlankInvoiceBtn" type="button">New Blank Invoice</button>
+        </div>
+      `
+    });
+
+    refreshPopupPageControls();
+  }
+
+  document.addEventListener("click", (event) => {
+    const closeButton = event.target.closest?.("[data-close-template-modal]");
+    if (closeButton) {
+      event.preventDefault();
+      closeTemplateModal(closeButton.dataset.closeTemplateModal);
+      return;
+    }
+
+    const overlay = event.target.closest?.(".template-modal-overlay");
+    if (overlay && event.target === overlay) {
+      event.preventDefault();
+      closeTemplateModal(overlay.id === "invoiceTemplateModalOverlay" ? "invoice" : "cost");
+      return;
+    }
+
+    const openSelectedCost = event.target.closest?.("#openSelectedJobCostTrackerBtn");
+    if (openSelectedCost) {
+      event.preventDefault();
+      const jobId = qs("#costTrackerPageJobSelect")?.value;
+      if (!jobId) return safeShowToast("Select a job first, then open the cost tracker.", true);
+      loadCostTrackerForJobPopup(jobId, true);
+      return;
+    }
+
+    const newUnassignedCost = event.target.closest?.("#newUnassignedCostTrackerBtn");
+    if (newUnassignedCost) {
+      event.preventDefault();
+      safeShowView("costTrackers");
+      makeBlankCostTrackerForJob("", { unassigned: true });
+      openTemplateModal("cost", "Create Unassigned Cost Tracker");
+      return;
+    }
+
+    const openSelectedInvoice = event.target.closest?.("#openSelectedJobInvoiceBtn");
+    if (openSelectedInvoice) {
+      event.preventDefault();
+      const jobId = qs("#invoicePageJobSelect")?.value;
+      if (!jobId) return safeShowToast("Select a job first, then open the invoice.", true);
+      loadInvoiceForJobPopup(jobId, true);
+      return;
+    }
+
+    const newBlankInvoice = event.target.closest?.("#newBlankInvoiceBtn");
+    if (newBlankInvoice) {
+      event.preventDefault();
+      safeShowView("invoices");
+      makeBlankInvoiceForJob("");
+      openTemplateModal("invoice", "Create Blank Invoice");
+      return;
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const editCost = event.target.closest?.("[data-edit-cost]");
+    const openCostForJob = event.target.closest?.("[data-open-cost-for-job]");
+    const invoiceFromCost = event.target.closest?.("[data-invoice-from-cost]");
+    const editInvoice = event.target.closest?.("[data-edit-invoice]");
+    const openInvoiceForJob = event.target.closest?.("[data-open-invoice-for-job]");
+
+    if (editCost) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const tracker = (state?.data?.costTrackers || []).find((row) => row.id === editCost.dataset.editCost);
+      if (tracker) window.loadCostTrackerIntoForm(tracker, { source: "edit" });
+      else safeShowToast("That cost tracker could not be found. Refresh the dashboard and try again.", true);
+      return false;
+    }
+
+    if (openCostForJob) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      loadCostTrackerForJobPopup(openCostForJob.dataset.openCostForJob, true);
+      return false;
+    }
+
+    if (invoiceFromCost) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const tracker = (state?.data?.costTrackers || []).find((row) => row.id === invoiceFromCost.dataset.invoiceFromCost);
+      if (tracker) window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: false });
+      else safeShowToast("That cost tracker could not be found. Refresh the dashboard and try again.", true);
+      return false;
+    }
+
+    if (editInvoice) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const invoice = (state?.data?.invoices || []).find((row) => row.id === editInvoice.dataset.editInvoice);
+      if (invoice) window.loadInvoiceIntoForm(invoice);
+      else safeShowToast("That invoice could not be found. Refresh the dashboard and try again.", true);
+      return false;
+    }
+
+    if (openInvoiceForJob) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      loadInvoiceForJobPopup(openInvoiceForJob.dataset.openInvoiceForJob, true);
+      return false;
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    const costSelect = event.target.closest?.("#costTrackerPageJobSelect");
+    if (costSelect?.value) loadCostTrackerForJobPopup(costSelect.value, true);
+
+    const invoiceSelect = event.target.closest?.("#invoicePageJobSelect");
+    if (invoiceSelect?.value) loadInvoiceForJobPopup(invoiceSelect.value, true);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!qs("#costTrackerTemplateModalOverlay.hidden")) closeTemplateModal("cost");
+    if (!qs("#invoiceTemplateModalOverlay.hidden")) closeTemplateModal("invoice");
+  });
+
+  const previousHydrate = typeof window.hydrateSelects === "function" ? window.hydrateSelects : (typeof hydrateSelects === "function" ? hydrateSelects : null);
+  if (previousHydrate && !previousHydrate.__popupWorkflowWrapped) {
+    const wrappedHydrate = function hydrateSelectsWithTemplatePopupControls() {
+      const result = previousHydrate.apply(this, arguments);
+      refreshPopupPageControls();
+      return result;
+    };
+    wrappedHydrate.__popupWorkflowWrapped = true;
+    window.hydrateSelects = wrappedHydrate;
+    try { hydrateSelects = window.hydrateSelects; } catch {}
+  }
+
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__popupWorkflowWrapped) {
+    const wrappedRenderAll = function renderAllWithTemplatePopupRefresh() {
+      const result = previousRenderAll.apply(this, arguments);
+      refreshPopupPageControls();
+      return result;
+    };
+    wrappedRenderAll.__popupWorkflowWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = window.renderAll; } catch {}
+  }
+
+  // app.js is loaded at the end of index.html, so the forms already exist.
+  // Move them into hidden popup windows immediately to avoid showing templates by default.
+  setupPopupPages();
+  refreshPopupPageControls();
+
+  document.addEventListener("DOMContentLoaded", () => {
+    setupPopupPages();
+    setTimeout(refreshPopupPageControls, 0);
+  });
+
+  setTimeout(() => {
+    setupPopupPages();
+    refreshPopupPageControls();
+  }, 0);
+})();
+
+/* ========================================================================
+   FINAL PAGE CONTROL FIT + COST TRACKER INVOICE SOURCE PATCH
+   ------------------------------------------------------------------------
+   - Keeps the Cost Tracker and Invoice templates in popups.
+   - Makes the Cost Tracker and Invoice page action controls wrap neatly.
+   - Changes the Invoice page starter from Job selection to Cost Tracker selection.
+   - Existing invoices show View, Edit, Download, and Delete actions.
+   ======================================================================== */
+(function installFinalInvoiceCostTrackerSelectionPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function text(value) {
+    try {
+      if (typeof escapeHtml === "function") return escapeHtml(value);
+    } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#039;"
+    }[char]));
+  }
+
+  function attr(value) {
+    try {
+      if (typeof escapeAttr === "function") return escapeAttr(value);
+    } catch {}
+    return text(value);
+  }
+
+  function moneyText(value) {
+    try {
+      if (typeof money === "function") return money(value);
+    } catch {}
+    const amount = Number(value || 0);
+    return Number.isFinite(amount)
+      ? amount.toLocaleString("en-US", { style: "currency", currency: "USD" })
+      : "$0.00";
+  }
+
+  function dateText(value) {
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    return value || "-";
+  }
+
+  function numberValue(value) {
+    try {
+      if (typeof number === "function") return number(value);
+    } catch {}
+    const amount = Number(value || 0);
+    return Number.isFinite(amount) ? amount : 0;
+  }
+
+  function findJobSafe(jobId) {
+    try {
+      if (typeof findJob === "function") return findJob(jobId);
+    } catch {}
+    return (state?.data?.jobs || []).find((job) => job.id === jobId) || null;
+  }
+
+  function trackerSummarySafe(tracker) {
+    try {
+      if (typeof costTrackerSummary === "function") return costTrackerSummary(tracker) || {};
+    } catch {}
+    if (!tracker?.summary) return {};
+    if (typeof tracker.summary === "object") return tracker.summary;
+    try { return JSON.parse(tracker.summary) || {}; } catch { return {}; }
+  }
+
+  function trackerNameSafe(tracker) {
+    try {
+      if (typeof getTrackerName === "function") return getTrackerName(tracker);
+    } catch {}
+    const summary = trackerSummarySafe(tracker);
+    return tracker?.tracker_name || tracker?.cost_tracker_name || summary.trackerName || summary.costTrackerName || "Cost Tracker";
+  }
+
+  function trackerRateTotalSafe(tracker) {
+    try {
+      if (typeof costTrackerQuoted === "function") return costTrackerQuoted(tracker);
+    } catch {}
+    const summary = trackerSummarySafe(tracker);
+    return numberValue(tracker?.quoted_price ?? summary.quotedPrice ?? summary.quoted_price ?? summary.rateTotal ?? summary.rate_total);
+  }
+
+  function invoiceTotalSafe(invoice) {
+    try {
+      if (typeof invoiceTotal === "function") return invoiceTotal(invoice);
+    } catch {}
+    const summary = (() => {
+      if (!invoice?.summary) return {};
+      if (typeof invoice.summary === "object") return invoice.summary;
+      try { return JSON.parse(invoice.summary) || {}; } catch { return {}; }
+    })();
+    return numberValue(summary.total ?? invoice?.total ?? numberValue(invoice?.subtotal) + numberValue(invoice?.tax));
+  }
+
+  function invoiceBalanceSafe(invoice) {
+    try {
+      if (typeof invoiceBalanceDue === "function") return invoiceBalanceDue(invoice);
+    } catch {}
+    const summary = (() => {
+      if (!invoice?.summary) return {};
+      if (typeof invoice.summary === "object") return invoice.summary;
+      try { return JSON.parse(invoice.summary) || {}; } catch { return {}; }
+    })();
+    return numberValue(summary.balanceDue ?? summary.balance_due ?? invoice?.balance_due ?? invoiceTotalSafe(invoice) - numberValue(invoice?.payments));
+  }
+
+  function buildInvoiceCostTrackerOptions(currentValue = "") {
+    const trackers = state?.data?.costTrackers || [];
+    const options = [`<option value="">Select a cost tracker to autofill an invoice...</option>`];
+
+    trackers.forEach((tracker) => {
+      const job = findJobSafe(tracker.job_id);
+      const label = [
+        trackerNameSafe(tracker),
+        job?.job_number ? `Job ${job.job_number}` : "Unassigned",
+        `Rate Total ${moneyText(trackerRateTotalSafe(tracker))}`
+      ].filter(Boolean).join(" • ");
+      options.push(`<option value="${attr(tracker.id)}"${tracker.id === currentValue ? " selected" : ""}>${text(label)}</option>`);
+    });
+
+    return options.join("");
+  }
+
+  function updateCostTrackerStartPanelLabels() {
+    const costActions = qs(".cost-page-start .template-page-actions");
+    if (!costActions) return;
+    costActions.classList.add("template-page-actions-fit");
+
+    const openButton = qs("#openSelectedJobCostTrackerBtn", costActions);
+    if (openButton) {
+      openButton.textContent = "Open Selected Job Cost Tracker";
+      openButton.title = "Open selected job cost tracker";
+    }
+
+    const newButton = qs("#newUnassignedCostTrackerBtn", costActions);
+    if (newButton) {
+      newButton.textContent = "New Unassigned Cost Tracker";
+      newButton.title = "Create a new unassigned cost tracker";
+    }
+  }
+
+  function updateInvoiceStartPanelToCostTrackerSource() {
+    const invoiceStart = qs(".invoice-page-start");
+    const invoiceActions = qs(".invoice-page-start .template-page-actions");
+    if (!invoiceStart || !invoiceActions) return;
+
+    const copy = qs(".template-page-start-copy", invoiceStart);
+    if (copy && !copy.dataset.costTrackerInvoiceCopyReady) {
+      copy.dataset.costTrackerInvoiceCopyReady = "true";
+      copy.innerHTML = `
+        <p class="eyebrow">Invoices</p>
+        <h3>Choose a cost tracker to create an invoice</h3>
+        <p class="tiny">Select a saved cost tracker to auto-fill the invoice from its Rate Total. You can also open a blank invoice or edit an existing invoice from the table below.</p>
+      `;
+    }
+
+    const current = qs("#invoicePageCostTrackerSelect")?.value || "";
+    if (!invoiceActions.dataset.costTrackerInvoiceActionsReady) {
+      invoiceActions.dataset.costTrackerInvoiceActionsReady = "true";
+      invoiceActions.classList.add("template-page-actions-fit", "invoice-cost-tracker-actions");
+      invoiceActions.innerHTML = `
+        <label>Choose Cost Tracker
+          <select id="invoicePageCostTrackerSelect" class="cost-tracker-select"></select>
+        </label>
+        <button class="btn primary" id="useSelectedCostTrackerInvoiceBtn" type="button">Use Selected Cost Tracker</button>
+        <button class="btn ghost" id="newBlankInvoiceBtn" type="button">New Blank Invoice</button>
+      `;
+    }
+
+    const select = qs("#invoicePageCostTrackerSelect", invoiceActions);
+    if (select) {
+      const selectedValue = current || select.value || "";
+      select.innerHTML = buildInvoiceCostTrackerOptions(selectedValue);
+      if (selectedValue) select.value = selectedValue;
+    }
+  }
+
+  function refreshPageStarterControls() {
+    updateCostTrackerStartPanelLabels();
+    updateInvoiceStartPanelToCostTrackerSource();
+  }
+
+  function openInvoiceFromSelectedCostTracker() {
+    const trackerId = qs("#invoicePageCostTrackerSelect")?.value || "";
+    if (!trackerId) {
+      try { showToast("Select a cost tracker first, then create the invoice.", true); } catch {}
+      return;
+    }
+
+    const tracker = (state?.data?.costTrackers || []).find((row) => row.id === trackerId);
+    if (!tracker) {
+      try { showToast("That cost tracker could not be found. Refresh the dashboard and try again.", true); } catch {}
+      return;
+    }
+
+    try { if (typeof showView === "function") showView("invoices"); } catch {}
+    if (typeof window.fillInvoiceFromCostTracker === "function") {
+      window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: false });
+    } else if (typeof fillInvoiceFromCostTracker === "function") {
+      fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: false });
+    }
+  }
+
+  document.addEventListener("click", (event) => {
+    const useTracker = event.target.closest?.("#useSelectedCostTrackerInvoiceBtn");
+    if (useTracker) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      openInvoiceFromSelectedCostTracker();
+      return false;
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    const select = event.target.closest?.("#invoicePageCostTrackerSelect");
+    if (!select) return;
+
+    const tracker = (state?.data?.costTrackers || []).find((row) => row.id === select.value);
+    if (!tracker) return;
+
+    try { if (typeof showView === "function") showView("invoices"); } catch {}
+    if (typeof window.fillInvoiceFromCostTracker === "function") {
+      window.fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+    } else if (typeof fillInvoiceFromCostTracker === "function") {
+      fillInvoiceFromCostTracker(tracker, { keepInvoiceNumber: true });
+    }
+  }, true);
+
+  const previousRenderInvoices = typeof window.renderInvoices === "function"
+    ? window.renderInvoices
+    : (typeof renderInvoices === "function" ? renderInvoices : null);
+
+  window.renderInvoices = function renderInvoicesWithViewEditDeleteFinal() {
+    const table = qs("#invoicesTable");
+    const count = qs("#invoicesCount");
+    if (!table || !count) {
+      if (previousRenderInvoices) return previousRenderInvoices.apply(this, arguments);
+      return;
+    }
+
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.invoices || [], ["invoice_number", "status", "bill_to", "project"])
+      : (state?.data?.invoices || []);
+
+    count.textContent = rows.length;
+    table.innerHTML = rows.map((invoice) => {
+      const job = findJobSafe(invoice.job_id);
+      const projectText = job?.job_name || invoice.project || "";
+      const jobText = job?.job_number || invoice.po_number || "-";
+      const status = invoice.status || "unsent";
+
+      return `
+        <tr>
+          <td data-label="Invoice #"><strong>${text(invoice.invoice_number || "-")}</strong></td>
+          <td data-label="Job / Project">${text(jobText)}<br><span class="muted">${text(projectText)}</span></td>
+          <td data-label="Status"><span class="status ${attr(status)}">${text(String(status).replaceAll("_", " "))}</span></td>
+          <td data-label="Invoice Date">${dateText(invoice.invoice_date)}</td>
+          <td data-label="Due">${dateText(invoice.due_date)}</td>
+          <td data-label="Total" class="money-cell">${moneyText(invoiceTotalSafe(invoice))}</td>
+          <td data-label="Balance" class="money-cell">${moneyText(invoiceBalanceSafe(invoice))}</td>
+          <td data-label="Actions" class="table-actions invoice-row-actions">
+            <button class="link-btn" data-preview-invoice="${attr(invoice.id)}" type="button">View</button>
+            <button class="link-btn" data-edit-invoice="${attr(invoice.id)}" type="button">Edit</button>
+            <button class="link-btn" data-download-invoice="${attr(invoice.id)}" type="button">Download</button>
+            <button class="link-btn danger-text" data-delete-type="invoices" data-delete-id="${attr(invoice.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8" class="muted">No records found.</td></tr>');
+  };
+
+  try { renderInvoices = window.renderInvoices; } catch {}
+
+  const previousHydrateSelects = typeof window.hydrateSelects === "function"
+    ? window.hydrateSelects
+    : (typeof hydrateSelects === "function" ? hydrateSelects : null);
+
+  if (previousHydrateSelects && !previousHydrateSelects.__invoiceCostTrackerPatchWrapped) {
+    const wrappedHydrateSelects = function hydrateSelectsWithInvoiceCostTrackerPageSource() {
+      const result = previousHydrateSelects.apply(this, arguments);
+      refreshPageStarterControls();
+      return result;
+    };
+    wrappedHydrateSelects.__invoiceCostTrackerPatchWrapped = true;
+    window.hydrateSelects = wrappedHydrateSelects;
+    try { hydrateSelects = window.hydrateSelects; } catch {}
+  }
+
+  const previousRenderAll = typeof window.renderAll === "function"
+    ? window.renderAll
+    : (typeof renderAll === "function" ? renderAll : null);
+
+  if (previousRenderAll && !previousRenderAll.__invoiceCostTrackerPatchWrapped) {
+    const wrappedRenderAll = function renderAllWithInvoiceCostTrackerPageSource() {
+      const result = previousRenderAll.apply(this, arguments);
+      refreshPageStarterControls();
+      try { window.renderInvoices?.(); } catch {}
+      return result;
+    };
+    wrappedRenderAll.__invoiceCostTrackerPatchWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = window.renderAll; } catch {}
+  }
+
+  refreshPageStarterControls();
+  try { window.renderInvoices?.(); } catch {}
+  document.addEventListener("DOMContentLoaded", () => {
+    refreshPageStarterControls();
+    try { window.renderInvoices?.(); } catch {}
+  });
+  setTimeout(() => {
+    refreshPageStarterControls();
+    try { window.renderInvoices?.(); } catch {}
+  }, 0);
+  setTimeout(refreshPageStarterControls, 250);
+})();
+
+/* ========================================================================
+   FINAL JOB DETAILS MODAL + SIMPLE COST TRACKER SETUP PATCH
+   ------------------------------------------------------------------------
+   - Job "View Details" opens a popup window instead of inserting details
+     into the jobs table.
+   - The Cost Tracker setup card is simplified to only the cost tracker name.
+   ======================================================================== */
+(function installJobDetailsModalAndSimpleCostTrackerSetupPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function safeHtml(value) {
+    try {
+      if (typeof escapeHtml === "function") return escapeHtml(value);
+    } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#039;"
+    }[char]));
+  }
+
+  function safeAttr(value) {
+    try {
+      if (typeof escapeAttr === "function") return escapeAttr(value);
+    } catch {}
+    return safeHtml(value);
+  }
+
+  function safeDate(value) {
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    return value || "-";
+  }
+
+  function safeMoney(value) {
+    try {
+      if (typeof money === "function") return money(value);
+    } catch {}
+    const amount = Number(value || 0);
+    return Number.isFinite(amount)
+      ? amount.toLocaleString("en-US", { style: "currency", currency: "USD" })
+      : "$0.00";
+  }
+
+  function safeNumber(value) {
+    try {
+      if (typeof number === "function") return number(value);
+    } catch {}
+    const amount = Number(value || 0);
+    return Number.isFinite(amount) ? amount : 0;
+  }
+
+  function parseJsonSafe(value) {
+    if (!value) return {};
+    if (typeof value === "object") return value || {};
+    try { return JSON.parse(value) || {}; } catch { return {}; }
+  }
+
+  function jobById(jobId) {
+    try {
+      if (typeof findJob === "function") return findJob(jobId);
+    } catch {}
+    return (state?.data?.jobs || []).find((job) => job.id === jobId) || null;
+  }
+
+  function trackerName(tracker) {
+    try {
+      if (typeof getTrackerName === "function") return getTrackerName(tracker);
+    } catch {}
+    const summary = parseJsonSafe(tracker?.summary);
+    return tracker?.tracker_name || tracker?.cost_tracker_name || tracker?.name || summary.trackerName || summary.tracker_name || "Cost Tracker";
+  }
+
+  function trackerRateTotal(tracker) {
+    try {
+      if (typeof costTrackerQuoted === "function") return costTrackerQuoted(tracker);
+    } catch {}
+    const summary = parseJsonSafe(tracker?.summary);
+    return safeNumber(tracker?.quoted_price ?? summary.quotedPrice ?? summary.quoted_price ?? summary.rateTotal ?? summary.rate_total);
+  }
+
+  function trackerCostTotal(tracker) {
+    try {
+      if (typeof costTrackerTotal === "function") return costTrackerTotal(tracker);
+    } catch {}
+    const summary = parseJsonSafe(tracker?.summary);
+    return safeNumber(tracker?.total_cost ?? summary.totalCost ?? summary.total_cost);
+  }
+
+  function invoiceTotalSafe(invoice) {
+    try {
+      if (typeof invoiceTotal === "function") return invoiceTotal(invoice);
+    } catch {}
+    const summary = parseJsonSafe(invoice?.summary);
+    return safeNumber(summary.total ?? invoice?.total ?? safeNumber(invoice?.subtotal) + safeNumber(invoice?.tax));
+  }
+
+  function invoiceBalanceSafe(invoice) {
+    try {
+      if (typeof invoiceBalanceDue === "function") return invoiceBalanceDue(invoice);
+    } catch {}
+    const summary = parseJsonSafe(invoice?.summary);
+    return safeNumber(summary.balanceDue ?? summary.balance_due ?? invoice?.balance_due ?? invoiceTotalSafe(invoice) - safeNumber(invoice?.payments));
+  }
+
+  function docsForJob(jobId) {
+    return (state?.data?.documents || []).filter((doc) => doc.job_id === jobId);
+  }
+
+  function uploadedDocsForJob(jobId) {
+    return docsForJob(jobId).filter((doc) => {
+      const source = String(doc.external_source || "").toLowerCase();
+      const externalId = String(doc.external_id || "").toLowerCase();
+      const status = String(doc.file_status || "").toLowerCase();
+      return source.includes("upload") || externalId.startsWith("upload:") || externalId.startsWith("inline-upload:") || doc.storage_path || status.includes("uploaded") || doc.file_name || doc.original_file_name;
+    });
+  }
+
+  function groupTimesheetsForJob(jobId) {
+    const map = new Map();
+    (state?.data?.timesheets || [])
+      .filter((entry) => entry.job_id === jobId)
+      .forEach((entry) => {
+        const id = entry.timesheet_group_id || `${entry.job_id || "job"}_${entry.work_date || entry.date || entry.id}`;
+        if (!map.has(id)) {
+          map.set(id, {
+            id,
+            date: entry.work_date || entry.date || "",
+            employeeCount: 0,
+            totalHours: 0,
+            entries: []
+          });
+        }
+        const group = map.get(id);
+        group.employeeCount += 1;
+        group.totalHours += safeNumber(entry.hours);
+        group.entries.push(entry);
+      });
+    return Array.from(map.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }
+
+  function latestByTime(rows, fields) {
+    return rows.slice().sort((a, b) => {
+      const aValue = fields.map((field) => a?.[field]).find(Boolean) || "";
+      const bValue = fields.map((field) => b?.[field]).find(Boolean) || "";
+      const aTime = Date.parse(aValue) || 0;
+      const bTime = Date.parse(bValue) || 0;
+      return bTime - aTime;
+    })[0] || null;
+  }
+
+  function documentIcon(type, name) {
+    const text = `${type || ""} ${name || ""}`.toLowerCase();
+    if (/cost|tracker|spreadsheet|excel|\.xlsx|\.xls/.test(text)) return "📊";
+    if (/invoice|pdf/.test(text)) return "📄";
+    if (/timesheet|time sheet/.test(text)) return "🕘";
+    if (/image|photo|\.png|\.jpe?g|\.webp|\.gif/.test(text)) return "🖼️";
+    return "📎";
+  }
+
+  function fileSizeText(bytes) {
+    const size = Number(bytes || 0);
+    if (!size) return "";
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function statusBadge(exists) {
+    return exists
+      ? '<span class="status job-doc-ready">Made</span>'
+      : '<span class="status job-doc-missing">Not made yet</span>';
+  }
+
+  function documentCard({ title, exists, subtitle, actions, missingAction }) {
+    return `
+      <article class="job-document-status-card ${exists ? "ready" : "missing"}">
+        <div>
+          <strong>${safeHtml(title)}</strong>
+          <span>${safeHtml(subtitle || "")}</span>
+        </div>
+        <div class="job-document-status-actions">
+          ${statusBadge(exists)}
+          <div class="job-document-action-row">${exists ? actions : missingAction}</div>
+        </div>
+      </article>
+    `;
+  }
+
+  function jobSummaryChips(job) {
+    const docs = uploadedDocsForJob(job.id);
+    const trackers = (state?.data?.costTrackers || []).filter((row) => row.job_id === job.id).length + docs.filter((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => row.job_id === job.id).length + docs.filter((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
+    const timesheets = groupTimesheetsForJob(job.id).length + docs.filter((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
+    return `
+      <div class="job-document-chip-row">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers ? "✓" : "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices ? "✓" : "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+        <span class="job-doc-chip ${docs.length ? "made" : "missing"}">Files ${docs.length || "—"}</span>
+      </div>
+    `;
+  }
+
+  function timesheetList(groups) {
+    if (!groups.length) {
+      return '<p class="muted job-detail-empty">No timesheets have been saved for this job yet.</p>';
+    }
+    return `
+      <div class="job-detail-mini-list">
+        ${groups.map((group) => `
+          <article class="job-detail-mini-row">
+            <div>
+              <strong>${safeHtml(safeDate(group.date))}</strong>
+              <span>${group.employeeCount} employee row${group.employeeCount === 1 ? "" : "s"} • ${safeNumber(group.totalHours)} total hours</span>
+            </div>
+            <button class="link-btn" data-download-timesheet-group="${safeAttr(group.id)}" type="button">Download</button>
+          </article>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function uploadedFileList(jobId) {
+    const docs = uploadedDocsForJob(jobId);
+    if (!docs.length) {
+      return '<p class="muted job-detail-empty">No existing files have been attached to this job yet.</p>';
+    }
+    return `
+      <div class="job-detail-file-list">
+        ${docs.map((doc) => {
+          const docId = doc.id || doc.external_id || "";
+          const fileName = doc.file_name || doc.original_file_name || "Attached file";
+          const detail = [doc.document_type || "Job File", fileSizeText(doc.file_size), doc.file_status || "uploaded"].filter(Boolean).join(" • ");
+          return `
+            <article class="job-detail-file-row">
+              <div class="uploaded-file-icon">${documentIcon(doc.document_type, fileName)}</div>
+              <div class="job-detail-file-info">
+                <strong>${safeHtml(fileName)}</strong>
+                <span>${safeHtml(detail)}</span>
+              </div>
+              <div class="job-detail-file-actions">
+                <button class="link-btn" data-open-uploaded-doc="${safeAttr(docId)}" type="button">Open</button>
+                <button class="link-btn" data-download-uploaded-doc="${safeAttr(docId)}" type="button">Download</button>
+                <button class="link-btn danger-text" data-delete-type="documents" data-delete-id="${safeAttr(docId)}" type="button">Delete</button>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function buildJobDetailsMarkup(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => row.job_id === job.id);
+    const invoices = (state?.data?.invoices || []).filter((row) => row.job_id === job.id);
+    const timesheetGroups = groupTimesheetsForJob(job.id);
+    const docs = uploadedDocsForJob(job.id);
+    const latestTracker = latestByTime(trackers, ["last_synced_at", "updated_at", "created_at"]);
+    const latestInvoice = latestByTime(invoices, ["invoice_date", "last_synced_at", "updated_at", "created_at"]);
+    const costDocs = docs.filter((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const invoiceDocs = docs.filter((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const timesheetDocs = docs.filter((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const latestCostDoc = costDocs[0];
+    const latestInvoiceDoc = invoiceDocs[0];
+    const latestTimesheetDoc = timesheetDocs[0];
+
+    const trackerExists = Boolean(latestTracker || latestCostDoc);
+    const invoiceExists = Boolean(latestInvoice || latestInvoiceDoc);
+    const timesheetExists = Boolean(timesheetGroups.length || latestTimesheetDoc);
+
+    const trackerActions = latestTracker ? `
+      <button class="link-btn" data-preview-cost="${safeAttr(latestTracker.id)}" type="button">View</button>
+      <button class="link-btn" data-download-cost="${safeAttr(latestTracker.id)}" type="button">Download</button>
+      <button class="link-btn" data-edit-cost="${safeAttr(latestTracker.id)}" type="button">Open Cost Tracker</button>
+    ` : (latestCostDoc ? `
+      <button class="link-btn" data-open-uploaded-doc="${safeAttr(latestCostDoc.id || latestCostDoc.external_id)}" type="button">Open File</button>
+      <button class="link-btn" data-download-uploaded-doc="${safeAttr(latestCostDoc.id || latestCostDoc.external_id)}" type="button">Download File</button>
+      <button class="link-btn" data-open-cost-for-job="${safeAttr(job.id)}" type="button">Create Editable Tracker</button>
+    ` : "");
+
+    const invoiceActions = latestInvoice ? `
+      <button class="link-btn" data-preview-invoice="${safeAttr(latestInvoice.id)}" type="button">View</button>
+      <button class="link-btn" data-download-invoice="${safeAttr(latestInvoice.id)}" type="button">Download</button>
+      <button class="link-btn" data-edit-invoice="${safeAttr(latestInvoice.id)}" type="button">Open Invoice</button>
+    ` : (latestInvoiceDoc ? `
+      <button class="link-btn" data-open-uploaded-doc="${safeAttr(latestInvoiceDoc.id || latestInvoiceDoc.external_id)}" type="button">Open File</button>
+      <button class="link-btn" data-download-uploaded-doc="${safeAttr(latestInvoiceDoc.id || latestInvoiceDoc.external_id)}" type="button">Download File</button>
+      <button class="link-btn" data-open-invoice-for-job="${safeAttr(job.id)}" type="button">Create Editable Invoice</button>
+    ` : "");
+
+    const timesheetActions = timesheetGroups.length ? `
+      <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">Open Timesheets</button>
+    ` : (latestTimesheetDoc ? `
+      <button class="link-btn" data-open-uploaded-doc="${safeAttr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Open File</button>
+      <button class="link-btn" data-download-uploaded-doc="${safeAttr(latestTimesheetDoc.id || latestTimesheetDoc.external_id)}" type="button">Download File</button>
+      <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">Create Editable Timesheet</button>
+    ` : "");
+
+    return `
+      <section class="job-details-panel job-details-popup-panel">
+        <div class="job-details-header">
+          <div>
+            <span class="setup-eyebrow">Job Details</span>
+            <h4>${safeHtml(`${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}`)}</h4>
+            <p>${safeHtml(job.company_name || "No customer listed")} • ${safeHtml(job.location || "No location listed")} • ${safeHtml(safeDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${safeHtml(safeDate(job.end_date))}` : ""}</p>
+          </div>
+          <div class="job-details-counts">
+            <span>${trackers.length} cost tracker${trackers.length === 1 ? "" : "s"}</span>
+            <span>${invoices.length} invoice${invoices.length === 1 ? "" : "s"}</span>
+            <span>${timesheetGroups.length} timesheet day${timesheetGroups.length === 1 ? "" : "s"}</span>
+            <span>${docs.length} file${docs.length === 1 ? "" : "s"}</span>
+          </div>
+        </div>
+
+        <div class="job-documents-status-grid">
+          ${documentCard({
+            title: "Cost Tracker",
+            exists: trackerExists,
+            subtitle: latestTracker ? `${trackerName(latestTracker)} • Rate ${safeMoney(trackerRateTotal(latestTracker))} • Cost ${safeMoney(trackerCostTotal(latestTracker))}` : (latestCostDoc ? `${latestCostDoc.file_name || latestCostDoc.original_file_name || "Uploaded cost tracker"} • attached file` : ""),
+            actions: trackerActions,
+            missingAction: `<button class="link-btn" data-open-cost-for-job="${safeAttr(job.id)}" type="button">Create Cost Tracker</button>`
+          })}
+          ${documentCard({
+            title: "Invoice",
+            exists: invoiceExists,
+            subtitle: latestInvoice ? `${latestInvoice.invoice_number || "Invoice"} • ${safeMoney(invoiceTotalSafe(latestInvoice))} • Balance ${safeMoney(invoiceBalanceSafe(latestInvoice))} • ${latestInvoice.status || "unsent"}` : (latestInvoiceDoc ? `${latestInvoiceDoc.file_name || latestInvoiceDoc.original_file_name || "Uploaded invoice"} • attached file` : ""),
+            actions: invoiceActions,
+            missingAction: `<button class="link-btn" data-open-invoice-for-job="${safeAttr(job.id)}" type="button">Create Invoice</button>`
+          })}
+          ${documentCard({
+            title: "Timesheets",
+            exists: timesheetExists,
+            subtitle: timesheetGroups.length ? `${timesheetGroups.length} saved day${timesheetGroups.length === 1 ? "" : "s"} for this job.` : (latestTimesheetDoc ? `${latestTimesheetDoc.file_name || latestTimesheetDoc.original_file_name || "Uploaded timesheet"} • attached file` : ""),
+            actions: timesheetActions,
+            missingAction: `<button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">Create Timesheet</button>`
+          })}
+        </div>
+
+        <div class="job-details-split-grid">
+          <section class="job-detail-section">
+            <div class="job-detail-section-header">
+              <h5>All Timesheets for this Job</h5>
+              <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">+ Timesheet</button>
+            </div>
+            ${timesheetList(timesheetGroups)}
+          </section>
+
+          <section class="job-detail-section">
+            <div class="job-detail-section-header">
+              <h5>Attached Files</h5>
+            </div>
+            ${uploadedFileList(job.id)}
+          </section>
+        </div>
+
+        <section class="job-detail-upload-card">
+          <div>
+            <span class="setup-eyebrow">Add an existing document</span>
+            <h5>Attach a file to this job</h5>
+            <p>Upload cost trackers, invoices, timesheets, or other job files.</p>
+          </div>
+          <form class="job-detail-upload-form" data-job-document-upload="true">
+            <input type="hidden" name="job_id" value="${safeAttr(job.id)}" />
+            <label>
+              Document Type
+              <select name="document_type">
+                <option value="Cost Tracker">Cost Tracker</option>
+                <option value="Invoice">Invoice</option>
+                <option value="Timesheet">Timesheet</option>
+                <option value="Job File">Other Job File</option>
+              </select>
+            </label>
+            <label class="wide">
+              Choose File(s)
+              <input name="documents" type="file" multiple required />
+            </label>
+            <button class="btn primary" type="submit">Add to Job</button>
+          </form>
+        </section>
+      </section>
+    `;
+  }
+
+  function ensureJobDetailsModal() {
+    let overlay = qs("#jobDetailsModalOverlay");
+    if (overlay) return overlay;
+    overlay = document.createElement("div");
+    overlay.id = "jobDetailsModalOverlay";
+    overlay.className = "job-details-modal-overlay hidden";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <div class="job-details-modal-card" role="dialog" aria-modal="true" aria-labelledby="jobDetailsModalTitle">
+        <div class="job-details-modal-header">
+          <div>
+            <p class="eyebrow">Job Details</p>
+            <h3 id="jobDetailsModalTitle">Job Details</h3>
+            <p class="tiny">Manage this job’s cost tracker, invoice, timesheets, and uploaded files.</p>
+          </div>
+          <button class="icon-btn job-details-modal-close" type="button" aria-label="Close job details window">×</button>
+        </div>
+        <div class="job-details-modal-body" id="jobDetailsModalBody"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+  }
+
+  function openJobDetailsModal(jobId) {
+    const job = jobById(jobId);
+    if (!job) {
+      try { if (typeof showToast === "function") showToast("That job could not be found. Refresh the dashboard and try again.", true); } catch {}
+      return;
+    }
+    const overlay = ensureJobDetailsModal();
+    const body = qs("#jobDetailsModalBody", overlay);
+    const title = qs("#jobDetailsModalTitle", overlay);
+    if (title) title.textContent = `${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}`;
+    if (body) body.innerHTML = buildJobDetailsMarkup(job);
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("job-details-modal-open");
+    window.__pimpExpandedJobId = null;
+    setTimeout(() => qs(".job-details-modal-close", overlay)?.focus?.(), 30);
+  }
+
+  function closeJobDetailsModal() {
+    const overlay = qs("#jobDetailsModalOverlay");
+    if (!overlay) return;
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("job-details-modal-open");
+  }
+
+  function renderJobsAsModalRows() {
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+    window.__pimpExpandedJobId = null;
+    table.innerHTML = rows.map((job) => `
+      <tr class="job-main-row" data-job-row-id="${safeAttr(job.id)}">
+        <td data-label="Job #"><strong>${safeHtml(job.job_number || "-")}</strong><br><button class="link-btn job-row-open-btn" data-open-job-details-modal="${safeAttr(job.id)}" type="button">View Details</button></td>
+        <td data-label="Job Name">${safeHtml(job.job_name || "-")}${jobSummaryChips(job)}</td>
+        <td data-label="Company">${safeHtml(job.company_name || "-")}</td>
+        <td data-label="Location">${safeHtml(job.location || "-")}</td>
+        <td data-label="Status"><span class="status ${safeAttr(job.status || "")}">${safeHtml(job.status || "unknown")}</span></td>
+        <td data-label="Dates">${safeHtml(safeDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${safeHtml(safeDate(job.end_date))}` : ""}</td>
+        <td data-label="Files"><button class="link-btn" data-open-job-details-modal="${safeAttr(job.id)}" type="button">View Job Documents</button></td>
+        <td data-label="Actions" class="actions-cell">
+          <button class="link-btn" data-edit-job="${safeAttr(job.id)}" type="button">Edit</button>
+          <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${safeAttr(job.id)}" type="button">Delete</button>
+        </td>
+      </tr>
+    `).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8" class="muted">No records found.</td></tr>');
+  }
+
+  window.renderJobs = renderJobsAsModalRows;
+  try { renderJobs = window.renderJobs; } catch {}
+
+  function simplifyCostTrackerSetupCard() {
+    const card = qs("#costTrackerSetupCard");
+    if (!card || card.dataset.simpleNameOnly === "true") return;
+    const currentValue = card.querySelector('[name="cost_tracker_name"]')?.value || "";
+    card.dataset.simpleNameOnly = "true";
+    card.classList.add("cost-tracker-setup-name-only-card");
+    card.innerHTML = `
+      <label class="cost-tracker-name-field cost-tracker-name-only-field">
+        Cost Tracker Name
+        <input name="cost_tracker_name" placeholder="Example: West Plant cost tracker" required value="${safeAttr(currentValue)}" />
+      </label>
+    `;
+  }
+
+  function refreshFinalJobDetailsAndSetupUi() {
+    simplifyCostTrackerSetupCard();
+    try { renderJobsAsModalRows(); } catch {}
+  }
+
+  document.addEventListener("click", (event) => {
+    const openButton = event.target.closest?.("[data-open-job-details-modal]");
+    if (openButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      openJobDetailsModal(openButton.dataset.openJobDetailsModal);
+      return false;
+    }
+
+    const closeButton = event.target.closest?.(".job-details-modal-close");
+    if (closeButton) {
+      event.preventDefault();
+      closeJobDetailsModal();
+      return;
+    }
+
+    const overlay = event.target.closest?.("#jobDetailsModalOverlay");
+    if (overlay && event.target === overlay) {
+      event.preventDefault();
+      closeJobDetailsModal();
+      return;
+    }
+
+    const row = event.target.closest?.("tr[data-job-row-id]");
+    if (row && !event.target.closest("button,a,input,select,textarea,label")) {
+      event.preventDefault();
+      event.stopPropagation();
+      openJobDetailsModal(row.dataset.jobRowId);
+    }
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeJobDetailsModal();
+  });
+
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__jobDetailsModalNameOnlyWrapped) {
+    const wrappedRenderAll = function renderAllWithJobDetailsModalAndSimpleSetup() {
+      const result = previousRenderAll.apply(this, arguments);
+      refreshFinalJobDetailsAndSetupUi();
+      return result;
+    };
+    wrappedRenderAll.__jobDetailsModalNameOnlyWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = window.renderAll; } catch {}
+  }
+
+  const previousHydrate = typeof window.hydrateSelects === "function" ? window.hydrateSelects : (typeof hydrateSelects === "function" ? hydrateSelects : null);
+  if (previousHydrate && !previousHydrate.__jobDetailsModalNameOnlyWrapped) {
+    const wrappedHydrate = function hydrateSelectsWithSimpleCostTrackerSetup() {
+      const result = previousHydrate.apply(this, arguments);
+      simplifyCostTrackerSetupCard();
+      return result;
+    };
+    wrappedHydrate.__jobDetailsModalNameOnlyWrapped = true;
+    window.hydrateSelects = wrappedHydrate;
+    try { hydrateSelects = window.hydrateSelects; } catch {}
+  }
+
+  ensureJobDetailsModal();
+  refreshFinalJobDetailsAndSetupUi();
+  document.addEventListener("DOMContentLoaded", () => {
+    ensureJobDetailsModal();
+    setTimeout(refreshFinalJobDetailsAndSetupUi, 0);
+  });
+  setTimeout(refreshFinalJobDetailsAndSetupUi, 0);
+  setTimeout(simplifyCostTrackerSetupCard, 250);
+})();
+
+
+/* ========================================================================
+   FINAL JOB DETAILS TEMPLATE MODAL STACKING PATCH
+   ------------------------------------------------------------------------
+   - When Cost Tracker / Invoice windows are opened from the Job Details
+     popup, do not switch the main page to Cost Trackers or Invoices.
+   - Detach the Cost Tracker and Invoice template overlays to document.body
+     so they can layer in front of the Job Details popup.
+   ======================================================================== */
+(function installFinalJobDetailsTemplateModalStackingPatch() {
+  const TEMPLATE_VIEW_NAMES = new Set(["costTrackers", "invoices"]);
+  const TEMPLATE_OVERLAY_SELECTORS = ["#costTrackerTemplateModalOverlay", "#invoiceTemplateModalOverlay"];
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function isJobDetailsOpen() {
+    return Boolean(qs("#jobDetailsModalOverlay:not(.hidden)"));
+  }
+
+  function detachTemplateModalOverlays() {
+    TEMPLATE_OVERLAY_SELECTORS.forEach((selector) => {
+      const overlay = qs(selector);
+      if (!overlay) return;
+      overlay.classList.add("template-modal-detached-over-job-details");
+      if (overlay.parentElement !== document.body) {
+        document.body.appendChild(overlay);
+      }
+    });
+  }
+
+  function keepTemplateModalAboveJobDetails(kind) {
+    detachTemplateModalOverlays();
+    const selector = kind === "invoice" ? "#invoiceTemplateModalOverlay" : "#costTrackerTemplateModalOverlay";
+    const overlay = qs(selector);
+    if (overlay) {
+      overlay.classList.add("template-modal-detached-over-job-details");
+      overlay.style.zIndex = "180";
+    }
+  }
+
+  const originalShowView = typeof window.showView === "function"
+    ? window.showView
+    : (typeof showView === "function" ? showView : null);
+
+  if (originalShowView && !originalShowView.__jobDetailsTemplateModalStackingWrapped) {
+    const wrappedShowView = function showViewWithoutLeavingJobDetailsForTemplateWindows(viewName) {
+      if (isJobDetailsOpen() && TEMPLATE_VIEW_NAMES.has(String(viewName || ""))) {
+        detachTemplateModalOverlays();
+        return;
+      }
+      return originalShowView.apply(this, arguments);
+    };
+    wrappedShowView.__jobDetailsTemplateModalStackingWrapped = true;
+    wrappedShowView.__originalShowView = originalShowView;
+    window.showView = wrappedShowView;
+    try { showView = wrappedShowView; } catch {}
+  }
+
+  const originalOpenCostTrackerIntoForm = typeof window.loadCostTrackerIntoForm === "function" ? window.loadCostTrackerIntoForm : null;
+  if (originalOpenCostTrackerIntoForm && !originalOpenCostTrackerIntoForm.__jobDetailsTemplateModalStackingWrapped) {
+    window.loadCostTrackerIntoForm = function loadCostTrackerIntoFormAboveJobDetails(tracker, options = {}) {
+      detachTemplateModalOverlays();
+      const result = originalOpenCostTrackerIntoForm.call(this, tracker, options);
+      keepTemplateModalAboveJobDetails("cost");
+      return result;
+    };
+    window.loadCostTrackerIntoForm.__jobDetailsTemplateModalStackingWrapped = true;
+    try { loadCostTrackerIntoForm = window.loadCostTrackerIntoForm; } catch {}
+  }
+
+  const originalLoadCostTrackerForJob = typeof window.loadCostTrackerForJob === "function" ? window.loadCostTrackerForJob : null;
+  if (originalLoadCostTrackerForJob && !originalLoadCostTrackerForJob.__jobDetailsTemplateModalStackingWrapped) {
+    window.loadCostTrackerForJob = function loadCostTrackerForJobAboveJobDetails(jobId, announce = true) {
+      detachTemplateModalOverlays();
+      const result = originalLoadCostTrackerForJob.call(this, jobId, announce);
+      keepTemplateModalAboveJobDetails("cost");
+      return result;
+    };
+    window.loadCostTrackerForJob.__jobDetailsTemplateModalStackingWrapped = true;
+    try { loadCostTrackerForJob = window.loadCostTrackerForJob; } catch {}
+  }
+
+  const originalLoadInvoiceIntoForm = typeof window.loadInvoiceIntoForm === "function" ? window.loadInvoiceIntoForm : null;
+  if (originalLoadInvoiceIntoForm && !originalLoadInvoiceIntoForm.__jobDetailsTemplateModalStackingWrapped) {
+    window.loadInvoiceIntoForm = function loadInvoiceIntoFormAboveJobDetails(invoice) {
+      detachTemplateModalOverlays();
+      const result = originalLoadInvoiceIntoForm.call(this, invoice);
+      keepTemplateModalAboveJobDetails("invoice");
+      return result;
+    };
+    window.loadInvoiceIntoForm.__jobDetailsTemplateModalStackingWrapped = true;
+    try { loadInvoiceIntoForm = window.loadInvoiceIntoForm; } catch {}
+  }
+
+  const originalLoadInvoiceForJob = typeof window.loadInvoiceForJob === "function" ? window.loadInvoiceForJob : null;
+  if (originalLoadInvoiceForJob && !originalLoadInvoiceForJob.__jobDetailsTemplateModalStackingWrapped) {
+    window.loadInvoiceForJob = function loadInvoiceForJobAboveJobDetails(jobId, announce = true) {
+      detachTemplateModalOverlays();
+      const result = originalLoadInvoiceForJob.call(this, jobId, announce);
+      keepTemplateModalAboveJobDetails("invoice");
+      return result;
+    };
+    window.loadInvoiceForJob.__jobDetailsTemplateModalStackingWrapped = true;
+    try { loadInvoiceForJob = window.loadInvoiceForJob; } catch {}
+  }
+
+  const originalFillInvoiceFromCostTracker = typeof window.fillInvoiceFromCostTracker === "function" ? window.fillInvoiceFromCostTracker : null;
+  if (originalFillInvoiceFromCostTracker && !originalFillInvoiceFromCostTracker.__jobDetailsTemplateModalStackingWrapped) {
+    window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerAboveJobDetails(tracker, options = {}) {
+      detachTemplateModalOverlays();
+      const result = originalFillInvoiceFromCostTracker.call(this, tracker, options);
+      keepTemplateModalAboveJobDetails("invoice");
+      return result;
+    };
+    window.fillInvoiceFromCostTracker.__jobDetailsTemplateModalStackingWrapped = true;
+    try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+  }
+
+  document.addEventListener("click", (event) => {
+    const costAction = event.target.closest?.("#jobDetailsModalOverlay [data-open-cost-for-job], #jobDetailsModalOverlay [data-edit-cost]");
+    const invoiceAction = event.target.closest?.("#jobDetailsModalOverlay [data-open-invoice-for-job], #jobDetailsModalOverlay [data-edit-invoice], #jobDetailsModalOverlay [data-invoice-from-cost]");
+    if (costAction || invoiceAction) {
+      detachTemplateModalOverlays();
+      setTimeout(() => keepTemplateModalAboveJobDetails(costAction ? "cost" : "invoice"), 0);
+      setTimeout(() => keepTemplateModalAboveJobDetails(costAction ? "cost" : "invoice"), 50);
+    }
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const openCost = qs("#costTrackerTemplateModalOverlay:not(.hidden)");
+    const openInvoice = qs("#invoiceTemplateModalOverlay:not(.hidden)");
+    if (openCost || openInvoice) {
+      event.stopPropagation();
+    }
+  }, true);
+
+  detachTemplateModalOverlays();
+  document.addEventListener("DOMContentLoaded", detachTemplateModalOverlays);
+  setTimeout(detachTemplateModalOverlays, 0);
+  setTimeout(detachTemplateModalOverlays, 250);
+  setTimeout(detachTemplateModalOverlays, 1000);
+
+  try {
+    const observer = new MutationObserver(() => detachTemplateModalOverlays());
+    observer.observe(document.body, { childList: true, subtree: true });
+  } catch {}
+})();
+
+
+/* ========================================================================
+   FINAL JOBS TABLE + MANUAL INVOICE NUMBER + WEEKDAY TOTAL DAYS PATCH
+   ------------------------------------------------------------------------
+   - Removes the Files column from the Jobs table.
+   - New invoices opened for jobs/cost trackers keep Invoice # blank and show
+     "Invoice #" as the placeholder for manual entry.
+   - Job Total Days uses weekdays only, excluding Saturdays and Sundays.
+   ======================================================================== */
+(function installFinalJobsInvoiceWeekdayPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function html(value) {
+    if (typeof escapeHtml === "function") return escapeHtml(value);
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function attr(value) {
+    if (typeof escapeAttr === "function") return escapeAttr(value);
+    return html(value);
+  }
+
+  function asNumber(value) {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function dateText(value) {
+    return typeof formatDate === "function" ? formatDate(value) : (value || "-");
+  }
+
+  function moneyText(value) {
+    return typeof money === "function" ? money(value) : `$${asNumber(value).toFixed(2)}`;
+  }
+
+  function cleanDays(value) {
+    if (typeof cleanNumberDisplay === "function") return cleanNumberDisplay(value);
+    return String(asNumber(value)).replace(/\.00$/, "");
+  }
+
+  function parseLocalDate(value) {
+    if (!value) return null;
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  window.calculateJobDays = function calculateJobDaysWeekdaysOnlyFinal(startDate, endDate) {
+    const start = parseLocalDate(startDate);
+    const end = parseLocalDate(endDate || startDate);
+    if (!start || !end || end < start) return 0;
+
+    let total = 0;
+    const cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) total += 1;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return total;
+  };
+  try { calculateJobDays = window.calculateJobDays; } catch {}
+
+  function setFormField(form, name, value) {
+    const field = form?.querySelector?.(`[name="${name}"]`);
+    if (field) field.value = value ?? "";
+  }
+
+  function setJobTotalDaysFromDates(form = qs("#jobForm")) {
+    if (!form) return 0;
+    const start = form.querySelector('[name="start_date"]')?.value || "";
+    const end = form.querySelector('[name="end_date"]')?.value || start;
+    const total = window.calculateJobDays(start, end);
+    setFormField(form, "total_job_days", total || "");
+    return total;
+  }
+
+  window.syncJobTotalDaysField = function syncJobTotalDaysFieldWeekdaysOnlyFinal() {
+    return setJobTotalDaysFromDates(qs("#jobForm"));
+  };
+  try { syncJobTotalDaysField = window.syncJobTotalDaysField; } catch {}
+
+  const previousBuildJobPayload = typeof buildJobPayload === "function" ? buildJobPayload : null;
+  if (previousBuildJobPayload && !previousBuildJobPayload.__weekdayOnlyFinalWrapped) {
+    const wrappedBuildJobPayload = function buildJobPayloadWithWeekdaysOnly(values, client) {
+      const start = values?.start_date || null;
+      const end = values?.end_date || values?.start_date || null;
+      const weekdayTotal = window.calculateJobDays(start, end);
+      const nextValues = { ...(values || {}), total_job_days: weekdayTotal || "" };
+      const payload = previousBuildJobPayload.call(this, nextValues, client) || {};
+      payload.total_job_days = weekdayTotal || null;
+      payload.start_date = start;
+      payload.end_date = end;
+      return payload;
+    };
+    wrappedBuildJobPayload.__weekdayOnlyFinalWrapped = true;
+    window.buildJobPayload = wrappedBuildJobPayload;
+    try { buildJobPayload = wrappedBuildJobPayload; } catch {}
+  }
+
+  function bindWeekdayDateInputs() {
+    qsa('#jobForm [name="start_date"], #jobForm [name="end_date"]').forEach((input) => {
+      if (input.dataset.weekdayOnlyFinalBound === "true") return;
+      input.dataset.weekdayOnlyFinalBound = "true";
+      input.addEventListener("input", () => setJobTotalDaysFromDates(qs("#jobForm")));
+      input.addEventListener("change", () => setJobTotalDaysFromDates(qs("#jobForm")));
+    });
+  }
+
+  function normalizeJobsHeaderNoFiles() {
+    const headerRow = qs("#jobsView table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = `
+      <th>Job #</th>
+      <th>Job Name</th>
+      <th>Company</th>
+      <th>Location</th>
+      <th>Status</th>
+      <th>Dates</th>
+      <th>Actions</th>
+    `;
+  }
+
+  function jobById(jobId) {
+    return (state?.data?.jobs || []).find((job) => String(job.id) === String(jobId));
+  }
+
+  function jobSummaryChipsFinal(job) {
+    try {
+      if (typeof jobSummaryChips === "function") return jobSummaryChips(job);
+    } catch {}
+    const trackers = (state?.data?.costTrackers || []).filter((row) => row.job_id === job.id).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => row.job_id === job.id).length;
+    const timesheets = (state?.data?.timesheets || []).filter((row) => row.job_id === job.id).length;
+    return `
+      <div class="job-summary-chips">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+
+  window.renderJobs = function renderJobsWithoutFilesColumnFinal() {
+    normalizeJobsHeaderNoFiles();
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+
+    table.innerHTML = rows.map((job) => {
+      const totalDays = job.total_job_days || window.calculateJobDays(job.start_date, job.end_date);
+      return `
+        <tr class="job-main-row" data-job-row-id="${attr(job.id)}">
+          <td data-label="Job #"><strong>${html(job.job_number || "-")}</strong><br><button class="link-btn job-row-open-btn" data-open-job-details-modal="${attr(job.id)}" type="button">View Details</button></td>
+          <td data-label="Job Name">${html(job.job_name || "-")}${jobSummaryChipsFinal(job)}</td>
+          <td data-label="Company">${html(job.company_name || "-")}</td>
+          <td data-label="Location">${html(job.location || "-")}</td>
+          <td data-label="Status"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
+          <td data-label="Dates">${html(dateText(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${html(dateText(job.end_date))}` : ""}<br><span class="muted">${totalDays ? `${html(cleanDays(totalDays))} weekday${asNumber(totalDays) === 1 ? "" : "s"}` : "Total days auto-calculated"}</span></td>
+          <td data-label="Actions" class="actions-cell">
+            <button class="link-btn" data-edit-job="${attr(job.id)}" type="button">Edit</button>
+            <button class="link-btn" data-open-cost-for-job="${attr(job.id)}" type="button">Cost Tracker</button>
+            <button class="link-btn" data-open-invoice-for-job="${attr(job.id)}" type="button">Invoice</button>
+            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+  };
+  try { renderJobs = window.renderJobs; } catch {}
+
+  function setInvoiceNumberManualPlaceholder(form = qs("#invoiceForm")) {
+    const input = form?.querySelector?.('[name="invoice_number"]');
+    if (!input) return;
+    input.placeholder = "Invoice #";
+    input.autocomplete = "off";
+    input.required = true;
+  }
+
+  function blankInvoiceNumberForNewInvoice() {
+    const form = qs("#invoiceForm");
+    setInvoiceNumberManualPlaceholder(form);
+    const input = form?.querySelector?.('[name="invoice_number"]');
+    if (input) input.value = "";
+  }
+
+  function jobHasSavedInvoice(jobId) {
+    return (state?.data?.invoices || []).some((invoice) => String(invoice.job_id || "") === String(jobId || ""));
+  }
+
+  const previousLoadInvoiceForJobFinal = typeof window.loadInvoiceForJob === "function"
+    ? window.loadInvoiceForJob
+    : (typeof loadInvoiceForJob === "function" ? loadInvoiceForJob : null);
+  if (previousLoadInvoiceForJobFinal && !previousLoadInvoiceForJobFinal.__manualInvoiceNumberFinalWrapped) {
+    window.loadInvoiceForJob = function loadInvoiceForJobBlankNumberWhenNewFinal(jobId, announce = true) {
+      const hadInvoice = jobHasSavedInvoice(jobId);
+      const result = previousLoadInvoiceForJobFinal.call(this, jobId, announce);
+      setInvoiceNumberManualPlaceholder();
+      if (!hadInvoice) {
+        blankInvoiceNumberForNewInvoice();
+        setTimeout(blankInvoiceNumberForNewInvoice, 0);
+        setTimeout(blankInvoiceNumberForNewInvoice, 50);
+      }
+      return result;
+    };
+    window.loadInvoiceForJob.__manualInvoiceNumberFinalWrapped = true;
+    try { loadInvoiceForJob = window.loadInvoiceForJob; } catch {}
+  }
+
+  const previousFillInvoiceFromCostTrackerFinal = typeof window.fillInvoiceFromCostTracker === "function"
+    ? window.fillInvoiceFromCostTracker
+    : (typeof fillInvoiceFromCostTracker === "function" ? fillInvoiceFromCostTracker : null);
+  if (previousFillInvoiceFromCostTrackerFinal && !previousFillInvoiceFromCostTrackerFinal.__manualInvoiceNumberFinalWrapped) {
+    window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerBlankNumberFinal(tracker, options = {}) {
+      const result = previousFillInvoiceFromCostTrackerFinal.call(this, tracker, { ...options, keepInvoiceNumber: false });
+      blankInvoiceNumberForNewInvoice();
+      setTimeout(blankInvoiceNumberForNewInvoice, 0);
+      setTimeout(blankInvoiceNumberForNewInvoice, 50);
+      return result;
+    };
+    window.fillInvoiceFromCostTracker.__manualInvoiceNumberFinalWrapped = true;
+    try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+  }
+
+  const previousGenerateInvoiceNumberFinal = typeof window.generateInvoiceNumber === "function"
+    ? window.generateInvoiceNumber
+    : (typeof generateInvoiceNumber === "function" ? generateInvoiceNumber : null);
+  window.generateInvoiceNumber = function generateInvoiceNumberBlankForManualEntryFinal() {
+    return "";
+  };
+  window.generateInvoiceNumber.__previousGenerateInvoiceNumber = previousGenerateInvoiceNumberFinal;
+  try { generateInvoiceNumber = window.generateInvoiceNumber; } catch {}
+
+  function initializeFinalPatch() {
+    normalizeJobsHeaderNoFiles();
+    bindWeekdayDateInputs();
+    setInvoiceNumberManualPlaceholder();
+    try { window.syncJobTotalDaysField(); } catch {}
+    try { window.renderJobs(); } catch {}
+  }
+
+  const previousRenderAllFinal = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAllFinal && !previousRenderAllFinal.__jobsInvoiceWeekdayFinalWrapped) {
+    const wrappedRenderAll = function renderAllWithNoFilesAndWeekdaysFinal() {
+      const result = previousRenderAllFinal.apply(this, arguments);
+      initializeFinalPatch();
+      return result;
+    };
+    wrappedRenderAll.__jobsInvoiceWeekdayFinalWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  document.addEventListener("click", (event) => {
+    const createsNewInvoice = event.target.closest?.('#jobDetailsModalOverlay [data-open-invoice-for-job], [data-invoice-from-cost], #newBlankInvoiceBtn, #invoiceNewBlankBtn, #invoiceUseSelectedCostTrackerBtn, #useSelectedCostTrackerBtn');
+    if (createsNewInvoice) {
+      const jobId = createsNewInvoice.dataset?.openInvoiceForJob || "";
+      const existing = jobId ? jobHasSavedInvoice(jobId) : false;
+      setTimeout(() => {
+        setInvoiceNumberManualPlaceholder();
+        if (!existing || createsNewInvoice.matches?.('[data-invoice-from-cost], #newBlankInvoiceBtn, #invoiceNewBlankBtn, #invoiceUseSelectedCostTrackerBtn, #useSelectedCostTrackerBtn')) {
+          blankInvoiceNumberForNewInvoice();
+        }
+      }, 75);
+    }
+  }, true);
+
+  qsa('#jobForm [name="start_date"], #jobForm [name="end_date"]').forEach((input) => {
+    input.addEventListener("input", () => setJobTotalDaysFromDates(qs("#jobForm")));
+    input.addEventListener("change", () => setJobTotalDaysFromDates(qs("#jobForm")));
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeFinalPatch);
+  } else {
+    initializeFinalPatch();
+  }
+  setTimeout(initializeFinalPatch, 0);
+  setTimeout(initializeFinalPatch, 250);
+})();
+
+/* ========================================================================
+   FINAL JOB DETAILS SAVE NOTIFICATION + LIVE REFRESH PATCH
+   ------------------------------------------------------------------------
+   - When Cost Tracker is saved from the Job Details popup, show Created/Edit
+     message instead of only a generic saved message.
+   - When Invoice is saved from the Job Details popup, show Created/Edit
+     message instead of only a generic saved message.
+   - Refresh the already-open Job Details popup after the save so document
+     counts/cards update without closing and reopening the job.
+   ======================================================================== */
+(function installFinalJobDetailsSaveNotificationRefreshPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function isJobDetailsOpen() {
+    return Boolean(qs("#jobDetailsModalOverlay:not(.hidden)"));
+  }
+
+  function activeJobDetailsJobId() {
+    const overlay = qs("#jobDetailsModalOverlay:not(.hidden)");
+    if (!overlay) return "";
+
+    const uploadJobId = qs('.job-detail-upload-form [name="job_id"]', overlay)?.value;
+    if (uploadJobId) return uploadJobId;
+
+    const guideJobId = qs("[data-doc-guide-job]", overlay)?.dataset?.docGuideJob;
+    if (guideJobId) return guideJobId;
+
+    const costJobId = qs('#costTrackerForm [name="job_id"]')?.value;
+    if (costJobId) return costJobId;
+
+    const invoiceJobId = qs('#invoiceForm [name="job_id"]')?.value;
+    if (invoiceJobId) return invoiceJobId;
+
+    return window.__pimpActiveJobDetailsId || "";
+  }
+
+  function rememberJobDetailsClick(event) {
+    const opener = event.target.closest?.("[data-open-job-details-modal]");
+    if (opener?.dataset?.openJobDetailsModal) {
+      window.__pimpActiveJobDetailsId = opener.dataset.openJobDetailsModal;
+    }
+  }
+
+  document.addEventListener("click", rememberJobDetailsClick, true);
+
+  function refreshOpenJobDetails(jobId) {
+    const targetJobId = jobId || activeJobDetailsJobId();
+    if (!targetJobId || !isJobDetailsOpen()) return;
+
+    window.__pimpActiveJobDetailsId = targetJobId;
+
+    // The job-details modal renderer lives inside an earlier patch closure.
+    // Trigger its existing click handler using a temporary opener so the same
+    // official markup is rebuilt with the refreshed state.data values.
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.hidden = true;
+    trigger.dataset.openJobDetailsModal = targetJobId;
+    document.body.appendChild(trigger);
+    try {
+      trigger.click();
+    } finally {
+      trigger.remove();
+    }
+  }
+
+  window.__pimpRefreshOpenJobDetails = refreshOpenJobDetails;
+
+  async function runWithToastWatch(fn) {
+    const previousWindowToast = window.showToast;
+    const previousLocalToast = typeof showToast === "function" ? showToast : null;
+    let sawErrorToast = false;
+
+    const watchedToast = function watchedToast(message, isError = false) {
+      if (isError) sawErrorToast = true;
+      const delegate = previousLocalToast || previousWindowToast;
+      if (typeof delegate === "function") {
+        return delegate.apply(this, arguments);
+      }
+    };
+
+    window.showToast = watchedToast;
+    try { showToast = watchedToast; } catch {}
+
+    try {
+      await fn();
+    } finally {
+      window.showToast = previousWindowToast;
+      try { showToast = previousLocalToast || previousWindowToast; } catch {}
+    }
+
+    return { sawErrorToast };
+  }
+
+  function showFinalToast(message, isError = false) {
+    const toast = typeof window.showToast === "function"
+      ? window.showToast
+      : (typeof showToast === "function" ? showToast : null);
+    if (toast) toast(message, isError);
+  }
+
+  function fakeSubmitEvent(form) {
+    return {
+      target: form,
+      currentTarget: form,
+      preventDefault() {},
+      stopPropagation() {},
+      stopImmediatePropagation() {}
+    };
+  }
+
+  const previousCostTrackerSave = typeof window.handleSaveCostTracker === "function"
+    ? window.handleSaveCostTracker
+    : (typeof handleSaveCostTracker === "function" ? handleSaveCostTracker : null);
+
+  if (previousCostTrackerSave && !previousCostTrackerSave.__jobDetailsSaveNotificationWrapped) {
+    window.handleSaveCostTracker = async function handleSaveCostTrackerWithJobDetailsNotice(event) {
+      const form = event?.currentTarget || event?.target || qs("#costTrackerForm");
+      const wasFromJobDetails = isJobDetailsOpen();
+      const jobId = activeJobDetailsJobId() || form?.querySelector?.('[name="job_id"]')?.value || "";
+      const wasEdit = Boolean(form?.querySelector?.('[name="record_id"]')?.value);
+
+      const result = await runWithToastWatch(() => previousCostTrackerSave.call(this, event));
+
+      if (wasFromJobDetails && !result.sawErrorToast) {
+        refreshOpenJobDetails(jobId || form?.querySelector?.('[name="job_id"]')?.value || "");
+        setTimeout(() => refreshOpenJobDetails(jobId || form?.querySelector?.('[name="job_id"]')?.value || ""), 150);
+        showFinalToast(wasEdit ? "Cost tracker edited." : "Cost tracker created.");
+      }
+    };
+    window.handleSaveCostTracker.__jobDetailsSaveNotificationWrapped = true;
+    try { handleSaveCostTracker = window.handleSaveCostTracker; } catch {}
+  }
+
+  const previousInvoiceSave = typeof window.handleCreateInvoice === "function"
+    ? window.handleCreateInvoice
+    : (typeof handleCreateInvoice === "function" ? handleCreateInvoice : null);
+
+  if (previousInvoiceSave && !previousInvoiceSave.__jobDetailsSaveNotificationWrapped) {
+    window.handleCreateInvoice = async function handleCreateInvoiceWithJobDetailsNotice(event) {
+      const form = event?.currentTarget || event?.target || qs("#invoiceForm");
+      const wasFromJobDetails = isJobDetailsOpen();
+      const jobId = activeJobDetailsJobId() || form?.querySelector?.('[name="job_id"]')?.value || "";
+      const wasEdit = Boolean(form?.querySelector?.('[name="record_id"]')?.value);
+
+      const result = await runWithToastWatch(() => previousInvoiceSave.call(this, event));
+
+      if (wasFromJobDetails && !result.sawErrorToast) {
+        refreshOpenJobDetails(jobId || form?.querySelector?.('[name="job_id"]')?.value || "");
+        setTimeout(() => refreshOpenJobDetails(jobId || form?.querySelector?.('[name="job_id"]')?.value || ""), 150);
+        showFinalToast(wasEdit ? "Invoice edited." : "Invoice created.");
+      }
+    };
+    window.handleCreateInvoice.__jobDetailsSaveNotificationWrapped = true;
+    try { handleCreateInvoice = window.handleCreateInvoice; } catch {}
+  }
+
+  // Some earlier patches attach submit handlers before the final wrapper is
+  // installed. When a template window was opened from Job Details, capture the
+  // submit first and run the final wrapped handler once so the correct message
+  // and Job Details refresh always happen.
+  document.addEventListener("submit", (event) => {
+    if (!isJobDetailsOpen()) return;
+
+    const costForm = event.target.closest?.("#costTrackerForm");
+    const invoiceForm = event.target.closest?.("#invoiceForm");
+
+    if (costForm && typeof window.handleSaveCostTracker === "function") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.handleSaveCostTracker.call(costForm, fakeSubmitEvent(costForm));
+    }
+
+    if (invoiceForm && typeof window.handleCreateInvoice === "function") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.handleCreateInvoice.call(invoiceForm, fakeSubmitEvent(invoiceForm));
+    }
+  }, true);
+})();
+
+/* ========================================================================
+   ABSOLUTE FINAL JOB TABLE TIMESHEET + WEEKDAY OVERRIDE PATCH
+   ------------------------------------------------------------------------
+   Enforces the latest job-table requirements after every earlier patch:
+   - Jobs table Actions no longer shows Cost Tracker or Invoice buttons.
+   - Timesheet chip counts unique daily timesheet sheets, not employee rows.
+   - Total Days always recalculates as weekdays only, excluding Saturday/Sunday.
+   ======================================================================== */
+(function installAbsoluteFinalJobTableTimesheetWeekdayOverride() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function esc(value) {
+    if (typeof escapeHtml === "function") return escapeHtml(value);
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function attr(value) {
+    if (typeof escapeAttr === "function") return escapeAttr(value);
+    return esc(value);
+  }
+
+  function num(value) {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function fmtDate(value) {
+    return typeof formatDate === "function" ? formatDate(value) : (value || "-");
+  }
+
+  function cleanNum(value) {
+    if (typeof cleanNumberDisplay === "function") return cleanNumberDisplay(value);
+    const parsed = num(value);
+    return Number.isInteger(parsed) ? String(parsed) : String(parsed).replace(/\.00$/, "");
+  }
+
+  function parseLocalDate(value) {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  function weekdayCount(startValue, endValue) {
+    const start = parseLocalDate(startValue);
+    const end = parseLocalDate(endValue || startValue);
+    if (!start || !end || end < start) return 0;
+
+    let total = 0;
+    const cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) total += 1;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return total;
+  }
+
+  window.calculateJobDays = function calculateJobDaysWeekdaysOnlyAbsoluteFinal(startDate, endDate) {
+    return weekdayCount(startDate, endDate);
+  };
+  try { calculateJobDays = window.calculateJobDays; } catch {}
+
+  function weekdayTotalForJob(job) {
+    const calculated = weekdayCount(job?.start_date, job?.end_date || job?.start_date);
+    return calculated || num(job?.total_job_days);
+  }
+
+  function setField(form, name, value) {
+    const field = form?.querySelector?.(`[name="${name}"]`);
+    if (field) field.value = value ?? "";
+  }
+
+  function syncJobFormTotalDays(form = qs("#jobForm")) {
+    if (!form) return 0;
+    const start = form.querySelector('[name="start_date"]')?.value || "";
+    const end = form.querySelector('[name="end_date"]')?.value || start;
+    const total = weekdayCount(start, end);
+    setField(form, "total_job_days", total || "");
+    return total;
+  }
+
+  window.syncJobTotalDaysField = syncJobFormTotalDays;
+  try { syncJobTotalDaysField = window.syncJobTotalDaysField; } catch {}
+
+  function bindWeekdayInputs() {
+    qsa('#jobForm [name="start_date"], #jobForm [name="end_date"]').forEach((input) => {
+      if (input.dataset.absoluteFinalWeekdayBound === "true") return;
+      input.dataset.absoluteFinalWeekdayBound = "true";
+      input.addEventListener("input", () => syncJobFormTotalDays());
+      input.addEventListener("change", () => syncJobFormTotalDays());
+    });
+  }
+
+  // Make sure the submitted job payload receives the recalculated weekday value,
+  // even if an older submit handler reads the form before render refresh runs.
+  document.addEventListener("submit", (event) => {
+    if (event.target?.matches?.("#jobForm")) syncJobFormTotalDays(event.target);
+  }, true);
+
+  const previousBuildJobPayload = typeof window.buildJobPayload === "function"
+    ? window.buildJobPayload
+    : (typeof buildJobPayload === "function" ? buildJobPayload : null);
+  if (previousBuildJobPayload && !previousBuildJobPayload.__absoluteFinalWeekdayWrapped) {
+    const wrapped = function buildJobPayloadWeekdaysOnlyAbsoluteFinal(values, client) {
+      const start = values?.start_date || "";
+      const end = values?.end_date || start;
+      const total = weekdayCount(start, end);
+      const nextValues = { ...(values || {}), total_job_days: total || "" };
+      const payload = previousBuildJobPayload.call(this, nextValues, client) || {};
+      payload.start_date = start || null;
+      payload.end_date = end || null;
+      payload.total_job_days = total || null;
+      return payload;
+    };
+    wrapped.__absoluteFinalWeekdayWrapped = true;
+    window.buildJobPayload = wrapped;
+    try { buildJobPayload = wrapped; } catch {}
+  }
+
+  const previousHandleCreateJob = typeof window.handleCreateJob === "function"
+    ? window.handleCreateJob
+    : (typeof handleCreateJob === "function" ? handleCreateJob : null);
+  if (previousHandleCreateJob && !previousHandleCreateJob.__absoluteFinalWeekdaySubmitWrapped) {
+    const wrapped = async function handleCreateJobWeekdaysOnlyAbsoluteFinal(event) {
+      const form = event?.currentTarget || event?.target || qs("#jobForm");
+      syncJobFormTotalDays(form);
+      return previousHandleCreateJob.call(this, event);
+    };
+    wrapped.__absoluteFinalWeekdaySubmitWrapped = true;
+    window.handleCreateJob = wrapped;
+    try { handleCreateJob = wrapped; } catch {}
+  }
+
+  function uniqueDailyTimesheetsForJob(jobId) {
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry?.job_id || "") !== String(jobId || "")) return;
+
+      // Count a saved daily timesheet once, even when it has multiple employee rows.
+      // The date is the safest legacy fallback because older rows may not share a
+      // timesheet_group_id, but they still represent one daily sheet per job/date.
+      const date = entry.work_date || entry.date || entry.timesheet_date || "no-date";
+      const ticket = entry.ticket_number || entry.ticket_no || entry.ticket || "";
+      const key = ticket ? `${date}::${ticket}` : `${date}`;
+      seen.add(key);
+    });
+    return seen.size;
+  }
+
+  window.__pimpUniqueDailyTimesheetsForJob = uniqueDailyTimesheetsForJob;
+
+  function jobSummaryChipsAbsoluteFinal(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const timesheets = uniqueDailyTimesheetsForJob(job.id);
+
+    return `
+      <div class="job-summary-chips">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+
+  window.__pimpJobSummaryChipsAbsoluteFinal = jobSummaryChipsAbsoluteFinal;
+
+  function normalizeJobsHeader() {
+    const headerRow = qs("#jobsView table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = `
+      <th>Job #</th>
+      <th>Job Name</th>
+      <th>Company</th>
+      <th>Location</th>
+      <th>Status</th>
+      <th>Dates</th>
+      <th>Actions</th>
+    `;
+  }
+
+  window.renderJobs = function renderJobsNoCostInvoiceActionsTimesheetDatesAbsoluteFinal() {
+    normalizeJobsHeader();
+
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+
+    table.innerHTML = rows.map((job) => {
+      const totalDays = weekdayTotalForJob(job);
+      const totalText = totalDays
+        ? `${esc(cleanNum(totalDays))} weekday${num(totalDays) === 1 ? "" : "s"}`
+        : "Total days auto-calculated";
+
+      return `
+        <tr class="job-main-row" data-job-row-id="${attr(job.id)}">
+          <td data-label="Job #">
+            <strong>${esc(job.job_number || "-")}</strong><br>
+            <button class="link-btn job-row-open-btn" data-open-job-details-modal="${attr(job.id)}" type="button">View Details</button>
+          </td>
+          <td data-label="Job Name">${esc(job.job_name || "-")}${jobSummaryChipsAbsoluteFinal(job)}</td>
+          <td data-label="Company">${esc(job.company_name || "-")}</td>
+          <td data-label="Location">${esc(job.location || "-")}</td>
+          <td data-label="Status"><span class="status ${attr(job.status || "")}">${esc(job.status || "unknown")}</span></td>
+          <td data-label="Dates">
+            ${esc(fmtDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${esc(fmtDate(job.end_date))}` : ""}<br>
+            <span class="muted">${totalText}</span>
+          </td>
+          <td data-label="Actions" class="actions-cell">
+            <button class="link-btn" data-open-job-details-modal="${attr(job.id)}" type="button">View Details</button>
+            <button class="link-btn" data-edit-job="${attr(job.id)}" type="button">Edit</button>
+            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+  };
+  try { renderJobs = window.renderJobs; } catch {}
+
+  const previousRenderAll = typeof window.renderAll === "function"
+    ? window.renderAll
+    : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__absoluteFinalJobTableTimesheetWeekdayWrapped) {
+    const wrapped = function renderAllWithAbsoluteFinalJobsPatch() {
+      const result = previousRenderAll.apply(this, arguments);
+      bindWeekdayInputs();
+      try { window.renderJobs(); } catch {}
+      return result;
+    };
+    wrapped.__absoluteFinalJobTableTimesheetWeekdayWrapped = true;
+    window.renderAll = wrapped;
+    try { renderAll = wrapped; } catch {}
+  }
+
+  function initialize() {
+    bindWeekdayInputs();
+    syncJobFormTotalDays();
+    try { window.renderJobs(); } catch {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize);
+  } else {
+    initialize();
+  }
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+
+
+
+/* ========================================================================
+   ABSOLUTE FINAL JOB ACTIONS + COST TRACKER WEEKDAY TOTAL OVERRIDE PATCH
+   ------------------------------------------------------------------------
+   - Removes View Details from the Jobs table Actions column.
+   - Keeps Cost Tracker Total Days matched to the same weekday-only total
+     displayed in the Jobs table, skipping Saturdays and Sundays.
+   ======================================================================== */
+(function installAbsoluteFinalJobActionsAndCostTrackerWeekdayTotalsPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function safeHtml(value) {
+    if (typeof escapeHtml === "function") return escapeHtml(value);
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function safeAttr(value) {
+    if (typeof escapeAttr === "function") return escapeAttr(value);
+    return safeHtml(value);
+  }
+
+  function asNumber(value) {
+    if (typeof number === "function") return number(value);
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatSafeDate(value) {
+    return typeof formatDate === "function" ? formatDate(value) : (value || "-");
+  }
+
+  function cleanDaysDisplay(value) {
+    if (typeof cleanNumberDisplay === "function") return cleanNumberDisplay(value);
+    const parsed = asNumber(value);
+    return Number.isInteger(parsed) ? String(parsed) : String(parsed).replace(/\.00$/, "");
+  }
+
+  function parseDateOnly(value) {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+    const text = String(value).trim();
+    const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+      const date = new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  function countWeekdays(startValue, endValue) {
+    const start = parseDateOnly(startValue);
+    const end = parseDateOnly(endValue || startValue);
+    if (!start || !end || end < start) return 0;
+
+    let count = 0;
+    const cursor = new Date(start.getTime());
+    while (cursor <= end) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) count += 1;
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return count;
+  }
+
+  window.calculateJobDays = function calculateJobDaysNoWeekendsFinalOverride(startDate, endDate) {
+    return countWeekdays(startDate, endDate);
+  };
+  try { calculateJobDays = window.calculateJobDays; } catch {}
+
+  function findJobById(jobId) {
+    const id = String(jobId || "");
+    return (state?.data?.jobs || []).find((job) => String(job.id || "") === id) || null;
+  }
+
+  function weekdayTotalForJobFinal(job) {
+    if (!job) return 0;
+    const calculated = countWeekdays(job.start_date, job.end_date || job.start_date);
+    return calculated || asNumber(job.total_job_days);
+  }
+
+  window.__pimpWeekdayTotalForJobFinal = weekdayTotalForJobFinal;
+
+  function selectedCostTrackerJob() {
+    const form = qs("#costTrackerForm");
+    const jobId = form?.querySelector?.('[name="job_id"]')?.value || "";
+    return findJobById(jobId);
+  }
+
+  function syncCostTrackerTotalDaysFromJob(form = qs("#costTrackerForm")) {
+    if (!form) return 0;
+    const jobId = form.querySelector('[name="job_id"]')?.value || "";
+    const job = findJobById(jobId);
+    if (!job) return asNumber(form.querySelector('[name="total_job_days"]')?.value || 0);
+
+    const weekdayTotal = weekdayTotalForJobFinal(job);
+    const field = form.querySelector('[name="total_job_days"]');
+    if (field) {
+      field.value = weekdayTotal || "";
+      field.readOnly = true;
+      field.title = "Auto-calculated from the selected job's weekdays only. Weekends are not counted.";
+    }
+    return weekdayTotal;
+  }
+
+  window.__pimpSyncCostTrackerTotalDaysFromJobFinal = syncCostTrackerTotalDaysFromJob;
+
+  window.getCostTrackerTotalDaysValue = function getCostTrackerTotalDaysValueWeekdaysOnlyFinal() {
+    const form = qs("#costTrackerForm");
+    const job = selectedCostTrackerJob();
+    if (job) return weekdayTotalForJobFinal(job);
+    const input = form?.querySelector?.('[name="total_job_days"]');
+    if (!input || String(input.value || "").trim() === "") return null;
+    return asNumber(input.value);
+  };
+  try { getCostTrackerTotalDaysValue = window.getCostTrackerTotalDaysValue; } catch {}
+
+  function syncJobFormTotalDays(form = qs("#jobForm")) {
+    if (!form) return 0;
+    const start = form.querySelector('[name="start_date"]')?.value || "";
+    const end = form.querySelector('[name="end_date"]')?.value || start;
+    const weekdayTotal = countWeekdays(start, end);
+    const field = form.querySelector('[name="total_job_days"]');
+    if (field) field.value = weekdayTotal || "";
+    return weekdayTotal;
+  }
+
+  window.syncJobTotalDaysField = syncJobFormTotalDays;
+  try { syncJobTotalDaysField = window.syncJobTotalDaysField; } catch {}
+
+  function bindDateAndCostTrackerSelectors() {
+    qsa('#jobForm [name="start_date"], #jobForm [name="end_date"]').forEach((input) => {
+      if (input.dataset.finalWeekdayCostTrackerBound === "true") return;
+      input.dataset.finalWeekdayCostTrackerBound = "true";
+      input.addEventListener("input", () => syncJobFormTotalDays());
+      input.addEventListener("change", () => syncJobFormTotalDays());
+    });
+
+    qsa('#costTrackerForm [name="job_id"]').forEach((select) => {
+      if (select.dataset.finalCostTrackerWeekdayBound === "true") return;
+      select.dataset.finalCostTrackerWeekdayBound = "true";
+      select.addEventListener("change", () => {
+        syncCostTrackerTotalDaysFromJob();
+        try { if (typeof recomputeCostTrackerTotals === "function") recomputeCostTrackerTotals(); } catch {}
+      });
+    });
+  }
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.matches?.("#jobForm")) syncJobFormTotalDays(event.target);
+    if (event.target?.matches?.("#costTrackerForm")) syncCostTrackerTotalDaysFromJob(event.target);
+  }, true);
+
+  const previousBuildJobPayload = typeof window.buildJobPayload === "function"
+    ? window.buildJobPayload
+    : (typeof buildJobPayload === "function" ? buildJobPayload : null);
+  if (previousBuildJobPayload && !previousBuildJobPayload.__noWeekendFinalCostTrackerSyncWrapped) {
+    const wrappedBuildJobPayload = function buildJobPayloadNoWeekendsFinal(values, client) {
+      const start = values?.start_date || "";
+      const end = values?.end_date || start;
+      const weekdayTotal = countWeekdays(start, end);
+      const nextValues = { ...(values || {}), total_job_days: weekdayTotal || "" };
+      const payload = previousBuildJobPayload.call(this, nextValues, client) || {};
+      payload.start_date = start || null;
+      payload.end_date = end || null;
+      payload.total_job_days = weekdayTotal || null;
+      return payload;
+    };
+    wrappedBuildJobPayload.__noWeekendFinalCostTrackerSyncWrapped = true;
+    window.buildJobPayload = wrappedBuildJobPayload;
+    try { buildJobPayload = wrappedBuildJobPayload; } catch {}
+  }
+
+  function normalizeJobsHeader() {
+    const headerRow = qs("#jobsView table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = `
+      <th>Job #</th>
+      <th>Job Name</th>
+      <th>Company</th>
+      <th>Location</th>
+      <th>Status</th>
+      <th>Dates</th>
+      <th>Actions</th>
+    `;
+  }
+
+  function uniqueDailyTimesheetsForJob(jobId) {
+    if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") {
+      return window.__pimpUniqueDailyTimesheetsForJob(jobId);
+    }
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry?.job_id || "") !== String(jobId || "")) return;
+      const date = entry.work_date || entry.date || entry.timesheet_date || "no-date";
+      const ticket = entry.ticket_number || entry.ticket_no || entry.ticket || "";
+      seen.add(ticket ? `${date}::${ticket}` : `${date}`);
+    });
+    return seen.size;
+  }
+
+  function jobSummaryChips(job) {
+    if (typeof window.__pimpJobSummaryChipsAbsoluteFinal === "function") {
+      return window.__pimpJobSummaryChipsAbsoluteFinal(job);
+    }
+    const trackers = (state?.data?.costTrackers || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const timesheets = uniqueDailyTimesheetsForJob(job.id);
+    return `
+      <div class="job-summary-chips">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+
+  window.renderJobs = function renderJobsNoViewDetailsActionFinal() {
+    normalizeJobsHeader();
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+
+    table.innerHTML = rows.map((job) => {
+      const totalDays = weekdayTotalForJobFinal(job);
+      const totalText = totalDays
+        ? `${safeHtml(cleanDaysDisplay(totalDays))} weekday${asNumber(totalDays) === 1 ? "" : "s"}`
+        : "Total days auto-calculated";
+
+      return `
+        <tr class="job-main-row" data-job-row-id="${safeAttr(job.id)}" data-open-job-details-modal="${safeAttr(job.id)}">
+          <td data-label="Job #">
+            <strong>${safeHtml(job.job_number || "-")}</strong>
+          </td>
+          <td data-label="Job Name">${safeHtml(job.job_name || "-")}${jobSummaryChips(job)}</td>
+          <td data-label="Company">${safeHtml(job.company_name || "-")}</td>
+          <td data-label="Location">${safeHtml(job.location || "-")}</td>
+          <td data-label="Status"><span class="status ${safeAttr(job.status || "")}">${safeHtml(job.status || "unknown")}</span></td>
+          <td data-label="Dates">
+            ${safeHtml(formatSafeDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${safeHtml(formatSafeDate(job.end_date))}` : ""}<br>
+            <span class="muted">${totalText}</span>
+          </td>
+          <td data-label="Actions" class="actions-cell">
+            <button class="link-btn" data-edit-job="${safeAttr(job.id)}" type="button">Edit</button>
+            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${safeAttr(job.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+  };
+  try { renderJobs = window.renderJobs; } catch {}
+
+  function wrapCostTrackerLoader(name) {
+    const previous = typeof window[name] === "function" ? window[name] : (typeof globalThis[name] === "function" ? globalThis[name] : null);
+    if (!previous || previous.__costTrackerWeekdayTotalFinalWrapped) return;
+    const wrapped = function costTrackerLoaderWithWeekdayTotalFinal() {
+      const result = previous.apply(this, arguments);
+      setTimeout(() => {
+        syncCostTrackerTotalDaysFromJob();
+        try { if (typeof recomputeCostTrackerTotals === "function") recomputeCostTrackerTotals(); } catch {}
+      }, 0);
+      return result;
+    };
+    wrapped.__costTrackerWeekdayTotalFinalWrapped = true;
+    window[name] = wrapped;
+    try { eval(`${name} = window[name]`); } catch {}
+  }
+
+  [
+    "loadCostTrackerForJob",
+    "loadCostTrackerIntoForm",
+    "populateCostTrackerFromTemplateForJob",
+    "updateCostSheetHeaderFromJob",
+    "updateCostSheetHeaderFromSelectedJob",
+    "resetCostTrackerForm"
+  ].forEach(wrapCostTrackerLoader);
+
+  const previousRenderAll = typeof window.renderAll === "function"
+    ? window.renderAll
+    : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__noViewDetailsCostTrackerWeekdayFinalWrapped) {
+    const wrappedRenderAll = function renderAllNoViewDetailsCostTrackerWeekdaysFinal() {
+      const result = previousRenderAll.apply(this, arguments);
+      bindDateAndCostTrackerSelectors();
+      try { window.renderJobs(); } catch {}
+      syncCostTrackerTotalDaysFromJob();
+      return result;
+    };
+    wrappedRenderAll.__noViewDetailsCostTrackerWeekdayFinalWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() {
+    bindDateAndCostTrackerSelectors();
+    syncJobFormTotalDays();
+    syncCostTrackerTotalDaysFromJob();
+    try { window.renderJobs(); } catch {}
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initialize);
+  } else {
+    initialize();
+  }
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+
+
+/* ========================================================================
+   FINAL JOB DETAILS LOCKED COST TRACKER + EDITABLE VIEW INVOICE PATCH
+   ------------------------------------------------------------------------
+   - When a Cost Tracker is opened from the Job Details window, hide the
+     Job / AFE picker and keep the tracker locked to that job.
+   - When an Invoice is opened from the Job Details window, show the editable
+     invoice using the same document-style layout as the View invoice popup.
+   ======================================================================== */
+(function installJobDetailsLockedCostTrackerAndInvoiceEditableViewPatch() {
+  const context = {
+    costJobId: "",
+    invoiceJobId: "",
+    invoiceFromJobDetails: false,
+    costFromJobDetails: false
+  };
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function text(value) {
+    try {
+      if (typeof escapeHtml === "function") return escapeHtml(value);
+    } catch {}
+    return String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "\"": "&quot;",
+      "'": "&#039;"
+    }[char]));
+  }
+
+  function isJobDetailsOpen() {
+    return Boolean(qs("#jobDetailsModalOverlay:not(.hidden)"));
+  }
+
+  function jobById(jobId) {
+    return (state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || "")) || null;
+  }
+
+  function trackerById(trackerId) {
+    return (state?.data?.costTrackers || []).find((tracker) => String(tracker.id || "") === String(trackerId || "")) || null;
+  }
+
+  function invoiceById(invoiceId) {
+    return (state?.data?.invoices || []).find((invoice) => String(invoice.id || "") === String(invoiceId || "")) || null;
+  }
+
+  function parseSummary(record) {
+    const summary = record?.summary;
+    if (!summary) return {};
+    if (typeof summary === "object") return summary;
+    try {
+      const parsed = JSON.parse(summary);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function activeJobDetailsJobId() {
+    const overlay = qs("#jobDetailsModalOverlay:not(.hidden)");
+    if (!overlay) return window.__pimpActiveJobDetailsId || "";
+
+    const uploadJobId = qs('.job-detail-upload-form [name="job_id"]', overlay)?.value;
+    if (uploadJobId) return uploadJobId;
+
+    const guideJobId = qs("[data-doc-guide-job]", overlay)?.dataset?.docGuideJob;
+    if (guideJobId) return guideJobId;
+
+    const openCostJob = qs("[data-open-cost-for-job]", overlay)?.dataset?.openCostForJob;
+    if (openCostJob) return openCostJob;
+
+    const openInvoiceJob = qs("[data-open-invoice-for-job]", overlay)?.dataset?.openInvoiceForJob;
+    if (openInvoiceJob) return openInvoiceJob;
+
+    return window.__pimpActiveJobDetailsId || "";
+  }
+
+  function labelForJob(jobId) {
+    const job = jobById(jobId);
+    if (!job) return "Selected job";
+    const number = job.job_number || "No #";
+    const name = job.job_name || "Untitled Job";
+    return `${number} — ${name}`;
+  }
+
+  function setFormFieldValue(form, name, value) {
+    const field = form?.querySelector?.(`[name="${name}"]`);
+    if (!field) return;
+    field.value = value ?? "";
+  }
+
+  function ensureLockedNotice(form, className, labelText) {
+    if (!form) return null;
+    let notice = form.querySelector(`.${className}`);
+    if (!notice) {
+      notice = document.createElement("div");
+      notice.className = `${className} locked-context-note`;
+      const header = form.querySelector(".sheet-page-header, .invoice-builder-header, .panel-header");
+      if (header?.parentElement) header.insertAdjacentElement("afterend", notice);
+      else form.prepend(notice);
+    }
+    notice.innerHTML = `<strong>${text(labelText)}</strong><span>This window was opened from Job Details, so the job/source is locked to the selected job.</span>`;
+    return notice;
+  }
+
+  function removeLockedNotice(form, className) {
+    form?.querySelector?.(`.${className}`)?.remove();
+  }
+
+  function applyCostTrackerJobLock(jobId, shouldLock = true) {
+    const overlay = qs("#costTrackerTemplateModalOverlay");
+    const form = qs("#costTrackerForm");
+    if (!overlay || !form) return;
+
+    const locked = Boolean(shouldLock && jobId && isJobDetailsOpen());
+    overlay.classList.toggle("job-details-cost-locked", locked);
+    form.classList.toggle("job-details-cost-locked-form", locked);
+
+    const jobSelect = form.querySelector('[name="job_id"]');
+    const clearButton = qs("#clearCostTrackerJobBtn", form);
+    if (locked) {
+      setFormFieldValue(form, "job_id", jobId);
+      if (jobSelect) {
+        jobSelect.value = jobId;
+        jobSelect.setAttribute("aria-disabled", "true");
+        jobSelect.tabIndex = -1;
+      }
+      if (clearButton) {
+        clearButton.disabled = true;
+        clearButton.setAttribute("aria-disabled", "true");
+      }
+      ensureLockedNotice(form, "cost-tracker-locked-job-note", `Locked to Job / AFE: ${labelForJob(jobId)}`);
+      try { if (typeof window.__pimpSyncCostTrackerTotalDaysFromJobFinal === "function") window.__pimpSyncCostTrackerTotalDaysFromJobFinal(form); } catch {}
+      try { if (typeof recomputeCostTrackerTotals === "function") recomputeCostTrackerTotals(); } catch {}
+    } else {
+      if (jobSelect) {
+        jobSelect.removeAttribute("aria-disabled");
+        jobSelect.removeAttribute("tabindex");
+      }
+      if (clearButton) {
+        clearButton.disabled = false;
+        clearButton.removeAttribute("aria-disabled");
+      }
+      removeLockedNotice(form, "cost-tracker-locked-job-note");
+    }
+  }
+
+  function applyInvoiceEditableViewMode(jobId, shouldApply = true) {
+    const overlay = qs("#invoiceTemplateModalOverlay");
+    const form = qs("#invoiceForm");
+    const editor = qs("#invoiceTemplateEditor");
+    if (!overlay || !form || !editor) return;
+
+    const locked = Boolean(shouldApply && isJobDetailsOpen());
+    overlay.classList.toggle("invoice-edit-like-view-mode", locked);
+    form.classList.toggle("invoice-edit-like-view-form", locked);
+    editor.classList.toggle("invoice-editable-view-layout", locked);
+
+    const sourceSelect = form.querySelector('[name="cost_tracker_id"]');
+    if (locked) {
+      if (jobId) setFormFieldValue(form, "job_id", jobId);
+      if (sourceSelect) {
+        sourceSelect.setAttribute("aria-disabled", "true");
+        sourceSelect.tabIndex = -1;
+      }
+      ensureLockedNotice(form, "invoice-locked-job-note", `Editing invoice for Job / AFE: ${labelForJob(jobId || activeJobDetailsJobId())}`);
+    } else {
+      if (sourceSelect) {
+        sourceSelect.removeAttribute("aria-disabled");
+        sourceSelect.removeAttribute("tabindex");
+      }
+      removeLockedNotice(form, "invoice-locked-job-note");
+    }
+  }
+
+  function scheduleApplyCostLock(jobId) {
+    context.costJobId = jobId || "";
+    context.costFromJobDetails = Boolean(jobId);
+    [0, 50, 150, 350].forEach((delay) => setTimeout(() => applyCostTrackerJobLock(context.costJobId, context.costFromJobDetails), delay));
+  }
+
+  function scheduleApplyInvoiceView(jobId) {
+    context.invoiceJobId = jobId || activeJobDetailsJobId() || "";
+    context.invoiceFromJobDetails = true;
+    [0, 50, 150, 350].forEach((delay) => setTimeout(() => applyInvoiceEditableViewMode(context.invoiceJobId, context.invoiceFromJobDetails), delay));
+  }
+
+  function clearCostLockSoon() {
+    context.costJobId = "";
+    context.costFromJobDetails = false;
+    [0, 80].forEach((delay) => setTimeout(() => applyCostTrackerJobLock("", false), delay));
+  }
+
+  function clearInvoiceViewSoon() {
+    context.invoiceJobId = "";
+    context.invoiceFromJobDetails = false;
+    [0, 80].forEach((delay) => setTimeout(() => applyInvoiceEditableViewMode("", false), delay));
+  }
+
+  function rememberTemplateContextFromJobDetails(event) {
+    const target = event.target;
+    if (!target?.closest) return;
+
+    const jobDetails = target.closest("#jobDetailsModalOverlay");
+    const costAction = target.closest("[data-open-cost-for-job], [data-edit-cost]");
+    const invoiceAction = target.closest("[data-open-invoice-for-job], [data-edit-invoice], [data-invoice-from-cost]");
+
+    if (jobDetails && costAction) {
+      const tracker = trackerById(costAction.dataset.editCost);
+      const jobId = costAction.dataset.openCostForJob || tracker?.job_id || activeJobDetailsJobId();
+      if (jobId) window.__pimpActiveJobDetailsId = jobId;
+      scheduleApplyCostLock(jobId);
+      return;
+    }
+
+    if (jobDetails && invoiceAction) {
+      const invoice = invoiceById(invoiceAction.dataset.editInvoice);
+      const tracker = trackerById(invoiceAction.dataset.invoiceFromCost);
+      const invoiceSummary = parseSummary(invoice);
+      const trackerFromInvoice = trackerById(invoiceSummary.sourceCostTrackerId || invoice?.cost_tracker_id || "");
+      const jobId = invoiceAction.dataset.openInvoiceForJob || invoice?.job_id || tracker?.job_id || trackerFromInvoice?.job_id || activeJobDetailsJobId();
+      if (jobId) window.__pimpActiveJobDetailsId = jobId;
+      scheduleApplyInvoiceView(jobId);
+      return;
+    }
+
+    // Opening a template from outside Job Details should restore the normal controls.
+    if (!jobDetails && costAction) clearCostLockSoon();
+    if (!jobDetails && invoiceAction) clearInvoiceViewSoon();
+  }
+
+  ["pointerdown", "mousedown", "touchstart"].forEach((eventName) => {
+    document.addEventListener(eventName, rememberTemplateContextFromJobDetails, true);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (!["Enter", " ", "Spacebar"].includes(event.key)) return;
+    rememberTemplateContextFromJobDetails(event);
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const closeKind = event.target.closest?.("[data-close-template-modal]")?.dataset?.closeTemplateModal;
+    if (closeKind === "cost") clearCostLockSoon();
+    if (closeKind === "invoice") clearInvoiceViewSoon();
+  }, true);
+
+  const previousLoadCostTrackerIntoForm = typeof window.loadCostTrackerIntoForm === "function" ? window.loadCostTrackerIntoForm : null;
+  if (previousLoadCostTrackerIntoForm && !previousLoadCostTrackerIntoForm.__jobDetailsLockedDropdownFinalWrapped) {
+    window.loadCostTrackerIntoForm = function loadCostTrackerIntoFormJobDetailsLockedDropdownFinal(tracker, options = {}) {
+      const result = previousLoadCostTrackerIntoForm.call(this, tracker, options);
+      if (context.costFromJobDetails || isJobDetailsOpen()) {
+        const jobId = context.costJobId || tracker?.job_id || activeJobDetailsJobId();
+        if (jobId) scheduleApplyCostLock(jobId);
+      }
+      return result;
+    };
+    window.loadCostTrackerIntoForm.__jobDetailsLockedDropdownFinalWrapped = true;
+    try { loadCostTrackerIntoForm = window.loadCostTrackerIntoForm; } catch {}
+  }
+
+  const previousLoadCostTrackerForJob = typeof window.loadCostTrackerForJob === "function" ? window.loadCostTrackerForJob : null;
+  if (previousLoadCostTrackerForJob && !previousLoadCostTrackerForJob.__jobDetailsLockedDropdownFinalWrapped) {
+    window.loadCostTrackerForJob = function loadCostTrackerForJobJobDetailsLockedDropdownFinal(jobId, announce = true) {
+      const result = previousLoadCostTrackerForJob.call(this, jobId, announce);
+      if (context.costFromJobDetails || isJobDetailsOpen()) scheduleApplyCostLock(jobId);
+      return result;
+    };
+    window.loadCostTrackerForJob.__jobDetailsLockedDropdownFinalWrapped = true;
+    try { loadCostTrackerForJob = window.loadCostTrackerForJob; } catch {}
+  }
+
+  const previousLoadInvoiceIntoForm = typeof window.loadInvoiceIntoForm === "function" ? window.loadInvoiceIntoForm : null;
+  if (previousLoadInvoiceIntoForm && !previousLoadInvoiceIntoForm.__jobDetailsEditableViewFinalWrapped) {
+    window.loadInvoiceIntoForm = function loadInvoiceIntoFormJobDetailsEditableViewFinal(invoice) {
+      const result = previousLoadInvoiceIntoForm.call(this, invoice);
+      if (context.invoiceFromJobDetails || isJobDetailsOpen()) {
+        scheduleApplyInvoiceView(context.invoiceJobId || invoice?.job_id || activeJobDetailsJobId());
+      }
+      return result;
+    };
+    window.loadInvoiceIntoForm.__jobDetailsEditableViewFinalWrapped = true;
+    try { loadInvoiceIntoForm = window.loadInvoiceIntoForm; } catch {}
+  }
+
+  const previousLoadInvoiceForJob = typeof window.loadInvoiceForJob === "function" ? window.loadInvoiceForJob : null;
+  if (previousLoadInvoiceForJob && !previousLoadInvoiceForJob.__jobDetailsEditableViewFinalWrapped) {
+    window.loadInvoiceForJob = function loadInvoiceForJobJobDetailsEditableViewFinal(jobId, announce = true) {
+      const result = previousLoadInvoiceForJob.call(this, jobId, announce);
+      if (context.invoiceFromJobDetails || isJobDetailsOpen()) scheduleApplyInvoiceView(jobId || activeJobDetailsJobId());
+      return result;
+    };
+    window.loadInvoiceForJob.__jobDetailsEditableViewFinalWrapped = true;
+    try { loadInvoiceForJob = window.loadInvoiceForJob; } catch {}
+  }
+
+  const previousFillInvoiceFromCostTracker = typeof window.fillInvoiceFromCostTracker === "function" ? window.fillInvoiceFromCostTracker : null;
+  if (previousFillInvoiceFromCostTracker && !previousFillInvoiceFromCostTracker.__jobDetailsEditableViewFinalWrapped) {
+    window.fillInvoiceFromCostTracker = function fillInvoiceFromCostTrackerJobDetailsEditableViewFinal(tracker, options = {}) {
+      const result = previousFillInvoiceFromCostTracker.call(this, tracker, options);
+      if (context.invoiceFromJobDetails || isJobDetailsOpen()) scheduleApplyInvoiceView(tracker?.job_id || activeJobDetailsJobId());
+      return result;
+    };
+    window.fillInvoiceFromCostTracker.__jobDetailsEditableViewFinalWrapped = true;
+    try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
+  }
+
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__jobDetailsLockedEditableViewFinalWrapped) {
+    const wrappedRenderAll = function renderAllJobDetailsLockedEditableViewFinal() {
+      const result = previousRenderAll.apply(this, arguments);
+      if (context.costFromJobDetails) applyCostTrackerJobLock(context.costJobId, true);
+      if (context.invoiceFromJobDetails) applyInvoiceEditableViewMode(context.invoiceJobId, true);
+      return result;
+    };
+    wrappedRenderAll.__jobDetailsLockedEditableViewFinalWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() {
+    if (context.costFromJobDetails) applyCostTrackerJobLock(context.costJobId, true);
+    if (context.invoiceFromJobDetails) applyInvoiceEditableViewMode(context.invoiceJobId, true);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+})();
+
+
+/* ========================================================================
+   ABSOLUTE FINAL JOB TABLE ACTION BUTTON CLICK FIX
+   ------------------------------------------------------------------------
+   Fixes the Jobs table so clicking Edit or Delete does not get treated like
+   clicking the job row. The row still opens Job Details when clicked anywhere
+   outside the action buttons.
+   ======================================================================== */
+(function installAbsoluteFinalJobActionButtonClickFix() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function safeHtml(value) {
+    try {
+      if (typeof escapeHtml === "function") return escapeHtml(value);
+    } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function safeAttr(value) {
+    try {
+      if (typeof escapeAttr === "function") return escapeAttr(value);
+    } catch {}
+    return safeHtml(value);
+  }
+
+  function formatSafeDate(value) {
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    return value || "-";
+  }
+
+  function numberValue(value) {
+    try {
+      if (typeof number === "function") return number(value);
+    } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function calculateWeekdaysOnly(startDate, endDate) {
+    if (!startDate) return 0;
+    const start = new Date(`${startDate}T00:00:00`);
+    const end = new Date(`${(endDate || startDate)}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+
+    const step = start <= end ? 1 : -1;
+    let cursor = new Date(start);
+    let count = 0;
+
+    while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) count += 1;
+      cursor.setDate(cursor.getDate() + step);
+    }
+
+    return count;
+  }
+
+  function weekdayTotalForJob(job) {
+    const calculated = calculateWeekdaysOnly(job?.start_date, job?.end_date || job?.start_date);
+    if (calculated) return calculated;
+    return numberValue(job?.total_job_days);
+  }
+
+  function cleanDaysDisplay(value) {
+    const rounded = Math.round((numberValue(value) + Number.EPSILON) * 100) / 100;
+    return String(rounded).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+  }
+
+  function uniqueDailyTimesheetsForJob(jobId) {
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      const summary = (() => {
+        try {
+          if (entry.summary && typeof entry.summary === "object") return entry.summary;
+          if (entry.summary) return JSON.parse(entry.summary);
+        } catch {}
+        return {};
+      })();
+      const key =
+        summary.timesheetGroupId ||
+        summary.timesheet_group_id ||
+        summary.sheetId ||
+        summary.sheet_id ||
+        entry.timesheet_group_id ||
+        entry.group_id ||
+        entry.sheet_id ||
+        entry.work_date ||
+        entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+
+  function jobSummaryChips(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const timesheets = uniqueDailyTimesheetsForJob(job.id);
+
+    return `
+      <div class="job-summary-chips">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+
+  function normalizeJobsHeader() {
+    const headerRow = qs(".jobs-table thead tr");
+    if (!headerRow) return;
+    const labels = ["Job #", "Job Name", "Company", "Location", "Status", "Dates", "Actions"];
+    headerRow.innerHTML = labels.map((label) => `<th>${safeHtml(label)}</th>`).join("");
+  }
+
+  window.renderJobs = function renderJobsWithActionButtonsFixedFinal() {
+    normalizeJobsHeader();
+
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+
+    table.innerHTML = rows.map((job) => {
+      const totalDays = weekdayTotalForJob(job);
+      const totalText = totalDays
+        ? `${safeHtml(cleanDaysDisplay(totalDays))} weekday${numberValue(totalDays) === 1 ? "" : "s"}`
+        : "Total days auto-calculated";
+
+      return `
+        <tr class="job-main-row" data-job-row-id="${safeAttr(job.id)}">
+          <td data-label="Job #"><strong>${safeHtml(job.job_number || "-")}</strong></td>
+          <td data-label="Job Name">${safeHtml(job.job_name || "-")}${jobSummaryChips(job)}</td>
+          <td data-label="Company">${safeHtml(job.company_name || "-")}</td>
+          <td data-label="Location">${safeHtml(job.location || "-")}</td>
+          <td data-label="Status"><span class="status ${safeAttr(job.status || "")}">${safeHtml(job.status || "unknown")}</span></td>
+          <td data-label="Dates">
+            ${safeHtml(formatSafeDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${safeHtml(formatSafeDate(job.end_date))}` : ""}<br>
+            <span class="muted">${totalText}</span>
+          </td>
+          <td data-label="Actions" class="actions-cell">
+            <button class="link-btn job-action-button" data-edit-job="${safeAttr(job.id)}" type="button">Edit</button>
+            <button class="link-btn danger-text job-action-button" data-delete-type="jobs" data-delete-id="${safeAttr(job.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+  };
+
+  try { renderJobs = window.renderJobs; } catch {}
+
+  // Guard against any older row-level opener seeing action clicks.
+  // The final renderer also removes data-open-job-details-modal from the row,
+  // but this keeps future action buttons safe too.
+  function stopJobActionFromOpeningDetails(event) {
+    const action = event.target?.closest?.("#jobsTable .actions-cell button, #jobsTable .actions-cell a, #jobsTable [data-edit-job], #jobsTable [data-delete-type][data-delete-id]");
+    if (!action) return;
+    event.stopPropagation();
+  }
+
+  ["pointerdown", "mousedown", "touchstart", "mouseup"].forEach((eventName) => {
+    document.addEventListener(eventName, stopJobActionFromOpeningDetails, true);
+  });
+
+  const previousRenderAll = typeof window.renderAll === "function"
+    ? window.renderAll
+    : (typeof renderAll === "function" ? renderAll : null);
+
+  if (previousRenderAll && !previousRenderAll.__jobActionButtonClickFixFinalWrapped) {
+    const wrappedRenderAll = function renderAllWithJobActionButtonClickFixFinal() {
+      const result = previousRenderAll.apply(this, arguments);
+      try { window.renderJobs(); } catch {}
+      return result;
+    };
+    wrappedRenderAll.__jobActionButtonClickFixFinalWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() {
+    try { window.renderJobs(); } catch {}
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+})();
+
+/* ========================================================================
+   ABSOLUTE FINAL JOB EDIT WORKDAYS + PROFESSIONAL JOB TABLE PATCH
+   ------------------------------------------------------------------------
+   - Editing a job always recalculates Total Days as weekdays/workdays only.
+   - Saturdays and Sundays are never counted in the job form, job table,
+     or Cost Tracker Total Days.
+   - Keeps job row navigation intact while action buttons work independently.
+   ======================================================================== */
+(function installJobEditWorkdaysAndProfessionalTableFinalPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function html(value) {
+    try {
+      if (typeof escapeHtml === "function") return escapeHtml(value);
+    } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function attr(value) {
+    try {
+      if (typeof escapeAttr === "function") return escapeAttr(value);
+    } catch {}
+    return html(value);
+  }
+
+  function asNumber(value) {
+    try {
+      if (typeof number === "function") return number(value);
+    } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatSafeDate(value) {
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    return value || "-";
+  }
+
+  function cleanDays(value) {
+    const parsed = asNumber(value);
+    if (!parsed) return "0";
+    return Number.isInteger(parsed) ? String(parsed) : String(Math.round((parsed + Number.EPSILON) * 100) / 100);
+  }
+
+  function parseLocalDate(value) {
+    if (!value) return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+    }
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  function countWorkdays(startValue, endValue) {
+    const start = parseLocalDate(startValue);
+    const end = parseLocalDate(endValue || startValue);
+    if (!start || !end) return 0;
+
+    const step = start <= end ? 1 : -1;
+    const cursor = new Date(start.getTime());
+    let total = 0;
+
+    while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) total += 1;
+      cursor.setDate(cursor.getDate() + step);
+    }
+
+    return total;
+  }
+
+  window.calculateJobDays = function calculateJobDaysWorkdaysFinal(startDate, endDate) {
+    return countWorkdays(startDate, endDate);
+  };
+  try { calculateJobDays = window.calculateJobDays; } catch {}
+
+  function workdaysForJob(job) {
+    if (!job) return 0;
+    const calculated = countWorkdays(job.start_date, job.end_date || job.start_date);
+    return calculated || asNumber(job.total_job_days);
+  }
+
+  window.__pimpWorkdaysForJobFinal = workdaysForJob;
+
+  function setFormField(form, name, value) {
+    const field = form?.querySelector?.(`[name="${name}"]`);
+    if (field) field.value = value ?? "";
+  }
+
+  function syncJobFormWorkdays(form = qs("#jobForm")) {
+    if (!form) return 0;
+    const start = form.querySelector('[name="start_date"]')?.value || "";
+    const end = form.querySelector('[name="end_date"]')?.value || start;
+    const total = countWorkdays(start, end);
+    setFormField(form, "total_job_days", total || "");
+    const field = form.querySelector('[name="total_job_days"]');
+    if (field) {
+      field.readOnly = true;
+      field.title = "Auto-calculated total workdays. Saturdays and Sundays are not counted.";
+    }
+    return total;
+  }
+
+  window.syncJobTotalDaysField = syncJobFormWorkdays;
+  try { syncJobTotalDaysField = window.syncJobTotalDaysField; } catch {}
+
+  function bindJobDateFields() {
+    qsa('#jobForm [name="start_date"], #jobForm [name="end_date"]').forEach((input) => {
+      if (input.dataset.workdaysEditFinalBound === "true") return;
+      input.dataset.workdaysEditFinalBound = "true";
+      input.addEventListener("input", () => syncJobFormWorkdays());
+      input.addEventListener("change", () => syncJobFormWorkdays());
+      input.addEventListener("blur", () => syncJobFormWorkdays());
+    });
+  }
+
+  function syncCostTrackerDaysFromSelectedJob(form = qs("#costTrackerForm")) {
+    if (!form) return 0;
+    const jobId = form.querySelector('[name="job_id"]')?.value || "";
+    const job = (state?.data?.jobs || []).find((row) => String(row.id || "") === String(jobId || ""));
+    const total = job ? workdaysForJob(job) : asNumber(qs('#jobForm [name="total_job_days"]')?.value || 0);
+    const field = form.querySelector('[name="total_job_days"]');
+    if (field) {
+      field.value = total || "";
+      field.title = "Matches the selected job's total workdays. Weekends are not counted.";
+    }
+    return total;
+  }
+
+  window.__pimpSyncCostTrackerWorkdaysFromJob = syncCostTrackerDaysFromSelectedJob;
+
+  window.getCostTrackerTotalDaysValue = function getCostTrackerTotalDaysValueWorkdaysFinal() {
+    const form = qs("#costTrackerForm");
+    const synced = syncCostTrackerDaysFromSelectedJob(form);
+    if (synced) return synced;
+    const input = form?.querySelector?.('[name="total_job_days"]');
+    return asNumber(input?.value || 0);
+  };
+  try { getCostTrackerTotalDaysValue = window.getCostTrackerTotalDaysValue; } catch {}
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.matches?.("#jobForm")) syncJobFormWorkdays(event.target);
+    if (event.target?.matches?.("#costTrackerForm")) syncCostTrackerDaysFromSelectedJob(event.target);
+  }, true);
+
+  const previousBuildJobPayload = typeof window.buildJobPayload === "function"
+    ? window.buildJobPayload
+    : (typeof buildJobPayload === "function" ? buildJobPayload : null);
+  if (previousBuildJobPayload && !previousBuildJobPayload.__workdaysEditFinalWrapped) {
+    const wrappedBuildJobPayload = function buildJobPayloadWorkdaysEditFinal(values, client) {
+      const start = values?.start_date || "";
+      const end = values?.end_date || start;
+      const total = countWorkdays(start, end);
+      const nextValues = { ...(values || {}), total_job_days: total || "" };
+      const payload = previousBuildJobPayload.call(this, nextValues, client) || {};
+      payload.start_date = start || null;
+      payload.end_date = end || null;
+      payload.total_job_days = total || null;
+      return payload;
+    };
+    wrappedBuildJobPayload.__workdaysEditFinalWrapped = true;
+    window.buildJobPayload = wrappedBuildJobPayload;
+    try { buildJobPayload = wrappedBuildJobPayload; } catch {}
+  }
+
+  const previousHandleCreateJob = typeof window.handleCreateJob === "function"
+    ? window.handleCreateJob
+    : (typeof handleCreateJob === "function" ? handleCreateJob : null);
+  if (previousHandleCreateJob && !previousHandleCreateJob.__workdaysEditFinalWrapped) {
+    const wrappedHandleCreateJob = async function handleCreateJobWorkdaysEditFinal(event) {
+      const form = event?.currentTarget || event?.target || qs("#jobForm");
+      syncJobFormWorkdays(form);
+      return previousHandleCreateJob.call(this, event);
+    };
+    wrappedHandleCreateJob.__workdaysEditFinalWrapped = true;
+    window.handleCreateJob = wrappedHandleCreateJob;
+    try { handleCreateJob = wrappedHandleCreateJob; } catch {}
+  }
+
+  const previousOpenJobModal = typeof window.openJobModal === "function" ? window.openJobModal : null;
+  if (previousOpenJobModal && !previousOpenJobModal.__workdaysEditFinalWrapped) {
+    window.openJobModal = function openJobModalWorkdaysEditFinal(options = {}) {
+      const result = previousOpenJobModal.call(this, options);
+      setTimeout(() => {
+        bindJobDateFields();
+        syncJobFormWorkdays();
+      }, 0);
+      setTimeout(syncJobFormWorkdays, 120);
+      return result;
+    };
+    window.openJobModal.__workdaysEditFinalWrapped = true;
+    try { openJobModal = window.openJobModal; } catch {}
+  }
+
+  document.addEventListener("click", (event) => {
+    const editButton = event.target.closest?.("[data-edit-job]");
+    if (editButton) {
+      setTimeout(() => {
+        bindJobDateFields();
+        syncJobFormWorkdays();
+      }, 0);
+      setTimeout(syncJobFormWorkdays, 150);
+      return;
+    }
+
+    const row = event.target.closest?.("#jobsTable tr[data-job-row-id]");
+    if (row && event.target.closest?.(".actions-cell, [data-edit-job], [data-delete-type]")) {
+      event.stopPropagation();
+    }
+  }, true);
+
+  function uniqueDailyTimesheets(jobId) {
+    if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") {
+      return window.__pimpUniqueDailyTimesheetsForJob(jobId);
+    }
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      const date = entry.work_date || entry.date || entry.timesheet_date || "no-date";
+      const ticket = entry.ticket_number || entry.ticket_no || entry.ticket || "";
+      seen.add(ticket ? `${date}::${ticket}` : date);
+    });
+    return seen.size;
+  }
+
+  function docChips(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const timesheets = uniqueDailyTimesheets(job.id);
+    return `
+      <div class="job-summary-chips professional-job-chips" aria-label="Saved job documents">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+
+  function normalizeHeader() {
+    const headerRow = qs(".jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Job Name", "Company", "Location", "Status", "Dates", "Actions"]
+      .map((label) => `<th>${html(label)}</th>`)
+      .join("");
+  }
+
+  window.renderJobs = function renderJobsProfessionalWorkdaysFinal() {
+    normalizeHeader();
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+
+    table.innerHTML = rows.map((job) => {
+      const days = workdaysForJob(job);
+      const dateRange = `${formatSafeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${formatSafeDate(job.end_date)}` : ""}`;
+      const daysText = days ? `${cleanDays(days)} workday${asNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      return `
+        <tr class="job-main-row professional-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong>${html(job.job_number || "-")}</strong></td>
+          <td data-label="Job Name" class="job-name-cell">
+            <div class="job-name-stack">
+              <strong>${html(job.job_name || "-")}</strong>
+              ${docChips(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
+          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
+          <td data-label="Dates" class="job-dates-cell">
+            <span class="job-date-range">${html(dateRange)}</span>
+            <span class="job-workday-count">${html(daysText)}</span>
+          </td>
+          <td data-label="Actions" class="actions-cell job-actions-cell">
+            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+  };
+  try { renderJobs = window.renderJobs; } catch {}
+
+  function bindCostTrackerSelector() {
+    qsa('#costTrackerForm [name="job_id"]').forEach((select) => {
+      if (select.dataset.workdaysCostTrackerFinalBound === "true") return;
+      select.dataset.workdaysCostTrackerFinalBound = "true";
+      select.addEventListener("change", () => {
+        syncCostTrackerDaysFromSelectedJob();
+        try { if (typeof recomputeCostTrackerTotals === "function") recomputeCostTrackerTotals(); } catch {}
+      });
+    });
+  }
+
+  ["loadCostTrackerForJob", "loadCostTrackerIntoForm", "populateCostTrackerFromTemplateForJob", "updateCostSheetHeaderFromJob", "updateCostSheetHeaderFromSelectedJob"].forEach((name) => {
+    const previous = typeof window[name] === "function" ? window[name] : null;
+    if (!previous || previous.__workdaysEditFinalWrapped) return;
+    const wrapped = function loaderWorkdaysEditFinal() {
+      const result = previous.apply(this, arguments);
+      setTimeout(() => {
+        syncCostTrackerDaysFromSelectedJob();
+        try { if (typeof recomputeCostTrackerTotals === "function") recomputeCostTrackerTotals(); } catch {}
+      }, 0);
+      return result;
+    };
+    wrapped.__workdaysEditFinalWrapped = true;
+    window[name] = wrapped;
+    try { eval(`${name} = window[name]`); } catch {}
+  });
+
+  const previousRenderAll = typeof window.renderAll === "function"
+    ? window.renderAll
+    : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__professionalWorkdaysFinalWrapped) {
+    const wrappedRenderAll = function renderAllProfessionalWorkdaysFinal() {
+      const result = previousRenderAll.apply(this, arguments);
+      bindJobDateFields();
+      bindCostTrackerSelector();
+      syncJobFormWorkdays();
+      syncCostTrackerDaysFromSelectedJob();
+      try { window.renderJobs(); } catch {}
+      return result;
+    };
+    wrappedRenderAll.__professionalWorkdaysFinalWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() {
+    bindJobDateFields();
+    bindCostTrackerSelector();
+    syncJobFormWorkdays();
+    syncCostTrackerDaysFromSelectedJob();
+    try { window.renderJobs(); } catch {}
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+
+
+/* ========================================================================
+   ABSOLUTE FINAL JOB ACTION BUTTON + JOB NUMBER ONE-LINE PATCH
+   ------------------------------------------------------------------------
+   - Edit/Delete buttons in the Jobs table now handle their own click before
+     the row-level "open job details" click can run.
+   - Job # renders as a bold one-line badge so long job numbers do not wrap.
+   ======================================================================== */
+(function installJobActionButtonsAndJobNumberOneLineAbsoluteFinalPatch() {
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function html(value) {
+    try {
+      if (typeof escapeHtml === "function") return escapeHtml(value);
+    } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function attr(value) {
+    try {
+      if (typeof escapeAttr === "function") return escapeAttr(value);
+    } catch {}
+    return html(value);
+  }
+
+  function asNumber(value) {
+    try {
+      if (typeof number === "function") return number(value);
+    } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatSafeDate(value) {
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    return value || "-";
+  }
+
+  function cleanDays(value) {
+    const parsed = asNumber(value);
+    if (!parsed) return "0";
+    return Number.isInteger(parsed) ? String(parsed) : String(Math.round((parsed + Number.EPSILON) * 100) / 100);
+  }
+
+  function parseLocalDate(value) {
+    if (!value) return null;
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  function countWeekdays(startValue, endValue) {
+    if (typeof window.calculateJobDays === "function") {
+      const calculated = asNumber(window.calculateJobDays(startValue, endValue || startValue));
+      if (calculated) return calculated;
+    }
+
+    const start = parseLocalDate(startValue);
+    const end = parseLocalDate(endValue || startValue);
+    if (!start || !end) return 0;
+
+    const step = start <= end ? 1 : -1;
+    const cursor = new Date(start.getTime());
+    let total = 0;
+
+    while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) total += 1;
+      cursor.setDate(cursor.getDate() + step);
+    }
+
+    return total;
+  }
+
+  function workdaysForJob(job) {
+    if (typeof window.__pimpWorkdaysForJobFinal === "function") {
+      const calculated = asNumber(window.__pimpWorkdaysForJobFinal(job));
+      if (calculated) return calculated;
+    }
+    return countWeekdays(job?.start_date, job?.end_date || job?.start_date) || asNumber(job?.total_job_days);
+  }
+
+  function uniqueDailyTimesheets(jobId) {
+    if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") {
+      return window.__pimpUniqueDailyTimesheetsForJob(jobId);
+    }
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      let summary = {};
+      try {
+        if (entry.summary && typeof entry.summary === "object") summary = entry.summary;
+        else if (entry.summary) summary = JSON.parse(entry.summary);
+      } catch {}
+      const key =
+        summary.timesheetGroupId ||
+        summary.timesheet_group_id ||
+        summary.sheetId ||
+        summary.sheet_id ||
+        entry.timesheet_group_id ||
+        entry.group_id ||
+        entry.sheet_id ||
+        entry.work_date ||
+        entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+
+  function docChips(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const timesheets = uniqueDailyTimesheets(job.id);
+    return `
+      <div class="job-summary-chips professional-job-chips" aria-label="Saved job documents">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+
+  function normalizeHeader() {
+    const headerRow = qs(".jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Job Name", "Company", "Location", "Status", "Dates", "Actions"]
+      .map((label) => `<th>${html(label)}</th>`)
+      .join("");
+  }
+
+  function renderJobsFinal() {
+    normalizeHeader();
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+
+    table.innerHTML = rows.map((job) => {
+      const days = workdaysForJob(job);
+      const dateRange = `${formatSafeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${formatSafeDate(job.end_date)}` : ""}`;
+      const daysText = days ? `${cleanDays(days)} workday${asNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      return `
+        <tr class="job-main-row professional-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
+          <td data-label="Job Name" class="job-name-cell">
+            <div class="job-name-stack">
+              <strong>${html(job.job_name || "-")}</strong>
+              ${docChips(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
+          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
+          <td data-label="Dates" class="job-dates-cell">
+            <span class="job-date-range">${html(dateRange)}</span>
+            <span class="job-workday-count">${html(daysText)}</span>
+          </td>
+          <td data-label="Actions" class="actions-cell job-actions-cell">
+            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+  }
+
+  window.renderJobs = renderJobsFinal;
+  try { renderJobs = window.renderJobs; } catch {}
+
+  function editJob(jobId) {
+    const job = (state?.data?.jobs || []).find((row) => String(row.id || "") === String(jobId || ""));
+    if (!job) {
+      try { showToast("Could not find that job to edit.", true); } catch {}
+      return;
+    }
+    if (typeof window.loadJobIntoForm === "function") window.loadJobIntoForm(job);
+    else if (typeof loadJobIntoForm === "function") loadJobIntoForm(job);
+  }
+
+  function deleteJob(jobId) {
+    if (!jobId) return;
+    if (typeof window.deleteDashboardRecord === "function") window.deleteDashboardRecord("jobs", jobId);
+    else if (typeof deleteDashboardRecord === "function") deleteDashboardRecord("jobs", jobId);
+  }
+
+  function handleJobActionClick(event) {
+    const editButton = event.target?.closest?.("#jobsTable [data-edit-job]");
+    const deleteButton = event.target?.closest?.('#jobsTable [data-delete-type="jobs"][data-delete-id]');
+    if (!editButton && !deleteButton) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    if (editButton) editJob(editButton.dataset.editJob);
+    if (deleteButton) deleteJob(deleteButton.dataset.deleteId);
+  }
+
+  // Capture the click before the row-level job-details opener can receive it.
+  document.addEventListener("click", handleJobActionClick, true);
+
+  function initialize() {
+    try { window.renderJobs(); } catch {}
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+
+/* ========================================================================
+   TRUE FINAL JOB TABLE ACTION + PLAIN JOB NUMBER PATCH
+   ------------------------------------------------------------------------
+   - Edit/Delete buttons no longer trigger the row-level Job Details opener.
+   - Row clicks still open Job Details when the user clicks outside buttons.
+   - Job # is plain black bold one-line text with no badge/highlight styling.
+   ======================================================================== */
+(function installPlainJobNumberAndActionIsolationTrueFinalPatch() {
+  function qs(selector, root = document) { return root.querySelector(selector); }
+  function html(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return html(value);
+  }
+  function asNumber(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  function formatSafeDate(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    return value || "-";
+  }
+  function cleanDays(value) {
+    const parsed = asNumber(value);
+    if (!parsed) return "0";
+    return Number.isInteger(parsed) ? String(parsed) : String(Math.round((parsed + Number.EPSILON) * 100) / 100);
+  }
+  function countWeekdaysFallback(startValue, endValue) {
+    if (typeof window.calculateJobDays === "function") {
+      const calculated = asNumber(window.calculateJobDays(startValue, endValue || startValue));
+      if (calculated) return calculated;
+    }
+    if (!startValue) return 0;
+    const start = new Date(`${startValue}T00:00:00`);
+    const end = new Date(`${endValue || startValue}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+    const step = start <= end ? 1 : -1;
+    const cursor = new Date(start.getTime());
+    let total = 0;
+    while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) total += 1;
+      cursor.setDate(cursor.getDate() + step);
+    }
+    return total;
+  }
+  function workdaysForJob(job) {
+    if (typeof window.__pimpWorkdaysForJobFinal === "function") {
+      const calculated = asNumber(window.__pimpWorkdaysForJobFinal(job));
+      if (calculated) return calculated;
+    }
+    return countWeekdaysFallback(job?.start_date, job?.end_date || job?.start_date) || asNumber(job?.total_job_days);
+  }
+  function uniqueDailyTimesheets(jobId) {
+    if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") {
+      return window.__pimpUniqueDailyTimesheetsForJob(jobId);
+    }
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      let summary = {};
+      try {
+        if (entry.summary && typeof entry.summary === "object") summary = entry.summary;
+        else if (entry.summary) summary = JSON.parse(entry.summary);
+      } catch {}
+      const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+  function docChips(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const timesheets = uniqueDailyTimesheets(job.id);
+    return `
+      <div class="job-summary-chips professional-job-chips" aria-label="Saved job documents">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+  function normalizeHeader() {
+    const headerRow = qs(".jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Job Name", "Company", "Location", "Status", "Dates", "Actions"]
+      .map((label) => `<th>${html(label)}</th>`)
+      .join("");
+  }
+  function renderJobsPlainFinal() {
+    normalizeHeader();
+    const rows = typeof filtered === "function"
+      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
+      : (state?.data?.jobs || []);
+    const count = qs("#jobsCount");
+    const table = qs("#jobsTable");
+    if (count) count.textContent = rows.length;
+    if (!table) return;
+    table.innerHTML = rows.map((job) => {
+      const days = workdaysForJob(job);
+      const dateRange = `${formatSafeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${formatSafeDate(job.end_date)}` : ""}`;
+      const daysText = days ? `${cleanDays(days)} workday${asNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      return `
+        <tr class="job-main-row professional-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
+          <td data-label="Job Name" class="job-name-cell">
+            <div class="job-name-stack">
+              <strong>${html(job.job_name || "-")}</strong>
+              ${docChips(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
+          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
+          <td data-label="Dates" class="job-dates-cell">
+            <span class="job-date-range">${html(dateRange)}</span>
+            <span class="job-workday-count">${html(daysText)}</span>
+          </td>
+          <td data-label="Actions" class="actions-cell job-actions-cell">
+            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+  }
+  window.renderJobs = renderJobsPlainFinal;
+  try { renderJobs = window.renderJobs; } catch {}
+  function editJob(jobId) {
+    const job = (state?.data?.jobs || []).find((row) => String(row.id || "") === String(jobId || ""));
+    if (!job) {
+      try { showToast("Could not find that job to edit.", true); } catch {}
+      return;
+    }
+    if (typeof window.loadJobIntoForm === "function") window.loadJobIntoForm(job);
+    else if (typeof loadJobIntoForm === "function") loadJobIntoForm(job);
+  }
+  function deleteJob(jobId) {
+    if (!jobId) return;
+    if (typeof window.deleteDashboardRecord === "function") window.deleteDashboardRecord("jobs", jobId);
+    else if (typeof deleteDashboardRecord === "function") deleteDashboardRecord("jobs", jobId);
+  }
+  function handleJobActionClick(event) {
+    const editButton = event.target?.closest?.("#jobsTable [data-edit-job]");
+    const deleteButton = event.target?.closest?.('#jobsTable [data-delete-type="jobs"][data-delete-id]');
+    if (!editButton && !deleteButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    if (editButton) editJob(editButton.dataset.editJob);
+    if (deleteButton) deleteJob(deleteButton.dataset.deleteId);
+    return false;
+  }
+  ["pointerdown", "mousedown", "mouseup", "click"].forEach((eventName) => {
+    document.addEventListener(eventName, (event) => {
+      const action = event.target?.closest?.("#jobsTable .job-actions-cell button, #jobsTable [data-edit-job], #jobsTable [data-delete-type]");
+      if (!action) return;
+      if (eventName === "click") handleJobActionClick(event);
+      else event.stopPropagation();
+    }, true);
+  });
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__plainJobNumberActionIsolationWrapped) {
+    const wrappedRenderAll = function renderAllWithPlainJobNumberActionIsolation() {
+      const result = previousRenderAll.apply(this, arguments);
+      try { window.renderJobs(); } catch {}
+      return result;
+    };
+    wrappedRenderAll.__plainJobNumberActionIsolationWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = window.renderAll; } catch {}
+  }
+  function initialize() { try { window.renderJobs(); } catch {} }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+

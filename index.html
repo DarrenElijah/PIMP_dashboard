@@ -4,25 +4,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
   <title>Pro Insulation MP Dashboard</title>
   <link rel="stylesheet" href="styles.css" />
-  <!--
-    defer keeps the page from running app.js before the browser has finished parsing the HTML.
-    app.js is cache-busted so GitHub Pages/Vercel/Netlify users do not get an old JavaScript file after deployment.
-  -->
-  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
-  <script defer src="app.js?v=20260531-1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 </head>
 <body>
-  <div id="bootStatus" class="boot-status" role="status" aria-live="polite">Loading dashboard tools...</div>
   <div id="toast" class="toast hidden"></div>
 
   <section id="authScreen" class="auth-screen">
@@ -173,35 +164,17 @@
       </section>
 
       <section id="jobsView" class="view">
-        <div class="split">
-          <form id="jobForm" class="panel form-panel">
-            <h3 id="jobFormTitle">Create Job</h3>
-            <input type="hidden" name="record_id" />
-            <div class="form-grid">
-              <label>Company Name<input name="company_name" required /></label>
-              <label>Client / Contact Name<input name="contact_name" /></label>
-              <label>Job / AFE Number<input name="job_number" required /></label>
-              <label>Job Name<input name="job_name" required /></label>
-              <label>Location<input name="location" /></label>
-              <label>Total Days<input name="total_job_days" type="number" min="0" step="1" readonly placeholder="Auto-calculated" /></label>
-              <label>Status
-                <select name="status">
-                  <option value="active">Active</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </label>
-              <label>Start Date<input name="start_date" type="date" /></label>
-              <label>End Date<input name="end_date" type="date" /></label>
+        <div class="jobs-page-layout">
+          <div class="jobs-page-action-bar panel">
+            <div>
+              <p class="eyebrow">Jobs</p>
+              <h3>Manage saved jobs</h3>
+              <p class="tiny">The job form stays hidden until you create a new job or edit an existing one.</p>
             </div>
-            <div class="form-actions">
-              <button class="btn ghost hidden" id="cancelJobEditBtn" type="button">Cancel Edit</button>
-              <button class="btn ghost" id="clearJobFormBtn" type="button">Clear All</button>
-              <button class="btn primary" id="jobSubmitBtn" type="submit">Create Job</button>
-            </div>
-          </form>
+            <button class="btn primary" id="openJobModalBtn" type="button">+ Create Job</button>
+          </div>
 
-          <section class="panel table-panel">
+          <section class="panel table-panel jobs-table-panel">
             <div class="panel-header table-panel-header">
               <h3>Jobs</h3>
               <div class="table-toolbar-inline">
@@ -219,7 +192,6 @@
                     <th>Location</th>
                     <th>Status</th>
                     <th>Dates</th>
-                    <th>Files</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -227,6 +199,44 @@
               </table>
             </div>
           </section>
+        </div>
+
+        <div id="jobModalOverlay" class="job-modal-overlay hidden" aria-hidden="true">
+          <div class="job-modal-card" role="dialog" aria-modal="true" aria-labelledby="jobFormTitle">
+            <div class="job-modal-header">
+              <div>
+                <p class="eyebrow">Job Details</p>
+                <h3 id="jobFormTitle">Create Job</h3>
+              </div>
+              <button class="icon-btn job-modal-close" id="closeJobModalBtn" type="button" aria-label="Close create job popup">×</button>
+            </div>
+
+            <form id="jobForm" class="job-modal-form">
+              <input type="hidden" name="record_id" />
+              <div class="form-grid">
+                <label>Company Name<input name="company_name" required /></label>
+                <label>Client / Contact Name<input name="contact_name" /></label>
+                <label>Job / AFE Number<input name="job_number" required /></label>
+                <label>Job Name<input name="job_name" required /></label>
+                <label>Location<input name="location" /></label>
+                <label>Total Days<input name="total_job_days" type="number" min="0" step="1" readonly placeholder="Auto-calculated" /></label>
+                <label>Status
+                  <select name="status">
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </label>
+                <label>Start Date<input name="start_date" type="date" /></label>
+                <label>End Date<input name="end_date" type="date" /></label>
+              </div>
+              <div class="form-actions job-modal-actions">
+                <button class="btn ghost hidden" id="cancelJobEditBtn" type="button">Cancel Edit</button>
+                <button class="btn ghost" id="clearJobFormBtn" type="button">Clear All</button>
+                <button class="btn primary" id="jobSubmitBtn" type="submit">Create Job</button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
 
@@ -289,7 +299,7 @@
                       </thead>
                       <tbody id="sheetLaborBody"></tbody>
                       <tfoot>
-                        <tr class="total-row"><th>PERSONNEL TOTAL</th><td id="sheetLaborQty">0</td><td id="sheetLaborHours">0</td><td></td><td id="sheetLaborOtHours">0</td><td></td><td id="sheetLaborCost">$0.00</td><td></td><td></td><td id="sheetLaborRate">$0.00</td><td></td></tr>
+                        <tr class="total-row"><th>PERSONNEL TOTAL</th><td id="sheetLaborQty"></td><td id="sheetLaborHours"></td><td></td><td id="sheetLaborOtHours"></td><td></td><td id="sheetLaborCost"></td><td></td><td></td><td id="sheetLaborRate"></td><td></td></tr>
                       </tfoot>
                     </table>
 
@@ -303,7 +313,7 @@
                       </thead>
                       <tbody id="sheetEquipmentBody"></tbody>
                       <tfoot>
-                        <tr class="total-row"><th>EQUIPMENT TOTAL</th><td></td><td></td><td></td><td></td><td></td><td id="sheetEquipmentCost">$0.00</td><td></td><td></td><td id="sheetEquipmentRate">$0.00</td><td></td></tr>
+                        <tr class="total-row"><th>EQUIPMENT TOTAL</th><td id="sheetEquipmentQty"></td><td id="sheetEquipmentHours"></td><td></td><td id="sheetEquipmentDays"></td><td></td><td id="sheetEquipmentCost"></td><td></td><td></td><td id="sheetEquipmentRate"></td><td></td></tr>
                       </tfoot>
                     </table>
 
@@ -391,7 +401,6 @@
                     <th>Job</th>
                     <th>Labor</th>
                     <th>Material</th>
-                    <th>Equipment</th>
                     <th>Subcontractor</th>
                     <th>Total Cost</th>
                     <th>Quoted</th>
@@ -467,7 +476,7 @@ EIN # __________</textarea>
                 </div>
                 <div class="invoice-template-number-label">Invoice #</div>
                 <div class="invoice-template-number-value">
-                  <input name="invoice_number" placeholder="Required — enter invoice #" autocomplete="off" required />
+                  <input name="invoice_number" placeholder="Invoice #" autocomplete="off" required />
                 </div>
 
                 <div class="invoice-template-bill-label">Bill To</div>
@@ -669,11 +678,11 @@ Account # __________</textarea>
               <table class="data-table timesheets-table">
                 <thead>
                   <tr>
-                    <th>Date</th>
+                    <th>Folder / Date</th>
                     <th>Customer</th>
-                    <th>Job</th>
+                    <th>Job / Dates</th>
                     <th>Location</th>
-                    <th>Employees</th>
+                    <th>Timesheets / Employees</th>
                     <th>Total Hours</th>
                     <th>Ticket #</th>
                     <th>Actions</th>
@@ -853,5 +862,7 @@ Account # __________</textarea>
     </form>
   </dialog>
 
+
+  <script src="app.js"></script>
 </body>
 </html>
