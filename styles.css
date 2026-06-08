@@ -8907,3 +8907,69 @@ body.job-timesheet-modal-open .topbar {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+
+/* ========================================================================
+   RELIABLE JOB DETAILS TIMESHEET FOLDER TOGGLE V2
+   ======================================================================== */
+.job-detail-section-header-actions .job-details-folder-toggle-btn[data-job-details-folder-toggle-v2] {
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.job-detail-section-header-actions .job-details-folder-toggle-btn[data-job-details-folder-toggle-v2].is-open {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.job-detail-section-header-actions .job-details-folder-toggle-btn[data-job-details-folder-toggle-v2]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+
+
+/* Inline invoice status dropdown inside the invoices table */
+.invoice-status-table-select {
+  width: auto;
+  min-width: 150px;
+  max-width: 190px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.invoice-status-table-select.unsent {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.invoice-status-table-select.awaiting_approval {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.invoice-status-table-select.approved,
+.invoice-status-table-select.paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.invoice-status-table-select.is-saving {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+@media (max-width: 760px) {
+  .invoice-status-table-select {
+    width: 100%;
+    max-width: 100%;
+  }
+}
+

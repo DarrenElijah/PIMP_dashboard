@@ -24959,3 +24959,517 @@ This removes it from the job documents list.`)) return;
 
   window.PIMP_syncJobDetailsTimesheetFolderButton = ensureSmallButton;
 })();
+
+
+/* ========================================================================
+   FINAL FIX: RELIABLE JOB DETAILS TIMESHEET FOLDER OPEN/CLOSE BUTTON V2
+   ------------------------------------------------------------------------
+   The Job Details window had several older delegated click handlers that
+   could stop the folder click before the current button ran. This patch
+   normalizes the folder controls inside Job Details to a private V2 toggle,
+   keeps the open/closed state in the shared folder-state Set, and avoids
+   changing the folder list layout or saved timesheet actions.
+   ======================================================================== */
+(function installReliableJobDetailsTimesheetFolderToggleV2() {
+  const expandedFolders = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+  window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedFolders;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function getOpenJobDetailsBody() {
+    return qs("#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody");
+  }
+
+  function getTimesheetsSection(body = getOpenJobDetailsBody()) {
+    if (!body) return null;
+    const headers = qsa(".job-detail-section-header h5", body);
+    const title = headers.find((h5) => /timesheets\s+folder|all\s+timesheets\s+for\s+this\s+job/i.test(h5.textContent || ""));
+    return title ? title.closest(".job-detail-section") : null;
+  }
+
+  function getFolderCard(section = getTimesheetsSection()) {
+    return section ? qs("[data-job-timesheet-folder-card]", section) : null;
+  }
+
+  function getFolderId(card) {
+    if (!card) return "";
+    const summary = qs(".job-timesheet-folder-summary", card);
+    return card.getAttribute("data-job-timesheet-folder-card") ||
+      summary?.getAttribute("data-job-details-folder-toggle-v2") ||
+      summary?.getAttribute("data-toggle-job-detail-timesheet-folder") ||
+      "";
+  }
+
+  function folderIsOpen(card) {
+    if (!card) return false;
+    const folderId = getFolderId(card);
+    const body = qs(".job-timesheet-folder-body", card);
+    const summary = qs(".job-timesheet-folder-summary", card);
+    return card.classList.contains("open") ||
+      (body && !body.classList.contains("hidden")) ||
+      summary?.getAttribute("aria-expanded") === "true" ||
+      (folderId && expandedFolders.has(folderId));
+  }
+
+  function setFolderOpen(card, shouldOpen) {
+    if (!card) return;
+    const folderId = getFolderId(card);
+    if (folderId) {
+      if (shouldOpen) expandedFolders.add(folderId);
+      else expandedFolders.delete(folderId);
+    }
+
+    const body = qs(".job-timesheet-folder-body", card);
+    const chevron = qs(".job-timesheet-folder-chevron", card);
+    const summary = qs(".job-timesheet-folder-summary", card);
+
+    card.classList.toggle("open", shouldOpen);
+    if (body) body.classList.toggle("hidden", !shouldOpen);
+    if (summary) summary.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    if (chevron) chevron.textContent = shouldOpen ? "▲" : "▼";
+
+    qsa("[data-job-details-folder-toggle-v2]", getTimesheetsSection() || document).forEach((button) => {
+      button.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+      button.classList.toggle("is-open", shouldOpen);
+      if (button.matches("button.job-details-folder-toggle-btn")) {
+        button.textContent = shouldOpen ? "Close Folder" : "Open Folder";
+        button.title = shouldOpen ? "Collapse timesheets folder" : "Open timesheets folder";
+      }
+    });
+  }
+
+  function normalizeFolderControls() {
+    const body = getOpenJobDetailsBody();
+    const section = getTimesheetsSection(body);
+    if (!section) return;
+
+    const header = qs(".job-detail-section-header", section);
+    const title = qs("h5", header || section);
+    if (title) title.textContent = "Timesheets Folder";
+
+    const card = getFolderCard(section);
+    const folderId = getFolderId(card);
+
+    // Convert the large folder row to the V2 toggle so older delegated
+    // handlers that watch data-toggle-job-detail-timesheet-folder cannot
+    // intercept and cancel the click.
+    if (card && folderId) {
+      const summary = qs(".job-timesheet-folder-summary", card);
+      if (summary) {
+        summary.setAttribute("data-job-details-folder-toggle-v2", folderId);
+        summary.removeAttribute("data-toggle-job-detail-timesheet-folder");
+      }
+    }
+
+    if (!header) return;
+    let actions = qs(".job-detail-section-header-actions", header);
+    if (!actions) {
+      actions = document.createElement("div");
+      actions.className = "job-detail-section-header-actions";
+      header.appendChild(actions);
+    }
+
+    // Reuse the old small button if it exists, but remove the old attribute
+    // so older handlers no longer catch it.
+    qsa("[data-job-details-folder-toggle-button]", actions).forEach((oldButton) => {
+      oldButton.removeAttribute("data-job-details-folder-toggle-button");
+      oldButton.setAttribute("data-job-details-folder-toggle-v2", folderId || "");
+      oldButton.classList.add("job-details-folder-toggle-btn");
+    });
+
+    let button = qs("button.job-details-folder-toggle-btn[data-job-details-folder-toggle-v2]", actions);
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn ghost job-details-folder-toggle-btn";
+      button.setAttribute("data-job-details-folder-toggle-v2", folderId || "");
+      actions.insertBefore(button, actions.firstChild);
+    } else {
+      button.setAttribute("data-job-details-folder-toggle-v2", folderId || "");
+    }
+
+    const open = folderIsOpen(card);
+    button.textContent = open ? "Close Folder" : "Open Folder";
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    button.classList.toggle("is-open", open);
+    button.disabled = !card || !folderId;
+    button.title = card ? (open ? "Collapse timesheets folder" : "Open timesheets folder") : "No saved timesheets for this job yet";
+  }
+
+  function handleToggleClick(event) {
+    const toggle = event.target.closest?.("#jobDetailsModalBody [data-job-details-folder-toggle-v2]");
+    if (!toggle) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    const section = getTimesheetsSection();
+    const card = getFolderCard(section);
+    if (!card) return;
+
+    setFolderOpen(card, !folderIsOpen(card));
+
+    // Older render patches may refresh the section after any click. Keep the
+    // V2 controls normalized after those refreshes finish.
+    window.setTimeout(normalizeFolderControls, 0);
+    window.setTimeout(normalizeFolderControls, 80);
+    window.setTimeout(normalizeFolderControls, 250);
+  }
+
+  document.addEventListener("click", handleToggleClick, true);
+
+  const observer = new MutationObserver(() => {
+    window.clearTimeout(observer.timer);
+    observer.timer = window.setTimeout(normalizeFolderControls, 25);
+  });
+
+  function start() {
+    try {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "aria-expanded", "data-toggle-job-detail-timesheet-folder"]
+      });
+    } catch {}
+    normalizeFolderControls();
+    window.setTimeout(normalizeFolderControls, 150);
+    window.setTimeout(normalizeFolderControls, 750);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+
+  window.PIMP_fixJobDetailsTimesheetFolderToggle = normalizeFolderControls;
+})();
+
+
+
+/* ========================================================================
+   FINAL PATCH: INLINE INVOICE STATUS + AUTO REFRESH ON RETURN
+   ------------------------------------------------------------------------
+   - Lets users change invoice status directly from the invoice table.
+   - Saves the changed status to Supabase immediately.
+   - Refreshes dashboard data when the page is loaded, restored, focused, or
+     becomes visible again after being in the background.
+   ======================================================================== */
+(function installInvoiceStatusAndReturnRefreshPatch() {
+  const INVOICE_STATUS_CHOICES_FINAL = [
+    { value: "unsent", label: "Unsent" },
+    { value: "awaiting_approval", label: "Awaiting Approval" },
+    { value: "approved", label: "Approved" },
+    { value: "paid", label: "Paid" }
+  ];
+
+  const STATUS_ALIASES_FINAL = {
+    "": "unsent",
+    draft: "unsent",
+    unsent: "unsent",
+    sent: "awaiting_approval",
+    overdue: "awaiting_approval",
+    awaitingapproval: "awaiting_approval",
+    awaiting_approval: "awaiting_approval",
+    "awaiting approval": "awaiting_approval",
+    approved: "approved",
+    paid: "paid",
+    cancelled: "unsent",
+    canceled: "unsent"
+  };
+
+  function safeTextFinal(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    }[char]));
+  }
+
+  function normalizeInvoiceStatusFinal(value) {
+    const raw = String(value ?? "").trim().toLowerCase();
+    const compact = raw.replace(/[-\s]+/g, "_");
+    const noSymbols = raw.replace(/[-_\s]+/g, "");
+    return STATUS_ALIASES_FINAL[raw] ||
+      STATUS_ALIASES_FINAL[compact] ||
+      STATUS_ALIASES_FINAL[noSymbols] ||
+      (INVOICE_STATUS_CHOICES_FINAL.some((item) => item.value === compact) ? compact : "unsent");
+  }
+
+  function invoiceStatusLabelFinal(value) {
+    const normalized = normalizeInvoiceStatusFinal(value);
+    return INVOICE_STATUS_CHOICES_FINAL.find((item) => item.value === normalized)?.label || "Unsent";
+  }
+
+  function invoiceStatusOptionsFinal(selectedValue) {
+    const selected = normalizeInvoiceStatusFinal(selectedValue);
+    return INVOICE_STATUS_CHOICES_FINAL.map((item) =>
+      `<option value="${safeTextFinal(item.value)}"${item.value === selected ? " selected" : ""}>${safeTextFinal(item.label)}</option>`
+    ).join("");
+  }
+
+  function findJobFinalPatch(jobId) {
+    try {
+      if (typeof findJob === "function") return findJob(jobId);
+    } catch {}
+    return (state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || "")) || null;
+  }
+
+  function formatDateFinalPatch(value) {
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    return value || "-";
+  }
+
+  function moneyFinalPatch(value) {
+    try {
+      if (typeof money === "function") return money(value);
+    } catch {}
+    const parsed = Number(value || 0);
+    return (Number.isFinite(parsed) ? parsed : 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+
+  function invoiceTotalFinalPatch(invoice) {
+    try {
+      if (typeof invoiceTotal === "function") return invoiceTotal(invoice);
+    } catch {}
+    const subtotal = Number(invoice?.subtotal || 0);
+    const tax = Number(invoice?.tax || 0);
+    return (Number.isFinite(subtotal) ? subtotal : 0) + (Number.isFinite(tax) ? tax : 0);
+  }
+
+  function invoiceBalanceFinalPatch(invoice) {
+    try {
+      if (typeof invoiceBalanceDue === "function") return invoiceBalanceDue(invoice);
+    } catch {}
+    const total = invoiceTotalFinalPatch(invoice);
+    const payments = Number(invoice?.payments || 0);
+    return total - (Number.isFinite(payments) ? payments : 0);
+  }
+
+  window.renderInvoices = function renderInvoicesWithInlineStatusFinal() {
+    const table = document.getElementById("invoicesTable");
+    const count = document.getElementById("invoicesCount");
+    if (!table || !count) return;
+
+    const invoiceRows = typeof filtered === "function"
+      ? filtered(state?.data?.invoices || [], ["invoice_number", "status", "bill_to", "project", "po_number"])
+      : (state?.data?.invoices || []);
+
+    count.textContent = invoiceRows.length;
+
+    table.innerHTML = invoiceRows.map((invoice) => {
+      const job = findJobFinalPatch(invoice.job_id);
+      const status = normalizeInvoiceStatusFinal(invoice.status);
+
+      return `
+        <tr>
+          <td data-label="Invoice #"><strong>${safeTextFinal(invoice.invoice_number || "-")}</strong></td>
+          <td data-label="Job">${safeTextFinal(job?.job_number || invoice.po_number || "-")}<br><span class="muted">${safeTextFinal(job?.job_name || invoice.project || "")}</span></td>
+          <td data-label="Status">
+            <select class="invoice-status-table-select status ${safeTextFinal(status)}"
+                    data-inline-invoice-status-id="${safeTextFinal(invoice.id)}"
+                    aria-label="Change invoice status for ${safeTextFinal(invoice.invoice_number || "invoice")}">
+              ${invoiceStatusOptionsFinal(status)}
+            </select>
+          </td>
+          <td data-label="Invoice Date">${formatDateFinalPatch(invoice.invoice_date)}</td>
+          <td data-label="Due">${formatDateFinalPatch(invoice.due_date)}</td>
+          <td data-label="Total" class="money-cell">${moneyFinalPatch(invoiceTotalFinalPatch(invoice))}</td>
+          <td data-label="Balance" class="money-cell">${moneyFinalPatch(invoiceBalanceFinalPatch(invoice))}</td>
+          <td data-label="PDF">${invoice.pdf_url ? `<a href="${safeTextFinal(invoice.pdf_url)}" target="_blank" rel="noreferrer">Open PDF</a>` : "-"}</td>
+          <td data-label="Actions" class="table-actions">
+            <button class="link-btn" data-edit-invoice="${safeTextFinal(invoice.id)}" type="button">Edit</button>
+            <button class="link-btn" data-preview-invoice="${safeTextFinal(invoice.id)}" type="button">Preview</button>
+            <button class="link-btn" data-download-invoice="${safeTextFinal(invoice.id)}" type="button">Download</button>
+            <button class="link-btn danger-text" data-delete-type="invoices" data-delete-id="${safeTextFinal(invoice.id)}" type="button">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(9) : '<tr><td colspan="9" class="muted">No records found.</td></tr>');
+  };
+
+  try {
+    renderInvoices = window.renderInvoices;
+  } catch {}
+
+  async function updateInvoiceStatusFromTable(invoiceId, statusValue, selectElement) {
+    const status = normalizeInvoiceStatusFinal(statusValue);
+    if (!invoiceId) return;
+
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing invoice status.", true);
+      if (selectElement) {
+        const invoice = (state?.data?.invoices || []).find((row) => String(row.id) === String(invoiceId));
+        selectElement.value = normalizeInvoiceStatusFinal(invoice?.status);
+      }
+      return;
+    }
+
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+
+    try {
+      const { error } = await state.supabase
+        .from("invoices")
+        .update({ status, last_synced_at: new Date().toISOString() })
+        .eq("id", invoiceId);
+
+      if (error) throw error;
+
+      state.data.invoices = (state.data.invoices || []).map((invoice) =>
+        String(invoice.id) === String(invoiceId)
+          ? { ...invoice, status, last_synced_at: new Date().toISOString() }
+          : invoice
+      );
+
+      if (typeof renderInvoices === "function") renderInvoices();
+      if (typeof renderStats === "function") renderStats();
+      if (typeof renderDashboardLists === "function") renderDashboardLists();
+
+      if (typeof showToast === "function") {
+        showToast(`Invoice status changed to ${invoiceStatusLabelFinal(status)}.`);
+      }
+    } catch (error) {
+      const invoice = (state?.data?.invoices || []).find((row) => String(row.id) === String(invoiceId));
+      if (selectElement) selectElement.value = normalizeInvoiceStatusFinal(invoice?.status);
+      if (typeof showToast === "function") {
+        showToast(error?.message || "Invoice status could not be updated.", true);
+      }
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  document.addEventListener("change", (event) => {
+    const select = event.target.closest?.("[data-inline-invoice-status-id]");
+    if (!select) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    updateInvoiceStatusFromTable(select.dataset.inlineInvoiceStatusId, select.value, select);
+  }, true);
+
+  function normalizeInvoiceFormStatusSelect() {
+    document.querySelectorAll('#invoiceForm select[name="status"]').forEach((select) => {
+      const current = normalizeInvoiceStatusFinal(select.value);
+      select.innerHTML = invoiceStatusOptionsFinal(current);
+      select.value = current;
+    });
+  }
+
+  async function refreshDashboardDataWhenUserReturns(reason = "return") {
+    if (!state?.supabase || !state?.session) return;
+    if (refreshDashboardDataWhenUserReturns.running) return;
+
+    refreshDashboardDataWhenUserReturns.running = true;
+
+    try {
+      const [
+        clients,
+        jobs,
+        costTrackers,
+        invoices,
+        employees,
+        assignments,
+        timesheets,
+        documents
+      ] = await Promise.all([
+        selectTable("clients", "*", "company_name", true),
+        selectTable("jobs", "*", "last_synced_at", false),
+        selectTable("cost_trackers", "*", "last_synced_at", false),
+        selectTable("invoices", "*", "invoice_date", false),
+        selectTable("employees", "*", "full_name", true),
+        selectTable("job_assignments", "*", "created_at", false),
+        selectTable("timesheets", "*", "work_date", false),
+        selectTable("documents", "*", "last_synced_at", false)
+      ]);
+
+      state.data.clients = clients || [];
+      state.data.jobs = jobs || [];
+      state.data.costTrackers = costTrackers || [];
+      state.data.invoices = invoices || [];
+      state.data.employees = employees || [];
+      state.data.assignments = assignments || [];
+      state.data.timesheets = timesheets || [];
+      state.data.documents = documents || [];
+
+      if (typeof hydrateSelects === "function") hydrateSelects();
+      normalizeInvoiceFormStatusSelect();
+      if (typeof renderAll === "function") renderAll();
+
+      window.PIMP_LAST_AUTO_REFRESH_AT = Date.now();
+      window.PIMP_LAST_AUTO_REFRESH_REASON = reason;
+    } catch (error) {
+      console.warn("Auto refresh failed:", error);
+      if (typeof showToast === "function") {
+        showToast("Dashboard could not refresh automatically. Use Refresh Data if needed.", true);
+      }
+    } finally {
+      refreshDashboardDataWhenUserReturns.running = false;
+    }
+  }
+
+  function requestReturnRefresh(reason) {
+    if (!state?.session) return;
+    if (document.visibilityState && document.visibilityState !== "visible") return;
+
+    window.clearTimeout(requestReturnRefresh.timer);
+    requestReturnRefresh.timer = window.setTimeout(() => {
+      refreshDashboardDataWhenUserReturns(reason);
+    }, 150);
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") requestReturnRefresh("visible");
+  });
+
+  window.addEventListener("focus", () => requestReturnRefresh("focus"));
+  window.addEventListener("pageshow", () => requestReturnRefresh("pageshow"));
+  window.addEventListener("online", () => requestReturnRefresh("online"));
+
+  const previousShowCorrectScreen = typeof showCorrectScreen === "function" ? showCorrectScreen : null;
+  if (previousShowCorrectScreen && !window.PIMP_SHOW_CORRECT_SCREEN_REFRESH_WRAPPED) {
+    window.PIMP_SHOW_CORRECT_SCREEN_REFRESH_WRAPPED = true;
+    showCorrectScreen = function showCorrectScreenWithReturnRefresh() {
+      previousShowCorrectScreen.apply(this, arguments);
+      if (state?.session) {
+        window.setTimeout(() => {
+          normalizeInvoiceFormStatusSelect();
+          if (typeof renderInvoices === "function") renderInvoices();
+          requestReturnRefresh("session");
+        }, 0);
+      }
+    };
+  }
+
+  function startInvoiceStatusAndRefreshPatch() {
+    normalizeInvoiceFormStatusSelect();
+    if (typeof renderInvoices === "function") renderInvoices();
+    requestReturnRefresh("startup");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startInvoiceStatusAndRefreshPatch);
+  } else {
+    startInvoiceStatusAndRefreshPatch();
+  }
+
+  window.PIMP_refreshDashboardWhenUserReturns = refreshDashboardDataWhenUserReturns;
+})();
+
