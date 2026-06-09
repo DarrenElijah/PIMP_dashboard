@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pro Insulation MP Dashboard</title>
-  <link rel="stylesheet" href="styles.css?v=20260609-cost-tracker-header-comments-v2" />
+  <link rel="stylesheet" href="styles.css?v=20260609-job-details-invoice-status" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -85,7 +85,7 @@
       </header>
 
       <section id="dashboardView" class="view active">
-        <div class="stats-grid">
+        <div class="stats-grid dashboard-hidden-stats hidden" aria-hidden="true">
           <article class="stat-card">
             <span>Total Jobs</span>
             <strong id="statJobs">0</strong>
@@ -112,56 +112,42 @@
           </article>
         </div>
 
-
-
-        <section class="beginner-start-panel" id="beginnerStartPanel">
-          <div class="beginner-start-copy">
-            <p class="eyebrow">Beginner Guide</p>
-            <h3>Start here if you are not sure what to do next</h3>
-            <p>Use these steps from left to right. The website saves everything to Supabase so files and job documents can be found later.</p>
+        <section class="panel table-panel jobs-table-panel dashboard-main-jobs-panel" id="dashboardMainJobsPanel">
+          <div class="panel-header table-panel-header dashboard-main-jobs-header">
+            <div>
+              <p class="eyebrow">Main Dashboard</p>
+              <h3>Recent Active Jobs</h3>
+              <p class="tiny">Edit jobs, update project status, view document status, review rate totals, and open job details from the main Dashboard page.</p>
+            </div>
+            <div class="table-toolbar-inline">
+              <input id="dashboardActiveJobsSearch" class="table-search dashboard-table-search" type="search" placeholder="Search active jobs..." />
+              <span id="dashboardActiveJobsCount" class="pill">0</span>
+            </div>
           </div>
-          <div class="beginner-steps-grid">
-            <button class="beginner-step-card" data-view-jump="jobs" type="button">
-              <span>1</span>
-              <strong>Create a Job</strong>
-              <small>Add the customer, job number, dates, and basic job information.</small>
-            </button>
-            <button class="beginner-step-card" data-view-jump="costTrackers" type="button">
-              <span>2</span>
-              <strong>Cost Tracker</strong>
-              <small>Fill out the bid sheet. After a job is saved, open the job row to attach an existing Excel cost tracker.</small>
-            </button>
-            <button class="beginner-step-card" data-view-jump="invoices" type="button">
-              <span>3</span>
-              <strong>Invoice / Timesheet</strong>
-              <small>Create invoices and daily timesheets from the saved job information.</small>
-            </button>
-            <button class="beginner-step-card" data-view-jump="jobs" type="button">
-              <span>4</span>
-              <strong>Job Details</strong>
-              <small>Open a job row to view and attach cost trackers, invoices, timesheets, and job files.</small>
-            </button>
+          <div class="table-wrap dashboard-main-table-wrap">
+            <table class="data-table jobs-table dashboard-active-jobs-table">
+              <thead>
+                <tr>
+                  <th>Job #</th>
+                  <th>Project Name</th>
+                  <th>Company</th>
+                  <th>Location</th>
+                  <th>Project Status</th>
+                  <th>Dates</th>
+                  <th>Rate Total</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardActiveJobsTable"></tbody>
+            </table>
           </div>
         </section>
 
-        <div class="grid-2">
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Recent Jobs</h3>
-              <button class="link-btn" data-view-jump="jobs" type="button">View all</button>
-            </div>
-            <div id="recentJobs"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Open Invoices</h3>
-              <button class="link-btn" data-view-jump="invoices" type="button">View all</button>
-            </div>
-            <div id="openInvoices"></div>
-          </section>
+        <div class="dashboard-legacy-render-targets hidden" aria-hidden="true">
+          <div id="recentJobs"></div>
+          <div id="openInvoices"></div>
         </div>
-      </section>
+</section>
 
       <section id="jobsView" class="view">
         <div class="jobs-page-layout">
@@ -874,6 +860,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script src="app.js?v=20260609-cost-tracker-header-comments-v2"></script>
+  <script src="app.js?v=20260609-dashboard-doc-indicators-short"></script>
 </body>
 </html>

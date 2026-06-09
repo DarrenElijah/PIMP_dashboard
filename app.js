@@ -27413,3 +27413,1438 @@ This removes it from the job documents list.`)) return;
 
   window.PIMP_refreshCostTrackerHeaderComments = initializePatch;
 })();
+
+/* ========================================================================
+   FINAL MAIN DASHBOARD ACTIVE JOBS TABLE PATCH V2
+   ------------------------------------------------------------------------
+   - Makes the Dashboard page the main working page.
+   - Adds a Jobs-table-style Recent Active Jobs table with Rate Total.
+   - Removes the Actions column so the table fits the Dashboard better.
+   ======================================================================== */
+(function installMainDashboardActiveJobsTableFinalV2() {
+  if (window.__pimpMainDashboardActiveJobsTableFinalV2Installed) return;
+  window.__pimpMainDashboardActiveJobsTableFinalV2Installed = true;
+
+  function qs(selector, root = document) { return root.querySelector(selector); }
+  function qsa(selector, root = document) { return Array.from(root.querySelectorAll(selector)); }
+  function html(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return html(value);
+  }
+  function num(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  function fmtMoney(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return num(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+  function fmtDate(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    return value || "-";
+  }
+  function parseJson(value, fallback = {}) {
+    if (!value) return fallback;
+    if (typeof value === "object") return value || fallback;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function timeValue(row) {
+    const value = row?.last_synced_at || row?.updated_at || row?.created_at || row?.start_date || row?.end_date || "";
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  function cleanDays(value) {
+    const parsed = num(value);
+    if (!parsed) return "0";
+    const rounded = Math.round((parsed + Number.EPSILON) * 100) / 100;
+    return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+  }
+  function parseLocalDate(value) {
+    if (!value) return null;
+    const text = String(value).trim();
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+  function countWeekdays(startValue, endValue) {
+    if (typeof window.calculateJobDays === "function") {
+      const calculated = num(window.calculateJobDays(startValue, endValue || startValue));
+      if (calculated) return calculated;
+    }
+    const start = parseLocalDate(startValue);
+    const end = parseLocalDate(endValue || startValue);
+    if (!start || !end) return 0;
+    const step = start <= end ? 1 : -1;
+    const cursor = new Date(start.getTime());
+    let total = 0;
+    while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {
+      const day = cursor.getDay();
+      if (day !== 0 && day !== 6) total += 1;
+      cursor.setDate(cursor.getDate() + step);
+    }
+    return total;
+  }
+  function workdaysForJob(job) {
+    if (typeof window.__pimpWorkdaysForJobFinal === "function") {
+      const calculated = num(window.__pimpWorkdaysForJobFinal(job));
+      if (calculated) return calculated;
+    }
+    return countWeekdays(job?.start_date, job?.end_date || job?.start_date) || num(job?.total_job_days);
+  }
+  function uniqueDailyTimesheets(jobId) {
+    if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") {
+      return window.__pimpUniqueDailyTimesheetsForJob(jobId);
+    }
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      const summary = parseJson(entry.summary);
+      const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+  function docChips(job) {
+    const trackers = (state?.data?.costTrackers || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const invoices = (state?.data?.invoices || []).filter((row) => String(row.job_id || "") === String(job.id || "")).length;
+    const timesheets = uniqueDailyTimesheets(job.id);
+    return `
+      <div class="job-summary-chips professional-job-chips dashboard-job-chips" aria-label="Saved job documents">
+        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers || "—"}</span>
+        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices || "—"}</span>
+        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
+      </div>
+    `;
+  }
+  function latestCostTrackerForJob(jobId) {
+    return (state?.data?.costTrackers || [])
+      .filter((row) => String(row.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+  function rateTotalForTracker(tracker) {
+    if (!tracker) return null;
+    if (typeof costTrackerQuoted === "function") {
+      const quoted = num(costTrackerQuoted(tracker));
+      if (quoted || tracker.quoted_price !== undefined) return quoted;
+    }
+    const summary = parseJson(tracker.summary);
+    const candidates = [
+      summary.rateTotal,
+      summary.rate_total,
+      summary.quotedTotal,
+      summary.quoted_total,
+      summary.quotedPrice,
+      summary.quoted_price,
+      tracker.rate_total,
+      tracker.quoted_price
+    ];
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null && candidate !== "") return num(candidate);
+    }
+    return 0;
+  }
+  function activeDashboardJobs() {
+    const term = String(qs("#dashboardActiveJobsSearch")?.value || "").toLowerCase().trim();
+    return (state?.data?.jobs || [])
+      .filter((job) => String(job.status || "").toLowerCase() === "active")
+      .filter((job) => {
+        if (!term) return true;
+        return [job.job_number, job.job_name, job.company_name, job.location, job.status]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      })
+      .sort((a, b) => timeValue(b) - timeValue(a));
+  }
+  function normalizeDashboardHeader() {
+    const headerRow = qs(".dashboard-active-jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Status", "Dates", "Rate Total"]
+      .map((label) => `<th>${html(label)}</th>`)
+      .join("");
+  }
+  function renderDashboardActiveJobs() {
+    const table = qs("#dashboardActiveJobsTable");
+    const count = qs("#dashboardActiveJobsCount");
+    if (!table) return;
+    normalizeDashboardHeader();
+    const rows = activeDashboardJobs();
+    if (count) count.textContent = rows.length;
+
+    table.innerHTML = rows.map((job) => {
+      const tracker = latestCostTrackerForJob(job.id);
+      const rateTotal = rateTotalForTracker(tracker);
+      const days = workdaysForJob(job);
+      const dateRange = `${fmtDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${fmtDate(job.end_date)}` : ""}`;
+      const daysText = days ? `${cleanDays(days)} workday${num(days) === 1 ? "" : "s"}` : "Auto-calculated";
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      return `
+        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
+          <td data-label="Project Name" class="job-name-cell">
+            <div class="job-name-stack">
+              <strong>${html(job.job_name || "-")}</strong>
+              ${docChips(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
+          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
+          <td data-label="Dates" class="job-dates-cell">
+            <span class="job-date-range">${html(dateRange)}</span>
+            <span class="job-workday-count">${html(daysText)}</span>
+          </td>
+          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(fmtMoney(rateTotal)) : "—"}</strong></td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="7" class="muted">No active jobs found.</td></tr>`;
+  }
+  window.renderDashboardActiveJobs = renderDashboardActiveJobs;
+
+  const previousDashboardLists = typeof window.renderDashboardLists === "function" ? window.renderDashboardLists : (typeof renderDashboardLists === "function" ? renderDashboardLists : null);
+  window.renderDashboardLists = function renderDashboardListsAsMainActiveJobsTable() {
+    // Keep old card renderer from breaking if legacy hidden containers still exist, then render the real Dashboard table.
+    if (typeof previousDashboardLists === "function") {
+      try { previousDashboardLists.apply(this, arguments); } catch {}
+    }
+    renderDashboardActiveJobs();
+  };
+  try { renderDashboardLists = window.renderDashboardLists; } catch {}
+
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__mainDashboardActiveJobsTableFinalV2Wrapped) {
+    const wrappedRenderAll = function renderAllWithMainDashboardActiveJobsTableFinalV2() {
+      const result = previousRenderAll.apply(this, arguments);
+      renderDashboardActiveJobs();
+      return result;
+    };
+    wrappedRenderAll.__mainDashboardActiveJobsTableFinalV2Wrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = window.renderAll; } catch {}
+  }
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.("#dashboardActiveJobsSearch")) renderDashboardActiveJobs();
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const row = event.target?.closest?.("#dashboardActiveJobsTable .dashboard-active-job-row");
+    if (!row) return;
+    if (event.target.closest("button, a, input, select, textarea")) return;
+    const jobId = row.dataset.dashboardJobRowId;
+    if (!jobId) return;
+    event.preventDefault();
+    if (typeof window.openJobDetailsModal === "function") window.openJobDetailsModal(jobId);
+    else {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.openJobDetailsModal = jobId;
+      document.body.appendChild(button);
+      button.click();
+      button.remove();
+    }
+  });
+
+  function initialize() { renderDashboardActiveJobs(); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+
+/* ========================================================================
+   FINAL DASHBOARD ACTIVE JOBS TABLE - ACTIONS + INLINE STATUS PATCH
+   ------------------------------------------------------------------------
+   - Adds Edit/Delete actions back to Recent Active Jobs.
+   - Adds inline Project Status editing from the Dashboard table.
+   - Adds inline Invoice Status editing from the Dashboard table when a job has an invoice.
+   - Keeps the Dashboard table clean and resized for the added columns.
+   ======================================================================== */
+(function installDashboardActiveJobsActionsAndStatusFinalPatch() {
+  const qs = (selector, root = document) => root.querySelector(selector);
+  const qsa = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const text = (value) => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+  const attr = text;
+  const toNumber = (value) => {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const moneyText = (value) => {
+    try {
+      if (typeof money === "function") return money(value);
+    } catch {}
+    return toNumber(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  };
+  const safeDate = (value) => {
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    if (!value) return "-";
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-US");
+  };
+  const timeValue = (row) => {
+    const candidates = [row?.last_synced_at, row?.updated_at, row?.created_at, row?.start_date, row?.invoice_date, row?.due_date];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const time = Date.parse(candidate);
+      if (Number.isFinite(time)) return time;
+    }
+    return 0;
+  };
+
+  function normalizeProjectStatus(status) {
+    const value = String(status || "active").toLowerCase().replace(/\s+/g, "_");
+    if (["completed", "complete", "done"].includes(value)) return "completed";
+    if (["cancelled", "canceled"].includes(value)) return "cancelled";
+    return "active";
+  }
+
+  function projectStatusOptions(current) {
+    const value = normalizeProjectStatus(current);
+    return [
+      ["active", "Active"],
+      ["completed", "Completed"],
+      ["cancelled", "Cancelled"]
+    ].map(([optionValue, label]) => `<option value="${optionValue}"${optionValue === value ? " selected" : ""}>${label}</option>`).join("");
+  }
+
+  function normalizeInvoiceStatus(status) {
+    const value = String(status || "unsent").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    if (["awaiting_approval", "awaitingapproval", "awaiting", "pending", "draft"].includes(value)) return "awaiting_approval";
+    if (["approved", "approve"].includes(value)) return "approved";
+    if (["paid"].includes(value)) return "paid";
+    return "unsent";
+  }
+
+  function invoiceStatusLabel(status) {
+    const labels = {
+      unsent: "Unsent",
+      awaiting_approval: "Awaiting Approval",
+      approved: "Approved",
+      paid: "Paid"
+    };
+    return labels[normalizeInvoiceStatus(status)] || "Unsent";
+  }
+
+  function invoiceStatusOptions(current) {
+    const value = normalizeInvoiceStatus(current);
+    return ["unsent", "awaiting_approval", "approved", "paid"]
+      .map((optionValue) => `<option value="${optionValue}"${optionValue === value ? " selected" : ""}>${invoiceStatusLabel(optionValue)}</option>`)
+      .join("");
+  }
+
+  function latestCostTrackerForJob(jobId) {
+    return (state?.data?.costTrackers || [])
+      .filter((row) => String(row.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function latestInvoiceForJob(jobId) {
+    return (state?.data?.invoices || [])
+      .filter((row) => String(row.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function rateTotalForTracker(tracker) {
+    if (!tracker) return null;
+    try {
+      if (typeof costTrackerQuoted === "function") {
+        const quoted = toNumber(costTrackerQuoted(tracker));
+        if (quoted || tracker.quoted_price !== undefined) return quoted;
+      }
+    } catch {}
+    let summary = {};
+    try { summary = typeof parseJsonObject === "function" ? parseJsonObject(tracker.summary) : JSON.parse(tracker.summary || "{}"); } catch {}
+    const candidates = [
+      summary.rateTotal,
+      summary.rate_total,
+      summary.quotedTotal,
+      summary.quoted_total,
+      summary.quotedPrice,
+      summary.quoted_price,
+      tracker.rate_total,
+      tracker.quoted_price
+    ];
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null && candidate !== "") return toNumber(candidate);
+    }
+    return 0;
+  }
+
+  function workdaysForJob(job) {
+    try {
+      if (typeof window.__pimpWeekdayCount === "function") return window.__pimpWeekdayCount(job.start_date, job.end_date || job.start_date);
+    } catch {}
+    const explicit = toNumber(job?.total_job_days || job?.total_days || job?.job_days);
+    if (explicit) return explicit;
+    return 0;
+  }
+
+  function dashboardActiveJobs() {
+    const term = String(qs("#dashboardActiveJobsSearch")?.value || "").toLowerCase().trim();
+    return (state?.data?.jobs || [])
+      .filter((job) => normalizeProjectStatus(job.status) === "active")
+      .filter((job) => {
+        if (!term) return true;
+        const invoice = latestInvoiceForJob(job.id);
+        return [job.job_number, job.job_name, job.company_name, job.location, job.status, invoice?.status]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      })
+      .sort((a, b) => timeValue(b) - timeValue(a));
+  }
+
+  function normalizeDashboardHeader() {
+    const headerRow = qs(".dashboard-active-jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Project Status", "Invoice Status", "Dates", "Rate Total", "Actions"]
+      .map((label) => `<th>${text(label)}</th>`)
+      .join("");
+  }
+
+  function renderDashboardActiveJobsFinal() {
+    const table = qs("#dashboardActiveJobsTable");
+    const count = qs("#dashboardActiveJobsCount");
+    if (!table) return;
+
+    normalizeDashboardHeader();
+    const rows = dashboardActiveJobs();
+    if (count) count.textContent = rows.length;
+
+    table.innerHTML = rows.map((job) => {
+      const tracker = latestCostTrackerForJob(job.id);
+      const invoice = latestInvoiceForJob(job.id);
+      const rateTotal = rateTotalForTracker(tracker);
+      const days = workdaysForJob(job);
+      const dateRange = `${safeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${safeDate(job.end_date)}` : ""}`;
+      const daysText = days ? `${days} workday${toNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
+      const projectStatus = normalizeProjectStatus(job.status);
+      const invoiceStatus = normalizeInvoiceStatus(invoice?.status);
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+
+      return `
+        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${text(job.job_number || "-")}</strong></td>
+          <td data-label="Project Name" class="job-name-cell"><strong>${text(job.job_name || "-")}</strong></td>
+          <td data-label="Company" class="job-company-cell">${text(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${text(job.location || "-")}</td>
+          <td data-label="Project Status" class="dashboard-project-status-cell">
+            <select class="dashboard-inline-status-select dashboard-project-status-select status ${attr(projectStatus)}" data-dashboard-job-status-id="${attr(job.id)}" aria-label="Change project status for ${attr(title)}">
+              ${projectStatusOptions(projectStatus)}
+            </select>
+          </td>
+          <td data-label="Invoice Status" class="dashboard-invoice-status-cell">
+            ${invoice ? `
+              <select class="dashboard-inline-status-select dashboard-invoice-status-select status ${attr(invoiceStatus)}" data-dashboard-invoice-status-id="${attr(invoice.id)}" aria-label="Change invoice status for ${attr(invoice.invoice_number || title)}">
+                ${invoiceStatusOptions(invoiceStatus)}
+              </select>
+            ` : `<span class="muted dashboard-no-invoice">No invoice</span>`}
+          </td>
+          <td data-label="Dates" class="job-dates-cell">
+            <span class="job-date-range">${text(dateRange)}</span>
+            <span class="job-workday-count">${text(daysText)}</span>
+          </td>
+          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? text(moneyText(rateTotal)) : "—"}</strong></td>
+          <td data-label="Actions" class="dashboard-actions-cell">
+            <div class="dashboard-actions-inline">
+              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="9" class="muted">No active jobs found.</td></tr>`;
+  }
+
+  async function updateDashboardJobStatus(jobId, statusValue, selectElement) {
+    const status = normalizeProjectStatus(statusValue);
+    const existing = (state?.data?.jobs || []).find((job) => String(job.id) === String(jobId));
+    if (!jobId || !existing) return;
+
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing project status.", true);
+      if (selectElement) selectElement.value = normalizeProjectStatus(existing.status);
+      return;
+    }
+
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const { error } = await state.supabase
+        .from("jobs")
+        .update({ status, last_synced_at: now })
+        .eq("id", jobId);
+      if (error) throw error;
+
+      state.data.jobs = (state.data.jobs || []).map((job) => String(job.id) === String(jobId) ? { ...job, status, last_synced_at: now } : job);
+      try { if (typeof renderJobs === "function") renderJobs(); } catch {}
+      try { if (typeof renderStats === "function") renderStats(); } catch {}
+      renderDashboardActiveJobsFinal();
+      if (typeof showToast === "function") showToast("Project status updated.");
+    } catch (error) {
+      if (selectElement) selectElement.value = normalizeProjectStatus(existing.status);
+      if (typeof showToast === "function") showToast(error?.message || "Project status could not be updated.", true);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  async function updateDashboardInvoiceStatus(invoiceId, statusValue, selectElement) {
+    const status = normalizeInvoiceStatus(statusValue);
+    const existing = (state?.data?.invoices || []).find((invoice) => String(invoice.id) === String(invoiceId));
+    if (!invoiceId || !existing) return;
+
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing invoice status.", true);
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      return;
+    }
+
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const { error } = await state.supabase
+        .from("invoices")
+        .update({ status, last_synced_at: now })
+        .eq("id", invoiceId);
+      if (error) throw error;
+
+      state.data.invoices = (state.data.invoices || []).map((invoice) => String(invoice.id) === String(invoiceId) ? { ...invoice, status, last_synced_at: now } : invoice);
+      try { if (typeof renderInvoices === "function") renderInvoices(); } catch {}
+      try { if (typeof renderStats === "function") renderStats(); } catch {}
+      renderDashboardActiveJobsFinal();
+      if (typeof showToast === "function") showToast(`Invoice status changed to ${invoiceStatusLabel(status)}.`);
+    } catch (error) {
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      if (typeof showToast === "function") showToast(error?.message || "Invoice status could not be updated.", true);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  function editDashboardJob(jobId) {
+    const job = (state?.data?.jobs || []).find((row) => String(row.id || "") === String(jobId || ""));
+    if (!job) {
+      if (typeof showToast === "function") showToast("Could not find that job to edit.", true);
+      return;
+    }
+    if (typeof window.loadJobIntoForm === "function") window.loadJobIntoForm(job);
+    else if (typeof loadJobIntoForm === "function") loadJobIntoForm(job);
+  }
+
+  function deleteDashboardJob(jobId) {
+    if (!jobId) return;
+    if (typeof window.deleteDashboardRecord === "function") window.deleteDashboardRecord("jobs", jobId);
+    else if (typeof deleteDashboardRecord === "function") deleteDashboardRecord("jobs", jobId);
+  }
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.("#dashboardActiveJobsSearch")) renderDashboardActiveJobsFinal();
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    const projectSelect = event.target?.closest?.("[data-dashboard-job-status-id]");
+    const invoiceSelect = event.target?.closest?.("[data-dashboard-invoice-status-id]");
+    if (!projectSelect && !invoiceSelect) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    if (projectSelect) updateDashboardJobStatus(projectSelect.dataset.dashboardJobStatusId, projectSelect.value, projectSelect);
+    if (invoiceSelect) updateDashboardInvoiceStatus(invoiceSelect.dataset.dashboardInvoiceStatusId, invoiceSelect.value, invoiceSelect);
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const editButton = event.target?.closest?.("[data-dashboard-edit-job]");
+    const deleteButton = event.target?.closest?.("[data-dashboard-delete-job]");
+    if (!editButton && !deleteButton) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    if (editButton) editDashboardJob(editButton.dataset.dashboardEditJob);
+    if (deleteButton) deleteDashboardJob(deleteButton.dataset.dashboardDeleteJob);
+  }, true);
+
+  window.renderDashboardActiveJobs = renderDashboardActiveJobsFinal;
+
+  const previousDashboardLists = typeof window.renderDashboardLists === "function"
+    ? window.renderDashboardLists
+    : (typeof renderDashboardLists === "function" ? renderDashboardLists : null);
+  if (previousDashboardLists && !previousDashboardLists.__dashboardActionsStatusFinalWrapped) {
+    const wrappedDashboardLists = function renderDashboardListsWithActionsAndStatusFinal() {
+      try { previousDashboardLists.apply(this, arguments); } catch {}
+      renderDashboardActiveJobsFinal();
+    };
+    wrappedDashboardLists.__dashboardActionsStatusFinalWrapped = true;
+    window.renderDashboardLists = wrappedDashboardLists;
+    try { renderDashboardLists = wrappedDashboardLists; } catch {}
+  }
+
+  const previousRenderAll = typeof window.renderAll === "function"
+    ? window.renderAll
+    : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__dashboardActionsStatusFinalWrapped) {
+    const wrappedRenderAll = function renderAllWithDashboardActionsAndStatusFinal() {
+      const result = previousRenderAll.apply(this, arguments);
+      renderDashboardActiveJobsFinal();
+      return result;
+    };
+    wrappedRenderAll.__dashboardActionsStatusFinalWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() { renderDashboardActiveJobsFinal(); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+
+
+
+/* ========================================================================
+   FINAL DASHBOARD ACTIVE JOBS TABLE - DOC CHIPS + COLUMN ORDER PATCH V2
+   ------------------------------------------------------------------------
+   - Moves Invoice Status after Rate Total.
+   - Shows Cost Tracker / Invoice / Timesheets status inside Project Name,
+     matching the saved-document chips style used by the Jobs table.
+   - Uses final inline status handlers so the Dashboard re-renders in the
+     corrected column order after project or invoice status changes.
+   ======================================================================== */
+(function installDashboardActiveJobsDocChipsOrderFinalV2() {
+  if (window.__pimpDashboardDocChipsOrderFinalV2Installed) return;
+  window.__pimpDashboardDocChipsOrderFinalV2Installed = true;
+
+  const qs = (selector, root = document) => root.querySelector(selector);
+  const esc = (value) => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+  const attr = esc;
+  const toNumber = (value) => {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const moneyLabel = (value) => {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return toNumber(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  };
+  const dateLabel = (value) => {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    if (!value) return "-";
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-US");
+  };
+  const parseJson = (value) => {
+    if (!value) return {};
+    if (typeof value === "object") return value || {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+  const timeValue = (row) => {
+    const candidates = [row?.last_synced_at, row?.updated_at, row?.created_at, row?.start_date, row?.invoice_date, row?.due_date, row?.work_date];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const time = Date.parse(candidate);
+      if (Number.isFinite(time)) return time;
+    }
+    return 0;
+  };
+
+  function normalizeProjectStatus(status) {
+    const value = String(status || "active").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    if (["completed", "complete", "done"].includes(value)) return "completed";
+    if (["cancelled", "canceled"].includes(value)) return "cancelled";
+    return "active";
+  }
+
+  function normalizeInvoiceStatus(status) {
+    const value = String(status || "unsent").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    if (["awaiting_approval", "awaitingapproval", "awaiting", "pending", "draft"].includes(value)) return "awaiting_approval";
+    if (["approved", "approve"].includes(value)) return "approved";
+    if (["paid"].includes(value)) return "paid";
+    return "unsent";
+  }
+
+  function projectStatusOptions(current) {
+    const selected = normalizeProjectStatus(current);
+    return [
+      ["active", "Active"],
+      ["completed", "Completed"],
+      ["cancelled", "Cancelled"]
+    ].map(([value, label]) => `<option value="${value}"${value === selected ? " selected" : ""}>${label}</option>`).join("");
+  }
+
+  function invoiceStatusLabel(status) {
+    const labels = {
+      unsent: "Unsent",
+      awaiting_approval: "Awaiting Approval",
+      approved: "Approved",
+      paid: "Paid"
+    };
+    return labels[normalizeInvoiceStatus(status)] || "Unsent";
+  }
+
+  function invoiceStatusOptions(current) {
+    const selected = normalizeInvoiceStatus(current);
+    return ["unsent", "awaiting_approval", "approved", "paid"]
+      .map((value) => `<option value="${value}"${value === selected ? " selected" : ""}>${invoiceStatusLabel(value)}</option>`)
+      .join("");
+  }
+
+  function latestCostTrackerForJob(jobId) {
+    return (state?.data?.costTrackers || [])
+      .filter((row) => String(row.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function latestInvoiceForJob(jobId) {
+    return (state?.data?.invoices || [])
+      .filter((row) => String(row.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function timesheetDaysForJob(jobId) {
+    if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") {
+      try { return window.__pimpUniqueDailyTimesheetsForJob(jobId); } catch {}
+    }
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      const summary = parseJson(entry.summary);
+      const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+
+  function jobDocumentChips(job) {
+    const costTrackerMade = Boolean(latestCostTrackerForJob(job?.id));
+    const invoiceMade = Boolean(latestInvoiceForJob(job?.id));
+    const timesheetDays = timesheetDaysForJob(job?.id);
+    return `
+      <div class="job-summary-chips professional-job-chips dashboard-job-chips" aria-label="Saved job documents">
+        <span class="job-doc-chip dashboard-doc-indicator ${costTrackerMade ? "made" : "missing"}" title="Cost Tracker ${costTrackerMade ? "present" : "not present"}">Cost Tracker</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${invoiceMade ? "made" : "missing"}" title="Invoice ${invoiceMade ? "present" : "not present"}">Invoice</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${timesheetDays ? "made" : "missing"}" title="Timesheets ${timesheetDays ? `${timesheetDays} saved day${timesheetDays === 1 ? "" : "s"}` : "not present"}">Timesheets</span>
+      </div>
+    `;
+  }
+
+  function rateTotalForTracker(tracker) {
+    if (!tracker) return null;
+    try {
+      if (typeof costTrackerQuoted === "function") {
+        const quoted = toNumber(costTrackerQuoted(tracker));
+        if (quoted || tracker.quoted_price !== undefined) return quoted;
+      }
+    } catch {}
+    const summary = parseJson(tracker.summary);
+    const candidates = [
+      summary.rateTotal,
+      summary.rate_total,
+      summary.quotedTotal,
+      summary.quoted_total,
+      summary.quotedPrice,
+      summary.quoted_price,
+      tracker.rate_total,
+      tracker.quoted_price
+    ];
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null && candidate !== "") return toNumber(candidate);
+    }
+    return 0;
+  }
+
+  function workdaysForJob(job) {
+    try { if (typeof window.__pimpWorkdaysForJobFinal === "function") return toNumber(window.__pimpWorkdaysForJobFinal(job)); } catch {}
+    try { if (typeof window.__pimpWeekdayCount === "function") return toNumber(window.__pimpWeekdayCount(job?.start_date, job?.end_date || job?.start_date)); } catch {}
+    return toNumber(job?.total_job_days || job?.total_days || job?.job_days);
+  }
+
+  function activeDashboardJobs() {
+    const term = String(qs("#dashboardActiveJobsSearch")?.value || "").toLowerCase().trim();
+    return (state?.data?.jobs || [])
+      .filter((job) => normalizeProjectStatus(job.status) === "active")
+      .filter((job) => {
+        if (!term) return true;
+        const invoice = latestInvoiceForJob(job.id);
+        const hasTracker = latestCostTrackerForJob(job.id) ? "cost tracker made" : "cost tracker not made";
+        const hasInvoice = invoice ? "invoice made" : "invoice not made";
+        const hasTimesheets = timesheetDaysForJob(job.id) ? "timesheets made" : "timesheets not made";
+        return [job.job_number, job.job_name, job.company_name, job.location, job.status, invoice?.status, hasTracker, hasInvoice, hasTimesheets]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      })
+      .sort((a, b) => timeValue(b) - timeValue(a));
+  }
+
+  function normalizeDashboardHeaderFinal() {
+    const headerRow = qs(".dashboard-active-jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Project Status", "Dates", "Rate Total", "Invoice Status", "Actions"]
+      .map((label) => `<th>${esc(label)}</th>`)
+      .join("");
+  }
+
+  function renderDashboardActiveJobsDocChipsFinal() {
+    const table = qs("#dashboardActiveJobsTable");
+    const count = qs("#dashboardActiveJobsCount");
+    if (!table) return;
+
+    normalizeDashboardHeaderFinal();
+    const rows = activeDashboardJobs();
+    if (count) count.textContent = rows.length;
+
+    table.innerHTML = rows.map((job) => {
+      const tracker = latestCostTrackerForJob(job.id);
+      const invoice = latestInvoiceForJob(job.id);
+      const rateTotal = rateTotalForTracker(tracker);
+      const days = workdaysForJob(job);
+      const dateRange = `${dateLabel(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${dateLabel(job.end_date)}` : ""}`;
+      const daysText = days ? `${days} workday${toNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
+      const projectStatus = normalizeProjectStatus(job.status);
+      const invoiceStatus = normalizeInvoiceStatus(invoice?.status);
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+
+      return `
+        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${esc(job.job_number || "-")}</strong></td>
+          <td data-label="Project Name" class="job-name-cell">
+            <div class="job-name-stack dashboard-project-stack">
+              <strong>${esc(job.job_name || "-")}</strong>
+              ${jobDocumentChips(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${esc(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${esc(job.location || "-")}</td>
+          <td data-label="Project Status" class="dashboard-project-status-cell">
+            <select class="dashboard-inline-status-select dashboard-project-status-select status ${attr(projectStatus)}" data-dashboard-final-job-status-id="${attr(job.id)}" aria-label="Change project status for ${attr(title)}">
+              ${projectStatusOptions(projectStatus)}
+            </select>
+          </td>
+          <td data-label="Dates" class="job-dates-cell">
+            <span class="job-date-range">${esc(dateRange)}</span>
+            <span class="job-workday-count">${esc(daysText)}</span>
+          </td>
+          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? esc(moneyLabel(rateTotal)) : "—"}</strong></td>
+          <td data-label="Invoice Status" class="dashboard-invoice-status-cell">
+            ${invoice ? `
+              <select class="dashboard-inline-status-select dashboard-invoice-status-select status ${attr(invoiceStatus)}" data-dashboard-final-invoice-status-id="${attr(invoice.id)}" aria-label="Change invoice status for ${attr(invoice.invoice_number || title)}">
+                ${invoiceStatusOptions(invoiceStatus)}
+              </select>
+            ` : `<span class="muted dashboard-no-invoice">No invoice</span>`}
+          </td>
+          <td data-label="Actions" class="dashboard-actions-cell">
+            <div class="dashboard-actions-inline">
+              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="9" class="muted">No active jobs found.</td></tr>`;
+  }
+
+  async function updateProjectStatusFinal(jobId, nextStatus, selectElement) {
+    const status = normalizeProjectStatus(nextStatus);
+    const existing = (state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || ""));
+    if (!existing) return;
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing project status.", true);
+      if (selectElement) selectElement.value = normalizeProjectStatus(existing.status);
+      return;
+    }
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+    try {
+      const now = new Date().toISOString();
+      const { error } = await state.supabase.from("jobs").update({ status, last_synced_at: now }).eq("id", jobId);
+      if (error) throw error;
+      state.data.jobs = (state.data.jobs || []).map((job) => String(job.id || "") === String(jobId || "") ? { ...job, status, last_synced_at: now } : job);
+      try { if (typeof renderJobs === "function") renderJobs(); } catch {}
+      try { if (typeof renderStats === "function") renderStats(); } catch {}
+      renderDashboardActiveJobsDocChipsFinal();
+      if (typeof showToast === "function") showToast("Project status updated.");
+    } catch (error) {
+      if (selectElement) selectElement.value = normalizeProjectStatus(existing.status);
+      if (typeof showToast === "function") showToast(error?.message || "Project status could not be updated.", true);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  async function updateInvoiceStatusFinal(invoiceId, nextStatus, selectElement) {
+    const status = normalizeInvoiceStatus(nextStatus);
+    const existing = (state?.data?.invoices || []).find((invoice) => String(invoice.id || "") === String(invoiceId || ""));
+    if (!existing) return;
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing invoice status.", true);
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      return;
+    }
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+    try {
+      const now = new Date().toISOString();
+      const { error } = await state.supabase.from("invoices").update({ status, last_synced_at: now }).eq("id", invoiceId);
+      if (error) throw error;
+      state.data.invoices = (state.data.invoices || []).map((invoice) => String(invoice.id || "") === String(invoiceId || "") ? { ...invoice, status, last_synced_at: now } : invoice);
+      try { if (typeof renderInvoices === "function") renderInvoices(); } catch {}
+      try { if (typeof renderStats === "function") renderStats(); } catch {}
+      renderDashboardActiveJobsDocChipsFinal();
+      if (typeof showToast === "function") showToast(`Invoice status changed to ${invoiceStatusLabel(status)}.`);
+    } catch (error) {
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      if (typeof showToast === "function") showToast(error?.message || "Invoice status could not be updated.", true);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.("#dashboardActiveJobsSearch")) {
+      setTimeout(renderDashboardActiveJobsDocChipsFinal, 0);
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    const projectSelect = event.target?.closest?.("[data-dashboard-final-job-status-id]");
+    const invoiceSelect = event.target?.closest?.("[data-dashboard-final-invoice-status-id]");
+    if (!projectSelect && !invoiceSelect) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    if (projectSelect) updateProjectStatusFinal(projectSelect.dataset.dashboardFinalJobStatusId, projectSelect.value, projectSelect);
+    if (invoiceSelect) updateInvoiceStatusFinal(invoiceSelect.dataset.dashboardFinalInvoiceStatusId, invoiceSelect.value, invoiceSelect);
+  }, true);
+
+  window.renderDashboardActiveJobs = renderDashboardActiveJobsDocChipsFinal;
+
+  const previousDashboardLists = typeof window.renderDashboardLists === "function"
+    ? window.renderDashboardLists
+    : (typeof renderDashboardLists === "function" ? renderDashboardLists : null);
+  if (previousDashboardLists && !previousDashboardLists.__dashboardDocChipsOrderFinalV2Wrapped) {
+    const wrappedDashboardLists = function renderDashboardListsWithDocChipsOrderFinalV2() {
+      const result = previousDashboardLists.apply(this, arguments);
+      renderDashboardActiveJobsDocChipsFinal();
+      return result;
+    };
+    wrappedDashboardLists.__dashboardDocChipsOrderFinalV2Wrapped = true;
+    window.renderDashboardLists = wrappedDashboardLists;
+    try { renderDashboardLists = wrappedDashboardLists; } catch {}
+  }
+
+  const previousRenderAll = typeof window.renderAll === "function"
+    ? window.renderAll
+    : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__dashboardDocChipsOrderFinalV2Wrapped) {
+    const wrappedRenderAll = function renderAllWithDashboardDocChipsOrderFinalV2() {
+      const result = previousRenderAll.apply(this, arguments);
+      renderDashboardActiveJobsDocChipsFinal();
+      return result;
+    };
+    wrappedRenderAll.__dashboardDocChipsOrderFinalV2Wrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() { renderDashboardActiveJobsDocChipsFinal(); }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  setTimeout(initialize, 0);
+  setTimeout(initialize, 250);
+  setTimeout(initialize, 1000);
+})();
+
+
+/* ========================================================================
+   FINAL PATCH: DASHBOARD WITHOUT INVOICE STATUS + JOB DETAILS INVOICE STATUS
+   ------------------------------------------------------------------------
+   - Removes the Invoice Status column from Recent Active Jobs.
+   - Keeps project status editing and Edit/Delete actions in the Dashboard.
+   - Adds invoice status editing inside the Job Details invoice section.
+   ======================================================================== */
+(function installDashboardNoInvoiceColumnAndJobDetailsInvoiceStatusPatch() {
+  if (window.PIMP_DASHBOARD_NO_INVOICE_COLUMN_JOB_DETAILS_INVOICE_STATUS_PATCH) return;
+  window.PIMP_DASHBOARD_NO_INVOICE_COLUMN_JOB_DETAILS_INVOICE_STATUS_PATCH = true;
+
+  const qs = (selector, root = document) => (root || document).querySelector(selector);
+  const qsa = (selector, root = document) => Array.from((root || document).querySelectorAll(selector));
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  }[char]));
+  const attr = esc;
+  const num = (value) => {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const parseJsonSafe = (value) => {
+    if (!value) return {};
+    if (typeof value === "object") return value || {};
+    try { return JSON.parse(value) || {}; } catch { return {}; }
+  };
+  const timeValue = (row) => {
+    const candidates = [row?.last_synced_at, row?.updated_at, row?.created_at, row?.invoice_date, row?.due_date, row?.start_date, row?.work_date];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const time = Date.parse(candidate);
+      if (Number.isFinite(time)) return time;
+    }
+    return 0;
+  };
+  const moneyLabel = (value) => {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return num(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  };
+  const dateLabel = (value) => {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    if (!value) return "-";
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-US");
+  };
+
+  function normalizeProjectStatus(status) {
+    const value = String(status || "active").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    if (["completed", "complete", "done"].includes(value)) return "completed";
+    if (["cancelled", "canceled"].includes(value)) return "cancelled";
+    return "active";
+  }
+
+  function projectStatusLabel(status) {
+    return { active: "Active", completed: "Completed", cancelled: "Cancelled" }[normalizeProjectStatus(status)] || "Active";
+  }
+
+  function projectStatusOptions(selected) {
+    const current = normalizeProjectStatus(selected);
+    return [
+      ["active", "Active"],
+      ["completed", "Completed"],
+      ["cancelled", "Cancelled"]
+    ].map(([value, label]) => `<option value="${value}"${value === current ? " selected" : ""}>${label}</option>`).join("");
+  }
+
+  function normalizeInvoiceStatus(status) {
+    const value = String(status || "unsent").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    if (["awaiting_approval", "awaitingapproval", "awaiting", "pending", "draft"].includes(value)) return "awaiting_approval";
+    if (["approved", "approve"].includes(value)) return "approved";
+    if (["paid"].includes(value)) return "paid";
+    return "unsent";
+  }
+
+  function invoiceStatusLabel(status) {
+    return {
+      unsent: "Unsent",
+      awaiting_approval: "Awaiting Approval",
+      approved: "Approved",
+      paid: "Paid"
+    }[normalizeInvoiceStatus(status)] || "Unsent";
+  }
+
+  function invoiceStatusOptions(selected) {
+    const current = normalizeInvoiceStatus(selected);
+    return ["unsent", "awaiting_approval", "approved", "paid"]
+      .map((value) => `<option value="${value}"${value === current ? " selected" : ""}>${invoiceStatusLabel(value)}</option>`)
+      .join("");
+  }
+
+  function latestCostTrackerForJob(jobId) {
+    return (state?.data?.costTrackers || [])
+      .filter((row) => String(row.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function latestInvoiceForJob(jobId) {
+    return (state?.data?.invoices || [])
+      .filter((row) => String(row.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function rateTotalForTracker(tracker) {
+    if (!tracker) return null;
+    try {
+      if (typeof costTrackerQuoted === "function") {
+        const quoted = num(costTrackerQuoted(tracker));
+        if (quoted || tracker.quoted_price !== undefined) return quoted;
+      }
+    } catch {}
+    const summary = parseJsonSafe(tracker.summary);
+    const candidates = [summary.rateTotal, summary.rate_total, summary.quotedTotal, summary.quoted_total, summary.quotedPrice, summary.quoted_price, tracker.rate_total, tracker.quoted_price];
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null && candidate !== "") return num(candidate);
+    }
+    return 0;
+  }
+
+  function workdaysForJob(job) {
+    try { if (typeof window.__pimpWeekdayCount === "function") return window.__pimpWeekdayCount(job.start_date, job.end_date || job.start_date); } catch {}
+    const explicit = num(job?.total_job_days || job?.total_days || job?.job_days);
+    if (explicit) return explicit;
+    try { if (typeof window.__pimpWorkdaysForJobFinal === "function") return window.__pimpWorkdaysForJobFinal(job); } catch {}
+    return 0;
+  }
+
+  function uniqueDailyTimesheets(jobId) {
+    try { if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") return window.__pimpUniqueDailyTimesheetsForJob(jobId); } catch {}
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      const summary = parseJsonSafe(entry.summary);
+      const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+
+  function uploadedDocsForJob(jobId) {
+    return (state?.data?.documents || []).filter((doc) => String(doc.job_id || "") === String(jobId || ""));
+  }
+
+  function documentIndicators(job) {
+    const docs = uploadedDocsForJob(job.id);
+    const trackerMade = (state?.data?.costTrackers || []).some((row) => String(row.job_id || "") === String(job.id || "")) || docs.some((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const invoiceMade = (state?.data?.invoices || []).some((row) => String(row.job_id || "") === String(job.id || "")) || docs.some((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const timesheetsMade = uniqueDailyTimesheets(job.id) > 0 || docs.some((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    return `
+      <div class="job-summary-chips professional-job-chips dashboard-job-chips dashboard-document-indicators" aria-label="Saved job documents">
+        <span class="job-doc-chip dashboard-doc-indicator ${trackerMade ? "made" : "missing"}">Cost Tracker</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${invoiceMade ? "made" : "missing"}">Invoice</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${timesheetsMade ? "made" : "missing"}">Timesheets</span>
+      </div>
+    `;
+  }
+
+  function activeDashboardJobs() {
+    const term = String(qs("#dashboardActiveJobsSearch")?.value || "").toLowerCase().trim();
+    return (state?.data?.jobs || [])
+      .filter((job) => normalizeProjectStatus(job.status) === "active")
+      .filter((job) => {
+        if (!term) return true;
+        return [job.job_number, job.job_name, job.company_name, job.location, projectStatusLabel(job.status)]
+          .join(" ")
+          .toLowerCase()
+          .includes(term);
+      })
+      .sort((a, b) => timeValue(b) - timeValue(a));
+  }
+
+  function normalizeDashboardHeader() {
+    const headerRow = qs(".dashboard-active-jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Project Status", "Dates", "Rate Total", "Actions"]
+      .map((label) => `<th>${esc(label)}</th>`)
+      .join("");
+  }
+
+  function renderDashboardNoInvoiceStatusColumn() {
+    const table = qs("#dashboardActiveJobsTable");
+    const count = qs("#dashboardActiveJobsCount");
+    if (!table) return;
+    normalizeDashboardHeader();
+    const rows = activeDashboardJobs();
+    if (count) count.textContent = rows.length;
+    table.innerHTML = rows.map((job) => {
+      const tracker = latestCostTrackerForJob(job.id);
+      const rateTotal = rateTotalForTracker(tracker);
+      const days = workdaysForJob(job);
+      const dateRange = `${dateLabel(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${dateLabel(job.end_date)}` : ""}`;
+      const daysText = days ? `${days} workday${num(days) === 1 ? "" : "s"}` : "Auto-calculated";
+      const projectStatus = normalizeProjectStatus(job.status);
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      return `
+        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${esc(job.job_number || "-")}</strong></td>
+          <td data-label="Project Name" class="job-name-cell">
+            <div class="job-name-stack dashboard-project-stack">
+              <strong>${esc(job.job_name || "-")}</strong>
+              ${documentIndicators(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${esc(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${esc(job.location || "-")}</td>
+          <td data-label="Project Status" class="dashboard-project-status-cell">
+            <select class="dashboard-inline-status-select dashboard-project-status-select status ${attr(projectStatus)}" data-dashboard-no-invoice-job-status-id="${attr(job.id)}" aria-label="Change project status for ${attr(title)}">
+              ${projectStatusOptions(projectStatus)}
+            </select>
+          </td>
+          <td data-label="Dates" class="job-dates-cell">
+            <span class="job-date-range">${esc(dateRange)}</span>
+            <span class="job-workday-count">${esc(daysText)}</span>
+          </td>
+          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? esc(moneyLabel(rateTotal)) : "—"}</strong></td>
+          <td data-label="Actions" class="dashboard-actions-cell">
+            <div class="dashboard-actions-inline">
+              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="8" class="muted">No active jobs found.</td></tr>`;
+  }
+
+  async function updateProjectStatus(jobId, nextStatus, selectElement) {
+    const status = normalizeProjectStatus(nextStatus);
+    const existing = (state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || ""));
+    if (!existing) return;
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing project status.", true);
+      if (selectElement) selectElement.value = normalizeProjectStatus(existing.status);
+      return;
+    }
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+    try {
+      const now = new Date().toISOString();
+      const { error } = await state.supabase.from("jobs").update({ status, last_synced_at: now }).eq("id", jobId);
+      if (error) throw error;
+      state.data.jobs = (state.data.jobs || []).map((job) => String(job.id || "") === String(jobId || "") ? { ...job, status, last_synced_at: now } : job);
+      try { if (typeof renderJobs === "function") renderJobs(); } catch {}
+      try { if (typeof renderStats === "function") renderStats(); } catch {}
+      renderDashboardNoInvoiceStatusColumn();
+      if (typeof showToast === "function") showToast("Project status updated.");
+    } catch (error) {
+      if (selectElement) selectElement.value = normalizeProjectStatus(existing.status);
+      if (typeof showToast === "function") showToast(error?.message || "Project status could not be updated.", true);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  function getCurrentJobDetailsJobId() {
+    const body = qs("#jobDetailsModalBody");
+    const explicit = qs('[data-job-document-upload] [name="job_id"]', body)?.value;
+    if (explicit) return explicit;
+    const title = qs("#jobDetailsModalTitle")?.textContent || "";
+    const jobNumber = title.split("—")[0]?.trim();
+    if (jobNumber) {
+      const job = (state?.data?.jobs || []).find((row) => String(row.job_number || "").trim() === jobNumber);
+      if (job) return job.id;
+    }
+    return "";
+  }
+
+  function normalizeJobDetailsInvoiceStatusControl() {
+    const body = qs("#jobDetailsModalBody");
+    if (!body) return;
+    const jobId = getCurrentJobDetailsJobId();
+    if (!jobId) return;
+    const invoice = latestInvoiceForJob(jobId);
+    if (!invoice) return;
+    const status = normalizeInvoiceStatus(invoice.status);
+    qsa(".document-status-card, .job-document-status-card, article", body).forEach((card) => {
+      const cardTitle = card.querySelector("h5, h4, h3, strong")?.textContent || "";
+      if (!/\binvoice\b/i.test(cardTitle)) return;
+      card.classList.add("job-details-invoice-status-edit-card");
+      const infoBlock = card.querySelector("div") || card;
+      let control = card.querySelector(".job-details-invoice-status-control");
+      if (!control) {
+        control = document.createElement("div");
+        control.className = "job-details-invoice-status-control";
+        const oldSubtitle = infoBlock.querySelector(":scope > span, span");
+        if (oldSubtitle) oldSubtitle.replaceWith(control);
+        else infoBlock.appendChild(control);
+      }
+      control.innerHTML = `
+        <span class="job-details-invoice-status-label">Invoice Status</span>
+        <select class="job-details-invoice-status-select status ${attr(status)}" data-job-details-invoice-status-id="${attr(invoice.id)}" aria-label="Change invoice status">
+          ${invoiceStatusOptions(status)}
+        </select>
+      `;
+    });
+  }
+
+  async function updateJobDetailsInvoiceStatus(invoiceId, nextStatus, selectElement) {
+    const status = normalizeInvoiceStatus(nextStatus);
+    const existing = (state?.data?.invoices || []).find((invoice) => String(invoice.id || "") === String(invoiceId || ""));
+    if (!existing) return;
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing invoice status.", true);
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      return;
+    }
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+    try {
+      const now = new Date().toISOString();
+      const { error } = await state.supabase.from("invoices").update({ status, last_synced_at: now }).eq("id", invoiceId);
+      if (error) throw error;
+      state.data.invoices = (state.data.invoices || []).map((invoice) => String(invoice.id || "") === String(invoiceId || "") ? { ...invoice, status, last_synced_at: now } : invoice);
+      try { if (typeof renderInvoices === "function") renderInvoices(); } catch {}
+      try { if (typeof renderStats === "function") renderStats(); } catch {}
+      renderDashboardNoInvoiceStatusColumn();
+      window.setTimeout(normalizeJobDetailsInvoiceStatusControl, 0);
+      if (typeof showToast === "function") showToast(`Invoice status changed to ${invoiceStatusLabel(status)}.`);
+    } catch (error) {
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      if (typeof showToast === "function") showToast(error?.message || "Invoice status could not be updated.", true);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.("#dashboardActiveJobsSearch")) {
+      window.setTimeout(renderDashboardNoInvoiceStatusColumn, 0);
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    const projectSelect = event.target?.closest?.("[data-dashboard-no-invoice-job-status-id]");
+    const invoiceSelect = event.target?.closest?.("[data-job-details-invoice-status-id]");
+    if (!projectSelect && !invoiceSelect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    if (projectSelect) updateProjectStatus(projectSelect.dataset.dashboardNoInvoiceJobStatusId, projectSelect.value, projectSelect);
+    if (invoiceSelect) updateJobDetailsInvoiceStatus(invoiceSelect.dataset.jobDetailsInvoiceStatusId, invoiceSelect.value, invoiceSelect);
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const row = event.target?.closest?.("#dashboardActiveJobsTable .dashboard-active-job-row");
+    if (!row || event.target.closest("button, a, input, select, textarea, label")) return;
+    const jobId = row.dataset.dashboardJobRowId;
+    if (!jobId) return;
+    event.preventDefault();
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.openJobDetailsModal = jobId;
+    button.style.display = "none";
+    document.body.appendChild(button);
+    button.click();
+    button.remove();
+    window.setTimeout(normalizeJobDetailsInvoiceStatusControl, 0);
+    window.setTimeout(normalizeJobDetailsInvoiceStatusControl, 120);
+  }, true);
+
+  const observer = new MutationObserver(() => {
+    window.clearTimeout(observer.__pimpInvoiceStatusTimer);
+    observer.__pimpInvoiceStatusTimer = window.setTimeout(normalizeJobDetailsInvoiceStatusControl, 40);
+  });
+
+  function startObserver() {
+    try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
+    normalizeJobDetailsInvoiceStatusControl();
+  }
+
+  window.renderDashboardActiveJobs = renderDashboardNoInvoiceStatusColumn;
+  try { renderDashboardActiveJobs = renderDashboardNoInvoiceStatusColumn; } catch {}
+
+  const previousDashboardLists = typeof window.renderDashboardLists === "function" ? window.renderDashboardLists : (typeof renderDashboardLists === "function" ? renderDashboardLists : null);
+  if (previousDashboardLists && !previousDashboardLists.__dashboardNoInvoiceColumnWrapped) {
+    const wrappedDashboardLists = function renderDashboardListsWithoutInvoiceStatusColumn() {
+      const result = previousDashboardLists.apply(this, arguments);
+      renderDashboardNoInvoiceStatusColumn();
+      normalizeJobDetailsInvoiceStatusControl();
+      return result;
+    };
+    wrappedDashboardLists.__dashboardNoInvoiceColumnWrapped = true;
+    window.renderDashboardLists = wrappedDashboardLists;
+    try { renderDashboardLists = wrappedDashboardLists; } catch {}
+  }
+
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__dashboardNoInvoiceColumnWrapped) {
+    const wrappedRenderAll = function renderAllWithoutDashboardInvoiceStatusColumn() {
+      const result = previousRenderAll.apply(this, arguments);
+      renderDashboardNoInvoiceStatusColumn();
+      normalizeJobDetailsInvoiceStatusControl();
+      return result;
+    };
+    wrappedRenderAll.__dashboardNoInvoiceColumnWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() {
+    renderDashboardNoInvoiceStatusColumn();
+    normalizeJobDetailsInvoiceStatusControl();
+    startObserver();
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  window.setTimeout(initialize, 0);
+  window.setTimeout(initialize, 250);
+  window.setTimeout(initialize, 1000);
+})();

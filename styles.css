@@ -9232,3 +9232,589 @@ body.job-timesheet-modal-open .topbar {
     grid-column: 1 / -1;
   }
 }
+
+/* ========================================================================
+   FINAL MAIN DASHBOARD ACTIVE JOBS TABLE PATCH V2
+   ======================================================================== */
+.dashboard-main-jobs-panel {
+  margin-top: 22px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dashboard-main-jobs-header {
+  padding: 20px 22px 16px;
+  margin: 0;
+  border-bottom: 1px solid var(--line);
+  align-items: flex-end;
+}
+
+.dashboard-main-jobs-header > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dashboard-main-jobs-header .tiny {
+  margin: 0;
+}
+
+.dashboard-main-table-wrap {
+  padding: 0;
+  overflow-x: auto;
+}
+
+.dashboard-active-jobs-table {
+  min-width: 1120px;
+  table-layout: fixed;
+}
+
+.dashboard-active-jobs-table th:nth-child(1),
+.dashboard-active-jobs-table td:nth-child(1) {
+  width: 110px;
+}
+
+.dashboard-active-jobs-table th:nth-child(2),
+.dashboard-active-jobs-table td:nth-child(2) {
+  width: 245px;
+}
+
+.dashboard-active-jobs-table th:nth-child(3),
+.dashboard-active-jobs-table td:nth-child(3) {
+  width: 170px;
+}
+
+.dashboard-active-jobs-table th:nth-child(4),
+.dashboard-active-jobs-table td:nth-child(4) {
+  width: 170px;
+}
+
+.dashboard-active-jobs-table th:nth-child(5),
+.dashboard-active-jobs-table td:nth-child(5) {
+  width: 105px;
+}
+
+.dashboard-active-jobs-table th:nth-child(6),
+.dashboard-active-jobs-table td:nth-child(6) {
+  width: 175px;
+}
+
+.dashboard-active-jobs-table th:nth-child(7),
+.dashboard-active-jobs-table td:nth-child(7) {
+  width: 130px;
+}
+
+.dashboard-active-jobs-table th:nth-child(8),
+.dashboard-active-jobs-table td:nth-child(8) {
+  width: 220px;
+}
+
+.dashboard-active-job-row {
+  cursor: pointer;
+}
+
+.dashboard-active-job-row .dashboard-rate-total-cell strong {
+  white-space: nowrap;
+  color: #0f172a;
+}
+
+.dashboard-job-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dashboard-job-actions-cell .job-table-action {
+  white-space: nowrap;
+}
+
+.dashboard-table-search {
+  width: min(360px, 42vw);
+}
+
+.dashboard-legacy-render-targets.hidden {
+  display: none !important;
+}
+
+@media (max-width: 900px) {
+  .dashboard-main-jobs-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dashboard-main-jobs-header .table-toolbar-inline {
+    width: 100%;
+  }
+
+  .dashboard-table-search {
+    width: 100%;
+  }
+}
+
+
+
+/* ========================================================================
+   FINAL DASHBOARD ACTIVE JOBS TABLE CLEANUP - NO ACTIONS / NO STATS
+   ======================================================================== */
+#dashboardView .dashboard-hidden-stats,
+#dashboardView > .stats-grid.dashboard-hidden-stats {
+  display: none !important;
+}
+
+.dashboard-main-jobs-panel {
+  margin-top: 0 !important;
+}
+
+.dashboard-main-jobs-header .tiny {
+  max-width: 620px;
+}
+
+.dashboard-active-jobs-table {
+  width: 100% !important;
+  min-width: 940px !important;
+  table-layout: fixed !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(1),
+.dashboard-active-jobs-table td:nth-child(1) {
+  width: 10% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(2),
+.dashboard-active-jobs-table td:nth-child(2) {
+  width: 25% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(3),
+.dashboard-active-jobs-table td:nth-child(3) {
+  width: 17% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(4),
+.dashboard-active-jobs-table td:nth-child(4) {
+  width: 16% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(5),
+.dashboard-active-jobs-table td:nth-child(5) {
+  width: 9% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(6),
+.dashboard-active-jobs-table td:nth-child(6) {
+  width: 14% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(7),
+.dashboard-active-jobs-table td:nth-child(7) {
+  width: 9% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(8),
+.dashboard-active-jobs-table td:nth-child(8),
+.dashboard-job-actions-cell,
+.dashboard-active-jobs-table .dashboard-job-actions-cell {
+  display: none !important;
+}
+
+.dashboard-rate-total-cell strong {
+  white-space: nowrap;
+}
+
+@media (max-width: 1050px) {
+  .dashboard-active-jobs-table {
+    min-width: 860px !important;
+  }
+}
+
+/* ========================================================================
+   FINAL DASHBOARD ACTIVE JOBS TABLE - ACTIONS + INLINE STATUS STYLING
+   ======================================================================== */
+.dashboard-active-jobs-table {
+  width: 100% !important;
+  min-width: 1280px !important;
+  table-layout: fixed !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(1),
+.dashboard-active-jobs-table td:nth-child(1) {
+  width: 8% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(2),
+.dashboard-active-jobs-table td:nth-child(2) {
+  width: 18% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(3),
+.dashboard-active-jobs-table td:nth-child(3) {
+  width: 13% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(4),
+.dashboard-active-jobs-table td:nth-child(4) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(5),
+.dashboard-active-jobs-table td:nth-child(5) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(6),
+.dashboard-active-jobs-table td:nth-child(6) {
+  width: 13% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(7),
+.dashboard-active-jobs-table td:nth-child(7) {
+  width: 11% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(8),
+.dashboard-active-jobs-table td:nth-child(8) {
+  width: 8% !important;
+  display: table-cell !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(9),
+.dashboard-active-jobs-table td:nth-child(9) {
+  width: 10% !important;
+  display: table-cell !important;
+}
+
+.dashboard-active-jobs-table td,
+.dashboard-active-jobs-table th {
+  vertical-align: middle !important;
+}
+
+.dashboard-inline-status-select {
+  width: 100%;
+  min-width: 0;
+  border-radius: 999px;
+  padding: 7px 28px 7px 10px;
+  font-size: 0.76rem;
+  font-weight: 900;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dashboard-project-status-cell,
+.dashboard-invoice-status-cell,
+.dashboard-actions-cell {
+  vertical-align: middle !important;
+}
+
+.dashboard-actions-cell,
+.dashboard-active-jobs-table .dashboard-actions-cell {
+  display: table-cell !important;
+}
+
+.dashboard-actions-inline {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-actions-inline .job-table-action {
+  white-space: nowrap;
+}
+
+.dashboard-no-invoice {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  white-space: nowrap;
+}
+
+.dashboard-rate-total-cell strong {
+  white-space: nowrap;
+}
+
+.dashboard-inline-status-select.is-saving {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+@media (max-width: 1200px) {
+  .dashboard-active-jobs-table {
+    min-width: 1180px !important;
+  }
+}
+
+
+
+/* ========================================================================
+   FINAL DASHBOARD ACTIVE JOBS TABLE - DOC CHIPS + COLUMN ORDER STYLING V2
+   ======================================================================== */
+.dashboard-active-jobs-table {
+  width: 100% !important;
+  min-width: 1360px !important;
+  table-layout: fixed !important;
+}
+
+.dashboard-active-jobs-table th,
+.dashboard-active-jobs-table td {
+  padding: 11px 9px !important;
+  vertical-align: middle !important;
+}
+
+.dashboard-active-jobs-table th {
+  font-size: 0.72rem !important;
+  letter-spacing: 0.025em !important;
+  line-height: 1.2 !important;
+  white-space: normal !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+  text-transform: none !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(1),
+.dashboard-active-jobs-table td:nth-child(1) {
+  width: 7% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(2),
+.dashboard-active-jobs-table td:nth-child(2) {
+  width: 22% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(3),
+.dashboard-active-jobs-table td:nth-child(3) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(4),
+.dashboard-active-jobs-table td:nth-child(4) {
+  width: 11% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(5),
+.dashboard-active-jobs-table td:nth-child(5) {
+  width: 11% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(6),
+.dashboard-active-jobs-table td:nth-child(6) {
+  width: 11% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(7),
+.dashboard-active-jobs-table td:nth-child(7) {
+  width: 9% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(8),
+.dashboard-active-jobs-table td:nth-child(8) {
+  width: 11% !important;
+  display: table-cell !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(9),
+.dashboard-active-jobs-table td:nth-child(9) {
+  width: 6% !important;
+  display: table-cell !important;
+}
+
+.dashboard-project-stack {
+  gap: 7px !important;
+}
+
+.dashboard-project-stack > strong {
+  display: block;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-job-chips {
+  gap: 5px !important;
+  margin-top: 4px !important;
+}
+
+.dashboard-job-chips .job-doc-chip {
+  padding: 4px 7px !important;
+  font-size: 0.67rem !important;
+  line-height: 1.05 !important;
+  white-space: normal !important;
+  max-width: 100%;
+}
+
+.dashboard-inline-status-select {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 7px 26px 7px 9px !important;
+  font-size: 0.72rem !important;
+  line-height: 1.15 !important;
+}
+
+.dashboard-rate-total-cell strong,
+.dashboard-no-invoice,
+.dashboard-actions-inline .job-table-action {
+  white-space: nowrap !important;
+}
+
+.dashboard-actions-inline {
+  gap: 5px !important;
+  justify-content: flex-start !important;
+}
+
+.dashboard-actions-inline .job-table-action {
+  font-size: 0.72rem !important;
+  padding: 0 !important;
+}
+
+@media (max-width: 1250px) {
+  .dashboard-active-jobs-table {
+    min-width: 1320px !important;
+  }
+}
+
+
+/* ========================================================================
+   FINAL DASHBOARD DOCUMENT INDICATOR LABELS / SIZING PATCH
+   ======================================================================== */
+.dashboard-project-stack .dashboard-job-chips,
+.dashboard-job-chips {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 5px !important;
+  width: 100% !important;
+  margin-top: 6px !important;
+  align-items: stretch !important;
+}
+
+.dashboard-job-chips .job-doc-chip,
+.dashboard-job-chips .dashboard-doc-indicator {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  padding: 4px 5px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+  line-height: 1 !important;
+  font-size: 0.63rem !important;
+  font-weight: 900 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  border: 1px solid transparent !important;
+}
+
+.dashboard-job-chips .job-doc-chip.made,
+.dashboard-job-chips .dashboard-doc-indicator.made {
+  background: #dcfce7 !important;
+  color: #166534 !important;
+  border-color: #bbf7d0 !important;
+}
+
+.dashboard-job-chips .job-doc-chip.missing,
+.dashboard-job-chips .dashboard-doc-indicator.missing {
+  background: #f1f5f9 !important;
+  color: #64748b !important;
+  border-color: #e2e8f0 !important;
+}
+
+
+/* ========================================================================
+   FINAL DASHBOARD TABLE WITHOUT INVOICE STATUS COLUMN + JOB DETAILS STATUS
+   ======================================================================== */
+.dashboard-active-jobs-table {
+  width: 100% !important;
+  min-width: 1240px !important;
+  table-layout: fixed !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(1),
+.dashboard-active-jobs-table td:nth-child(1) {
+  width: 7% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(2),
+.dashboard-active-jobs-table td:nth-child(2) {
+  width: 25% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(3),
+.dashboard-active-jobs-table td:nth-child(3) {
+  width: 13% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(4),
+.dashboard-active-jobs-table td:nth-child(4) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(5),
+.dashboard-active-jobs-table td:nth-child(5) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(6),
+.dashboard-active-jobs-table td:nth-child(6) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(7),
+.dashboard-active-jobs-table td:nth-child(7) {
+  width: 10% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(8),
+.dashboard-active-jobs-table td:nth-child(8) {
+  width: 9% !important;
+  display: table-cell !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(9),
+.dashboard-active-jobs-table td:nth-child(9) {
+  display: none !important;
+}
+
+.dashboard-active-jobs-table th {
+  white-space: normal !important;
+  line-height: 1.15 !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.02em !important;
+}
+
+.dashboard-document-indicators .dashboard-doc-indicator {
+  height: 24px !important;
+  min-height: 24px !important;
+  width: 100% !important;
+}
+
+.job-details-invoice-status-edit-card .job-details-invoice-status-control {
+  display: grid;
+  gap: 6px;
+  margin-top: 5px;
+  max-width: 240px;
+}
+
+.job-details-invoice-status-label {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.job-details-invoice-status-select {
+  width: min(220px, 100%);
+  min-width: 170px;
+  border-radius: 999px;
+  padding: 8px 30px 8px 11px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.job-details-invoice-status-select.is-saving {
+  opacity: 0.65;
+  cursor: progress;
+}
