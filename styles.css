@@ -8973,3 +8973,262 @@ body.job-timesheet-modal-open .topbar {
   }
 }
 
+
+
+/* Final Cost Tracker table resize: show only Rate Total as the money column */
+.cost-trackers-rate-only-table,
+.cost-trackers-table.cost-trackers-rate-only-table {
+  width: 100%;
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.cost-trackers-rate-only-table th:nth-child(1),
+.cost-trackers-rate-only-table td:nth-child(1) {
+  width: 28%;
+}
+
+.cost-trackers-rate-only-table th:nth-child(2),
+.cost-trackers-rate-only-table td:nth-child(2) {
+  width: 32%;
+}
+
+.cost-trackers-rate-only-table th:nth-child(3),
+.cost-trackers-rate-only-table td:nth-child(3) {
+  width: 18%;
+  text-align: right;
+}
+
+.cost-trackers-rate-only-table th:nth-child(4),
+.cost-trackers-rate-only-table td:nth-child(4) {
+  width: 22%;
+}
+
+.cost-trackers-rate-only-table .rate-total-cell {
+  font-weight: 900;
+  color: var(--brand-dark);
+  white-space: nowrap;
+}
+
+.cost-trackers-rate-only-table .table-actions {
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#sheetEquipmentHours {
+  color: transparent;
+}
+
+/* ========================================================================
+   FINAL JOB DETAILS DOCUMENT UPLOAD DEFAULT STYLE
+   ======================================================================== */
+.job-detail-upload-card.job-detail-upload-card-compact,
+#jobDetailsModalBody .job-detail-upload-card {
+  display: grid;
+  grid-template-columns: minmax(170px, 240px) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(29, 78, 216, 0.16);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+#jobDetailsModalBody .job-detail-upload-card h5,
+#jobDetailsModalBody .job-detail-upload-card p {
+  display: none !important;
+}
+
+#jobDetailsModalBody .job-detail-upload-card h5::after {
+  content: none !important;
+}
+
+.job-detail-upload-heading {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+}
+
+.job-detail-upload-form.job-detail-upload-form-compact,
+#jobDetailsModalBody .job-detail-upload-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 230px) minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+#jobDetailsModalBody .job-detail-upload-form select,
+#jobDetailsModalBody .job-detail-upload-form input[type="file"] {
+  background: #ffffff;
+}
+
+#jobDetailsModalBody .job-detail-upload-form input[type="file"] {
+  border: 1.5px dashed #93c5fd;
+  background: #eff6ff;
+}
+
+@media (max-width: 900px) {
+  .job-detail-upload-card.job-detail-upload-card-compact,
+  #jobDetailsModalBody .job-detail-upload-card,
+  .job-detail-upload-form.job-detail-upload-form-compact,
+  #jobDetailsModalBody .job-detail-upload-form {
+    grid-template-columns: 1fr;
+  }
+
+  .job-detail-upload-heading {
+    min-height: 0;
+  }
+}
+
+
+/* ========================================================================
+   FINAL COST TRACKER EDIT WINDOW CLEANUP
+   ======================================================================== */
+#costTrackerLoadNotice.cost-tracker-load-notice,
+#costTrackerForm .cost-tracker-locked-job-note {
+  display: none !important;
+}
+
+#costTrackerForm.cost-tracker-clean-edit-layout .sheet-page-header,
+#costTrackerTemplateModalOverlay.cost-tracker-clean-edit-overlay #costTrackerForm .sheet-page-header {
+  margin-bottom: 10px !important;
+}
+
+#costTrackerTemplateModalOverlay.cost-tracker-clean-edit-overlay .template-modal-body {
+  gap: 12px !important;
+}
+
+#costTrackerTemplateModalOverlay.cost-tracker-clean-edit-overlay #costTrackerForm {
+  gap: 12px !important;
+}
+
+#costTrackerTemplateModalOverlay.cost-tracker-clean-edit-overlay .cost-tracker-setup-card {
+  margin-top: 0 !important;
+}
+
+/* ========================================================================
+   FINAL COST TRACKER NUMBER CELL SPINNER CLEANUP
+   ======================================================================== */
+#costTrackerForm input[type="number"],
+#costTrackerTemplateModalOverlay input[type="number"],
+.template-modal-body #costTrackerForm input[type="number"],
+.sheet-panel .cost-line input[type="number"],
+.sheet-panel input[data-field][type="number"] {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
+#costTrackerForm input[type="number"]::-webkit-outer-spin-button,
+#costTrackerForm input[type="number"]::-webkit-inner-spin-button,
+#costTrackerTemplateModalOverlay input[type="number"]::-webkit-outer-spin-button,
+#costTrackerTemplateModalOverlay input[type="number"]::-webkit-inner-spin-button,
+.template-modal-body #costTrackerForm input[type="number"]::-webkit-outer-spin-button,
+.template-modal-body #costTrackerForm input[type="number"]::-webkit-inner-spin-button,
+.sheet-panel .cost-line input[type="number"]::-webkit-outer-spin-button,
+.sheet-panel .cost-line input[type="number"]::-webkit-inner-spin-button,
+.sheet-panel input[data-field][type="number"]::-webkit-outer-spin-button,
+.sheet-panel input[data-field][type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  margin: 0 !important;
+}
+
+
+
+/* Equipment footer should only show equipment cost totals; non-cost total cells stay blank. */
+.equipment-table tfoot .no-equipment-total {
+  color: transparent;
+}
+
+/* FINAL T&M / AFE JOB FIELD PATCH */
+.tm-afe-field {
+  grid-column: auto;
+}
+
+.tm-afe-input-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.45fr) minmax(140px, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.tm-afe-input-row select,
+.tm-afe-input-row input {
+  min-width: 0;
+}
+
+.tm-afe-input-row input:disabled {
+  background: #f8fafc;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+@media (max-width: 640px) {
+  .tm-afe-input-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+
+/* ========================================================================
+   FINAL COST TRACKER HEADER + INTERNAL COMMENTS PATCH
+   ======================================================================== */
+.cost-tracker-name-field {
+  grid-column: 1 / -1;
+}
+
+.cost-tracker-name-field input {
+  width: 100%;
+  min-height: 48px;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.cost-tracker-name-meta {
+  grid-column: span 3;
+  align-items: start;
+  min-height: auto;
+}
+
+#sheetTrackerNameDisplay {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.25;
+}
+
+.sheet-comments-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1.35fr) minmax(180px, 0.75fr);
+  align-items: stretch;
+}
+
+.sheet-comments-grid .invoice-comments-field,
+.sheet-comments-grid .internal-comments-field,
+.sheet-comments-grid .by-whom-field {
+  min-width: 0;
+}
+
+.sheet-comments-grid .internal-comments-field textarea,
+.sheet-comments-grid .invoice-comments-field textarea {
+  min-height: 150px;
+}
+
+.sheet-comments-grid .internal-comments-field .tiny {
+  margin-top: -2px;
+  font-weight: 600;
+}
+
+@media (max-width: 1050px) {
+  .sheet-comments-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cost-tracker-name-meta {
+    grid-column: 1 / -1;
+  }
+}

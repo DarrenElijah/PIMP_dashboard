@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pro Insulation MP Dashboard</title>
-  <link rel="stylesheet" href="styles.css?v=20260607-2215" />
+  <link rel="stylesheet" href="styles.css?v=20260609-cost-tracker-header-comments-v2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -187,7 +187,7 @@
                 <thead>
                   <tr>
                     <th>Job #</th>
-                    <th>Job Name</th>
+                    <th>Project Name</th>
                     <th>Company</th>
                     <th>Location</th>
                     <th>Status</th>
@@ -216,10 +216,19 @@
               <div class="form-grid">
                 <label>Company Name<input name="company_name" required /></label>
                 <label>Client / Contact Name<input name="contact_name" /></label>
-                <label>Job / AFE Number<input name="job_number" required /></label>
-                <label>Job Name<input name="job_name" required /></label>
+                <label>Project Name<input name="job_name" required /></label>
+                <label>Job number<input name="job_number" required /></label>
+                <label class="tm-afe-field">T&amp;M/AFE
+                  <div class="tm-afe-input-row">
+                    <select name="tm_afe_mode" id="jobTmAfeMode" aria-label="T&amp;M or AFE">
+                      <option value="tm">T&amp;M</option>
+                      <option value="afe">AFE</option>
+                    </select>
+                    <input name="tm_afe_number" id="jobTmAfeNumber" type="text" inputmode="numeric" placeholder="AFE number" aria-label="AFE number" disabled />
+                    <input name="job_dates" type="hidden" value="T&amp;M" />
+                  </div>
+                </label>
                 <label>Location<input name="location" /></label>
-                <label>Total Days<input name="total_job_days" type="number" min="0" step="1" readonly placeholder="Auto-calculated" /></label>
                 <label>Status
                   <select name="status">
                     <option value="active">Active</option>
@@ -229,6 +238,7 @@
                 </label>
                 <label>Start Date<input name="start_date" type="date" /></label>
                 <label>End Date<input name="end_date" type="date" /></label>
+                <label>Total Days<input name="total_job_days" type="number" min="0" step="1" readonly placeholder="Auto-calculated" /></label>
               </div>
               <div class="form-actions job-modal-actions">
                 <button class="btn ghost hidden" id="cancelJobEditBtn" type="button">Cancel Edit</button>
@@ -250,7 +260,7 @@
                 <p class="tiny">This view is laid out like the Google Sheets Bid Sheet. Labor hours are entered manually; Total Days will not auto-fill the Hours cells.</p>
               </div>
               <div class="sheet-header-actions">
-                <label class="sheet-job-picker">Job / AFE <select name="job_id" class="job-select"></select></label>
+                <label class="sheet-job-picker">T&amp;M/AFE <select name="job_id" class="job-select"></select></label>
                 <button class="btn ghost" id="clearCostTrackerJobBtn" type="button">Clear Job Info</button>
                 <button class="btn ghost" id="resetCostTrackerBtn" type="button">Clear</button>
                 <button class="btn ghost" id="downloadCostTrackerDraftBtn" type="button">Download Excel</button>
@@ -262,14 +272,14 @@
               <div class="cost-tracker-setup-copy">
                 <span class="setup-eyebrow">Cost tracker setup</span>
                 <h4>Name this cost tracker before saving</h4>
-                <p>For an unassigned tracker, enter a clear name here first. You can assign the Job / AFE later without losing this saved tracker.</p>
+                <p>For an unassigned tracker, enter a clear name here first. You can assign the T&amp;M/AFE later without losing this saved tracker.</p>
               </div>
               <label class="cost-tracker-name-field">
                 Cost Tracker Name <span class="required-pill">Required</span>
                 <input name="cost_tracker_name" placeholder="Example: West Plant insulation estimate, Tank 14 bid, Unassigned May 23 tracker" required />
               </label>
               <div class="cost-tracker-assignment-hint" id="costTrackerAssignmentHint">
-                Job assignment is optional. Leave Job / AFE blank to save this as an unassigned cost tracker.
+                Job assignment is optional. Leave T&amp;M/AFE blank to save this as an unassigned cost tracker.
               </div>
             </section>
 
@@ -278,11 +288,11 @@
                 <div class="sheet-title-row">BID/COST TRACKING SHEET</div>
 
                 <div class="sheet-meta-grid">
-                  <div class="sheet-meta-cell wide">COST TRACKER NAME:<strong id="sheetTrackerNameDisplay">Untitled Cost Tracker</strong></div>
+                  <div class="sheet-meta-cell wide cost-tracker-name-meta">COST TRACKER NAME:<strong id="sheetTrackerNameDisplay">Untitled Cost Tracker</strong></div>
                   <label class="sheet-meta-cell">DATE:<input name="cost_tracker_date" type="date" /></label>
-                  <div class="sheet-meta-cell">Job/AFE #<strong id="sheetJobNumber">—</strong></div>
-                  <div class="sheet-meta-cell">CLIENT:<strong id="sheetClientName">—</strong></div>
-                  <div class="sheet-meta-cell wide">JOB NAME:<strong id="sheetJobName">—</strong></div>
+                  <div class="sheet-meta-cell">T&amp;M/AFE<strong id="sheetJobNumber">—</strong></div>
+                  <div class="sheet-meta-cell">CLIENT Requestor:<strong id="sheetClientName">—</strong></div>
+                  <div class="sheet-meta-cell wide">PROJECT NAME:<strong id="sheetJobName">—</strong></div>
                   <label class="sheet-meta-cell small">Total Days:<input name="total_job_days" type="number" step="1" min="0" /></label>
                   <div class="sheet-meta-cell wide">Location:<strong id="sheetLocation">—</strong></div>
                 </div>
@@ -313,7 +323,7 @@
                       </thead>
                       <tbody id="sheetEquipmentBody"></tbody>
                       <tfoot>
-                        <tr class="total-row"><th>EQUIPMENT TOTAL</th><td id="sheetEquipmentQty"></td><td id="sheetEquipmentHours"></td><td></td><td id="sheetEquipmentDays"></td><td></td><td id="sheetEquipmentCost"></td><td></td><td></td><td id="sheetEquipmentRate"></td><td></td></tr>
+                        <tr class="total-row"><th>EQUIPMENT TOTAL</th><td class="no-equipment-total"></td><td class="no-equipment-total"></td><td></td><td class="no-equipment-total"></td><td></td><td id="sheetEquipmentCost"></td><td></td><td></td><td id="sheetEquipmentRate"></td><td></td></tr>
                       </tfoot>
                     </table>
 
@@ -372,8 +382,9 @@
                 </div>
 
                 <div class="sheet-comments-grid">
-                  <label>COMMENTS:<textarea name="notes" rows="7"></textarea></label>
-                  <label>By Whom:<input name="by_whom" /></label>
+                  <label class="invoice-comments-field">COMMENTS:<textarea name="notes" rows="7" placeholder="Comments that can transfer to the invoice description."></textarea></label>
+                  <label class="internal-comments-field">Internal Comments:<textarea name="internal_comments" rows="7" placeholder="Internal notes only. These do not transfer to the invoice."></textarea><span class="tiny">These comments stay on the cost tracker only.</span></label>
+                  <label class="by-whom-field">By Whom:<input name="by_whom" /></label>
                 </div>
               </div>
             </div>
@@ -392,7 +403,7 @@
                 <span id="costTrackersCount" class="pill">0</span>
               </div>
             </div>
-            <p class="table-help">Assign or change a Job / AFE directly from the table. Unassigned trackers can also start a new job record from the Create Job button.</p>
+            <p class="table-help">Assign or change a T&amp;M/AFE directly from the table. Unassigned trackers can also start a new job record from the Create Job button.</p>
             <div class="table-wrap">
               <table class="data-table cost-trackers-table">
                 <thead>
@@ -863,6 +874,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script src="app.js?v=20260607-2215"></script>
+  <script src="app.js?v=20260609-cost-tracker-header-comments-v2"></script>
 </body>
 </html>
