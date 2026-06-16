@@ -962,6 +962,173 @@ function showToast(message, isError = false) {
   }, 4200);
 }
 
+
+/* ========================================================================
+   FINAL DOM-ONLY TABLE SEARCH GUARD
+   ------------------------------------------------------------------------
+   Table search must only hide/show existing rows. It must not call renderAll,
+   rebuild table HTML, reset dropdowns, or run older status-normalizing code.
+   This is installed early so it captures search input before old handlers.
+   ======================================================================== */
+(function installDomOnlyTableSearchGuardEarly() {
+  const PATCH_FLAG = "__pimpDomOnlyTableSearchGuardEarly";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  const SEARCH_TO_TABLE = {
+    dashboardActiveJobsSearch: "#dashboardActiveJobsTable",
+    jobsSearch: "#jobsTable",
+    costTrackersSearch: "#costTrackersTable",
+    invoicesSearch: "#invoicesTable",
+    timesheetsSearch: "#timesheetsTable",
+    employeesSearch: "#employeesTable",
+    assignmentsSearch: "#assignmentsTable",
+    documentsSearch: "#documentsTable"
+  };
+
+  const SEARCH_TO_COUNT = {
+    dashboardActiveJobsSearch: "#dashboardActiveJobsCount",
+    jobsSearch: "#jobsCount",
+    costTrackersSearch: "#costTrackersCount",
+    invoicesSearch: "#invoicesCount",
+    timesheetsSearch: "#timesheetsCount",
+    employeesSearch: "#employeesCount",
+    assignmentsSearch: "#assignmentsCount",
+    documentsSearch: "#documentsCount"
+  };
+
+  function qs(selector, root = document) {
+    try { return root.querySelector(selector); } catch { return null; }
+  }
+
+  function qsa(selector, root = document) {
+    try { return Array.from(root.querySelectorAll(selector)); } catch { return []; }
+  }
+
+  function isTableSearchInput(target) {
+    return target?.matches?.(".table-search, #dashboardActiveJobsSearch, #jobsSearch, #costTrackersSearch, #invoicesSearch, #timesheetsSearch, #employeesSearch, #assignmentsSearch, #documentsSearch");
+  }
+
+  function tableBodyForSearch(input) {
+    if (!input) return null;
+    const mapped = SEARCH_TO_TABLE[input.id];
+    if (mapped) {
+      const table = qs(mapped);
+      if (table) return table;
+    }
+    const panel = input.closest?.(".panel, section, .view");
+    return qs("tbody", panel || document);
+  }
+
+  function countElementForSearch(input) {
+    if (!input) return null;
+    const mapped = SEARCH_TO_COUNT[input.id];
+    if (mapped) {
+      const count = qs(mapped);
+      if (count) return count;
+    }
+    return input.closest?.(".panel, section, .view")?.querySelector?.(".pill") || null;
+  }
+
+  function rowIsPlaceholder(row) {
+    const text = String(row?.textContent || "").trim().toLowerCase();
+    return row?.dataset?.searchEmptyRow === "true" || (row?.cells?.length === 1 && /no records|no matching|no results/.test(text));
+  }
+
+  function selectedText(select) {
+    const selected = select?.selectedOptions?.[0];
+    return [select?.value || "", selected?.textContent || ""].join(" ");
+  }
+
+  function rowSearchText(row) {
+    if (!row) return "";
+    const clone = row.cloneNode(true);
+    const originalSelects = qsa("select", row);
+    qsa("select", clone).forEach((select, index) => {
+      select.replaceWith(document.createTextNode(` ${selectedText(originalSelects[index])} `));
+    });
+    const originalInputs = qsa("input, textarea", row);
+    qsa("input, textarea", clone).forEach((input, index) => {
+      const original = originalInputs[index];
+      input.replaceWith(document.createTextNode(` ${original?.value || ""} `));
+    });
+    return String(clone.textContent || "").replace(/\s+/g, " ").toLowerCase();
+  }
+
+  function tableColumnCount(tbody) {
+    const table = tbody?.closest?.("table");
+    const headers = qsa("thead th", table);
+    if (headers.length) return headers.length;
+    const firstRow = qsa("tr", tbody).find((row) => !rowIsPlaceholder(row));
+    return Math.max(1, firstRow?.cells?.length || 1);
+  }
+
+  function ensureNoMatchesRow(tbody, show) {
+    qsa('tr[data-search-empty-row="true"]', tbody).forEach((row) => row.remove());
+    if (!show || !tbody) return;
+    const row = document.createElement("tr");
+    row.dataset.searchEmptyRow = "true";
+    const cell = document.createElement("td");
+    cell.className = "muted";
+    cell.colSpan = tableColumnCount(tbody);
+    cell.textContent = "No matching rows found.";
+    row.appendChild(cell);
+    tbody.appendChild(row);
+  }
+
+  function applyTableSearchOnly(input) {
+    const tbody = tableBodyForSearch(input);
+    if (!tbody) return;
+
+    const term = String(input?.value || "").trim().toLowerCase();
+    const rows = qsa("tr", tbody).filter((row) => row.dataset.searchEmptyRow !== "true");
+    let visible = 0;
+    let dataRows = 0;
+
+    rows.forEach((row) => {
+      if (rowIsPlaceholder(row)) {
+        const showPlaceholder = !term;
+        row.hidden = !showPlaceholder;
+        row.style.display = showPlaceholder ? "" : "none";
+        return;
+      }
+
+      dataRows += 1;
+      const match = !term || rowSearchText(row).includes(term);
+      row.hidden = !match;
+      row.style.display = match ? "" : "none";
+      row.dataset.searchHidden = match ? "false" : "true";
+      if (match) visible += 1;
+    });
+
+    ensureNoMatchesRow(tbody, Boolean(term && dataRows && !visible));
+
+    const count = countElementForSearch(input);
+    if (count) count.textContent = String(term ? visible : dataRows || rows.filter(rowIsPlaceholder).length || 0);
+  }
+
+  function applyAllActiveTableSearches() {
+    qsa(".table-search, #dashboardActiveJobsSearch, #jobsSearch, #costTrackersSearch, #invoicesSearch, #timesheetsSearch, #employeesSearch, #assignmentsSearch, #documentsSearch")
+      .forEach((input) => {
+        if (input?.value) applyTableSearchOnly(input);
+      });
+  }
+
+  function handleSearchInput(event) {
+    const input = event.target;
+    if (!isTableSearchInput(input)) return;
+
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    window.requestAnimationFrame(() => applyTableSearchOnly(input));
+  }
+
+  document.addEventListener("input", handleSearchInput, true);
+
+  window.PIMP_applyTableSearchOnly = applyTableSearchOnly;
+  window.PIMP_applyAllActiveTableSearchesOnly = applyAllActiveTableSearches;
+})();
+
 /* ==========================================================================
    COST TRACKER + INVOICE BUILDER UPGRADE
    --------------------------------------------------------------------------
@@ -30315,4 +30482,385 @@ This removes it from the job documents list.`)) return;
   else start();
 
   window.PIMP_updateTimesheetFolderInJobDetails = updateTimesheetFolderInJobDetails;
+})();
+
+/* ========================================================================
+   FINAL OPEN/CLOSED JOB TABLE ACTION CLEANUP PATCH
+   ------------------------------------------------------------------------
+   - Open Jobs: removes only the Details button from the table action cell.
+   - Closed Jobs: removes every action button and removes the Actions column.
+   - Runs after table renders/searches so older render patches cannot add them back.
+   ======================================================================== */
+(function finalOpenClosedJobTableActionCleanupPatch() {
+  const PATCH_FLAG = "__pimpOpenClosedJobActionsCleanupFinal";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function removeOpenJobDetailsButtons() {
+    const table = qs("#dashboardActiveJobsTable");
+    if (!table) return;
+
+    qsa('[data-open-job-details-modal]', table).forEach((button) => {
+      const actionCell = button.closest('td[data-label="Actions"], .dashboard-actions-cell, .actions-cell, .table-actions');
+      if (actionCell) button.remove();
+    });
+
+    qsa(".dashboard-actions-inline", table).forEach((wrap) => {
+      if (!wrap.textContent.trim()) {
+        const cell = wrap.closest("td");
+        if (cell) cell.textContent = "—";
+      }
+    });
+  }
+
+  function removeClosedJobActionsColumn() {
+    const tableBody = qs("#jobsTable");
+    const table = tableBody?.closest("table");
+    if (!table || !tableBody) return;
+
+    table.classList.add("closed-jobs-no-actions-final");
+
+    const headerRows = qsa("thead tr", table);
+    headerRows.forEach((row) => {
+      qsa("th", row).forEach((th) => {
+        if (th.textContent.trim().toLowerCase() === "actions") th.remove();
+      });
+    });
+
+    qsa("tr", tableBody).forEach((row) => {
+      qsa('td[data-label="Actions"], td.actions-cell, td.job-actions-cell, td.table-actions', row).forEach((cell) => cell.remove());
+      const onlyCell = row.querySelector('td[colspan]');
+      if (onlyCell) onlyCell.setAttribute("colspan", "7");
+    });
+  }
+
+  function cleanupJobTables() {
+    removeOpenJobDetailsButtons();
+    removeClosedJobActionsColumn();
+  }
+
+  function wrapFunction(name, cleanup) {
+    const previous = typeof window[name] === "function" ? window[name] : null;
+    if (!previous || previous.__openClosedJobActionsCleanupWrapped) return;
+    const wrapped = function openClosedJobActionsCleanupWrapped() {
+      const result = previous.apply(this, arguments);
+      try { cleanupJobTables(); } catch (error) { console.warn("Job table cleanup failed:", error); }
+      setTimeout(() => {
+        try { cleanupJobTables(); } catch (error) { console.warn("Job table cleanup failed:", error); }
+      }, 0);
+      return result;
+    };
+    wrapped.__openClosedJobActionsCleanupWrapped = true;
+    window[name] = wrapped;
+    try { globalThis[name] = wrapped; } catch {}
+  }
+
+  wrapFunction("renderDashboardActiveJobs", cleanupJobTables);
+  wrapFunction("renderJobs", cleanupJobTables);
+  wrapFunction("renderAll", cleanupJobTables);
+  wrapFunction("showView", cleanupJobTables);
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.("#dashboardActiveJobsSearch, #jobsSearch")) {
+      setTimeout(cleanupJobTables, 0);
+      setTimeout(cleanupJobTables, 80);
+    }
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.("#dashboardActiveJobsTable, #jobsTable")) {
+      setTimeout(cleanupJobTables, 0);
+    }
+  }, true);
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", cleanupJobTables);
+  } else {
+    cleanupJobTables();
+  }
+  setTimeout(cleanupJobTables, 0);
+  setTimeout(cleanupJobTables, 250);
+  setTimeout(cleanupJobTables, 1000);
+})();
+
+
+
+/* ========================================================================
+   FINAL OPEN JOB NAVIGATION + COST TRACKER VIEW DATE PATCH
+   ------------------------------------------------------------------------
+   - New Job buttons keep the user on Open Jobs instead of jumping to Closed Jobs.
+   - Saving a new or edited job returns/stays on Open Jobs after the data reloads.
+   - View Cost Tracker previews use the job's date range, matching Edit Cost Tracker.
+   ======================================================================== */
+(function installOpenJobNavigationAndCostTrackerViewDatePatch() {
+  const PATCH_FLAG = "__pimpOpenJobNavigationAndCostTrackerViewDatePatch";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function showOpenJobsView() {
+    try {
+      if (typeof showView === "function") showView("dashboard");
+      else if (typeof window.showView === "function") window.showView("dashboard");
+    } catch {}
+  }
+
+  function moveJobModalToBody() {
+    const overlay = qs("#jobModalOverlay");
+    if (overlay && overlay.parentElement !== document.body) {
+      document.body.appendChild(overlay);
+    }
+    return overlay;
+  }
+
+  function openNewJobFromOpenJobs() {
+    showOpenJobsView();
+    moveJobModalToBody();
+    try {
+      if (typeof window.openJobModal === "function") {
+        window.openJobModal({ reset: true });
+      }
+    } catch {}
+    moveJobModalToBody();
+    showOpenJobsView();
+  }
+
+  function wrapGlobalFunction(name, makeWrapper) {
+    let previous = null;
+    try { previous = window[name]; } catch {}
+    if (typeof previous !== "function") {
+      try { previous = eval(name); } catch {}
+    }
+    if (typeof previous !== "function" || previous.__pimpOpenJobNavigationWrapped) return;
+    const wrapped = makeWrapper(previous);
+    wrapped.__pimpOpenJobNavigationWrapped = true;
+    try { window[name] = wrapped; } catch {}
+    try { globalThis[name] = wrapped; } catch {}
+    try { eval(`${name} = window["${name}"]`); } catch {}
+  }
+
+  wrapGlobalFunction("openJobModal", (previous) => function openJobModalStayOnOpenJobs(options = {}) {
+    const result = previous.apply(this, arguments);
+    moveJobModalToBody();
+    showOpenJobsView();
+    return result;
+  });
+
+  wrapGlobalFunction("loadJobIntoForm", (previous) => function loadJobIntoFormStayOnOpenJobs(job) {
+    const result = previous.apply(this, arguments);
+    moveJobModalToBody();
+    showOpenJobsView();
+    return result;
+  });
+
+  wrapGlobalFunction("handleCreateJob", (previous) => async function handleCreateJobStayOnOpenJobs(event) {
+    const result = await previous.apply(this, arguments);
+    showOpenJobsView();
+    moveJobModalToBody();
+    setTimeout(showOpenJobsView, 0);
+    setTimeout(showOpenJobsView, 150);
+    return result;
+  });
+
+  // New Job buttons used to trigger older handlers that switched to Closed Jobs.
+  // Capture the click first, stop the older handlers, and open the job popup over Open Jobs.
+  document.addEventListener("click", (event) => {
+    const newJobButton = event.target?.closest?.("#quickCreateJobBtn, #openJobModalBtn");
+    if (!newJobButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    openNewJobFromOpenJobs();
+    return false;
+  }, true);
+
+  function text(value) {
+    return String(value ?? "").trim();
+  }
+
+  function parseJson(value, fallback = {}) {
+    if (!value) return fallback;
+    if (typeof value === "object") return value;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function findJobRecord(jobId) {
+    if (!jobId) return null;
+    try {
+      if (typeof findJob === "function") {
+        const found = findJob(jobId);
+        if (found) return found;
+      }
+    } catch {}
+    return (state?.data?.jobs || []).find((job) => String(job.id) === String(jobId)) || null;
+  }
+
+  function localDate(value) {
+    const source = text(value).slice(0, 10);
+    const match = source.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const parsed = new Date(source || text(value));
+    return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
+  function displayDate(value) {
+    const date = localDate(value);
+    if (!date) return "";
+    return date.toLocaleDateString("en-US");
+  }
+
+  function jobDateRange(job) {
+    if (!job) return "";
+    const start = displayDate(job.start_date);
+    const end = displayDate(job.end_date || job.start_date);
+    if (start && end && start !== end) return `${start} to ${end}`;
+    return start || end || "";
+  }
+
+  function trackerWithJobDateRange(tracker) {
+    if (!tracker || typeof tracker !== "object") return tracker;
+    const summary = parseJson(tracker.summary, {});
+    const job = findJobRecord(tracker.job_id || summary.jobId || summary.job_id);
+    const range = jobDateRange(job);
+    if (!range) return tracker;
+
+    return {
+      ...tracker,
+      cost_tracker_date: range,
+      tracker_date: range,
+      summary: {
+        ...summary,
+        costTrackerDate: range,
+        cost_tracker_date: range,
+        projectDates: range,
+        project_dates: range
+      }
+    };
+  }
+
+  wrapGlobalFunction("previewSavedCostTracker", (previous) => function previewSavedCostTrackerWithJobDateRange(tracker) {
+    return previous.call(this, trackerWithJobDateRange(tracker));
+  });
+
+  // Keep the preview fixed even when older capture handlers call window.previewSavedCostTracker.
+  document.addEventListener("click", (event) => {
+    const previewButton = event.target?.closest?.("[data-preview-cost]");
+    if (!previewButton || typeof window.previewSavedCostTracker !== "function") return;
+    const tracker = (state?.data?.costTrackers || []).find((row) => String(row.id) === String(previewButton.dataset.previewCost));
+    if (!tracker) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    window.previewSavedCostTracker(trackerWithJobDateRange(tracker));
+    return false;
+  }, true);
+
+
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id !== "jobForm") return;
+    // Older submit listeners may still run by reference and switch to Closed Jobs.
+    // Re-assert Open Jobs after the save/update/data refresh finishes.
+    [0, 150, 500, 1000, 1800].forEach((delay) => setTimeout(showOpenJobsView, delay));
+  }, true);
+
+  function initializeOpenJobBehavior() {
+    moveJobModalToBody();
+    qsa("#openJobModalBtn").forEach((button) => button.remove());
+    showOpenJobsView();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeOpenJobBehavior);
+  } else {
+    initializeOpenJobBehavior();
+  }
+  setTimeout(initializeOpenJobBehavior, 0);
+  setTimeout(initializeOpenJobBehavior, 250);
+  setTimeout(initializeOpenJobBehavior, 1000);
+
+  window.PIMP_showOpenJobsView = showOpenJobsView;
+  window.PIMP_trackerWithJobDateRange = trackerWithJobDateRange;
+})();
+
+
+/* ========================================================================
+   FINAL DOM-ONLY TABLE SEARCH LATE OVERRIDE
+   ------------------------------------------------------------------------
+   Keeps every table search as a visual row filter only. This prevents older
+   renderAll/search wrappers from using search text to rebuild rows or reset
+   statuses, dates, dropdowns, and other saved fields.
+   ======================================================================== */
+(function installDomOnlyTableSearchLateOverride() {
+  const PATCH_FLAG = "__pimpDomOnlyTableSearchLateOverride";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  function applySearchesSoon() {
+    const applyAll = window.PIMP_applyAllActiveTableSearchesOnly;
+    if (typeof applyAll !== "function") return;
+    window.setTimeout(applyAll, 0);
+    window.setTimeout(applyAll, 80);
+  }
+
+  window.getActiveSearchTerm = function getActiveSearchTermDomOnlySearch() {
+    const global = document.querySelector("#globalSearch:not(.hidden)");
+    return String(global?.value || "").toLowerCase().trim();
+  };
+  try { getActiveSearchTerm = window.getActiveSearchTerm; } catch {}
+
+  window.filtered = function filteredWithoutTableSearchRender(items) {
+    return Array.isArray(items) ? items : [];
+  };
+  try { filtered = window.filtered; } catch {}
+
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__domOnlyTableSearchLateWrapped) {
+    const wrappedRenderAll = function renderAllWithDomOnlyTableSearch() {
+      const result = previousRenderAll.apply(this, arguments);
+      applySearchesSoon();
+      return result;
+    };
+    wrappedRenderAll.__domOnlyTableSearchLateWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  const previousShowView = typeof window.showView === "function" ? window.showView : (typeof showView === "function" ? showView : null);
+  if (previousShowView && !previousShowView.__domOnlyTableSearchLateWrapped) {
+    const wrappedShowView = function showViewWithDomOnlyTableSearch() {
+      const result = previousShowView.apply(this, arguments);
+      applySearchesSoon();
+      return result;
+    };
+    wrappedShowView.__domOnlyTableSearchLateWrapped = true;
+    window.showView = wrappedShowView;
+    try { showView = wrappedShowView; } catch {}
+  }
+
+  document.addEventListener("DOMContentLoaded", applySearchesSoon);
+  applySearchesSoon();
 })();

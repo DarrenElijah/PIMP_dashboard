@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pro Insulation MP Dashboard</title>
-  <link rel="stylesheet" href="styles.css?v=20260616-timesheet-folder-save-fix" />
+  <link rel="stylesheet" href="styles.css?v=20260616-dom-only-table-search-fix" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -73,7 +73,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Database Dashboard</p>
-          <h2 id="viewTitle">Open Jobs</h2>
+          <h2 id="viewTitle">Open Jobs:</h2>
         </div>
         <div class="topbar-actions global-actions">
           <button class="btn ghost sidebar-toggle-btn" id="sidebarToggleBtn" type="button" aria-pressed="false">Hide Menu</button>
@@ -116,7 +116,7 @@
           <div class="panel-header table-panel-header dashboard-main-jobs-header">
             <div>
               <p class="eyebrow">Main Dashboard</p>
-              <h3>Open Jobs</h3>
+              <h3>Open Jobs:</h3>
               <p class="tiny">Review open jobs by invoice status, update invoice status, view document status, review rate totals, and open job details.</p>
             </div>
             <div class="table-toolbar-inline">
@@ -151,7 +151,7 @@
 
       <section id="jobsView" class="view">
         <div class="jobs-page-layout">
-          <section class="panel table-panel jobs-table-panel">
+<section class="panel table-panel jobs-table-panel">
             <div class="panel-header table-panel-header">
               <h3>Closed Jobs</h3>
               <div class="table-toolbar-inline">
@@ -170,7 +170,6 @@
                     <th>Invoice Status</th>
                     <th>Dates</th>
                     <th>Rate Total</th>
-                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="jobsTable"></tbody>
@@ -232,7 +231,11 @@
         <div class="sheet-workspace">
           <form id="costTrackerForm" class="panel sheet-panel">
             <input type="hidden" name="record_id" />
-            <input type="hidden" name="job_id" />
+            <div class="panel-header compact sheet-page-header cost-tracker-window-toolbar">
+              <div class="sheet-header-actions sheet-header-actions-only">
+                <label class="sheet-job-picker">T&amp;M/AFE <select name="job_id" class="job-select"></select></label>
+              </div>
+            </div>
 
             <section class="cost-tracker-setup-card hidden" id="costTrackerSetupCard" aria-hidden="true">
               <input type="hidden" name="cost_tracker_name" value="" />
@@ -830,6 +833,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script src="app.js?v=20260616-timesheet-folder-save-fix"></script>
+  <script src="app.js?v=20260616-dom-only-table-search-fix"></script>
 </body>
 </html>

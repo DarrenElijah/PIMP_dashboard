@@ -10904,3 +10904,10 @@ body.job-timesheet-modal-open .topbar {
     grid-template-columns: 1fr !important;
   }
 }
+
+/* Open/Closed Jobs action cleanup */
+.closed-jobs-no-actions-final th:last-child,
+.closed-jobs-no-actions-final td:last-child {
+  border-right: 0;
+}
+
