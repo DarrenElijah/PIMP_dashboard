@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pro Insulation MP Dashboard</title>
-  <link rel="stylesheet" href="styles.css?v=20260609-job-details-invoice-status" />
+  <link rel="stylesheet" href="styles.css?v=20260616-timesheet-folder-save-fix" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -56,8 +56,8 @@
         </div>
 
       <nav class="nav">
-        <button class="nav-btn active" data-view="dashboard">Dashboard</button>
-        <button class="nav-btn" data-view="jobs">Jobs</button>
+        <button class="nav-btn active" data-view="dashboard">Open Jobs</button>
+        <button class="nav-btn" data-view="jobs">Closed Jobs</button>
         <button class="nav-btn" data-view="costTrackers">Cost Trackers</button>
         <button class="nav-btn" data-view="invoices">Invoices</button>
         <button class="nav-btn" data-view="timesheets">Timesheets</button>
@@ -73,7 +73,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">Database Dashboard</p>
-          <h2 id="viewTitle">Dashboard</h2>
+          <h2 id="viewTitle">Open Jobs</h2>
         </div>
         <div class="topbar-actions global-actions">
           <button class="btn ghost sidebar-toggle-btn" id="sidebarToggleBtn" type="button" aria-pressed="false">Hide Menu</button>
@@ -116,11 +116,11 @@
           <div class="panel-header table-panel-header dashboard-main-jobs-header">
             <div>
               <p class="eyebrow">Main Dashboard</p>
-              <h3>Recent Active Jobs</h3>
-              <p class="tiny">Edit jobs, update project status, view document status, review rate totals, and open job details from the main Dashboard page.</p>
+              <h3>Open Jobs</h3>
+              <p class="tiny">Review open jobs by invoice status, update invoice status, view document status, review rate totals, and open job details.</p>
             </div>
             <div class="table-toolbar-inline">
-              <input id="dashboardActiveJobsSearch" class="table-search dashboard-table-search" type="search" placeholder="Search active jobs..." />
+              <input id="dashboardActiveJobsSearch" class="table-search dashboard-table-search" type="search" placeholder="Search open jobs..." />
               <span id="dashboardActiveJobsCount" class="pill">0</span>
             </div>
           </div>
@@ -132,7 +132,7 @@
                   <th>Project Name</th>
                   <th>Company</th>
                   <th>Location</th>
-                  <th>Project Status</th>
+                  <th>Invoice Status</th>
                   <th>Dates</th>
                   <th>Rate Total</th>
                   <th>Actions</th>
@@ -151,20 +151,11 @@
 
       <section id="jobsView" class="view">
         <div class="jobs-page-layout">
-          <div class="jobs-page-action-bar panel">
-            <div>
-              <p class="eyebrow">Jobs</p>
-              <h3>Manage saved jobs</h3>
-              <p class="tiny">The job form stays hidden until you create a new job or edit an existing one.</p>
-            </div>
-            <button class="btn primary" id="openJobModalBtn" type="button">+ Create Job</button>
-          </div>
-
           <section class="panel table-panel jobs-table-panel">
             <div class="panel-header table-panel-header">
-              <h3>Jobs</h3>
+              <h3>Closed Jobs</h3>
               <div class="table-toolbar-inline">
-                <input id="jobsSearch" class="table-search" type="search" placeholder="Search jobs..." />
+                <input id="jobsSearch" class="table-search" type="search" placeholder="Search closed jobs..." />
                 <span id="jobsCount" class="pill">0</span>
               </div>
             </div>
@@ -176,8 +167,9 @@
                     <th>Project Name</th>
                     <th>Company</th>
                     <th>Location</th>
-                    <th>Status</th>
+                    <th>Invoice Status</th>
                     <th>Dates</th>
+                    <th>Rate Total</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -240,33 +232,10 @@
         <div class="sheet-workspace">
           <form id="costTrackerForm" class="panel sheet-panel">
             <input type="hidden" name="record_id" />
-            <div class="panel-header compact sheet-page-header">
-              <div>
-                <h3>Bid / Cost Tracking Sheet</h3>
-                <p class="tiny">This view is laid out like the Google Sheets Bid Sheet. Labor hours are entered manually; Total Days will not auto-fill the Hours cells.</p>
-              </div>
-              <div class="sheet-header-actions">
-                <label class="sheet-job-picker">T&amp;M/AFE <select name="job_id" class="job-select"></select></label>
-                <button class="btn ghost" id="clearCostTrackerJobBtn" type="button">Clear Job Info</button>
-                <button class="btn ghost" id="resetCostTrackerBtn" type="button">Clear</button>
-                <button class="btn ghost" id="downloadCostTrackerDraftBtn" type="button">Download Excel</button>
-                <button class="btn primary" type="submit">Save Cost Tracker</button>
-              </div>
-            </div>
+            <input type="hidden" name="job_id" />
 
-            <section class="cost-tracker-setup-card" id="costTrackerSetupCard">
-              <div class="cost-tracker-setup-copy">
-                <span class="setup-eyebrow">Cost tracker setup</span>
-                <h4>Name this cost tracker before saving</h4>
-                <p>For an unassigned tracker, enter a clear name here first. You can assign the T&amp;M/AFE later without losing this saved tracker.</p>
-              </div>
-              <label class="cost-tracker-name-field">
-                Cost Tracker Name <span class="required-pill">Required</span>
-                <input name="cost_tracker_name" placeholder="Example: West Plant insulation estimate, Tank 14 bid, Unassigned May 23 tracker" required />
-              </label>
-              <div class="cost-tracker-assignment-hint" id="costTrackerAssignmentHint">
-                Job assignment is optional. Leave T&amp;M/AFE blank to save this as an unassigned cost tracker.
-              </div>
+            <section class="cost-tracker-setup-card hidden" id="costTrackerSetupCard" aria-hidden="true">
+              <input type="hidden" name="cost_tracker_name" value="" />
             </section>
 
             <div class="sheet-scroll">
@@ -275,7 +244,7 @@
 
                 <div class="sheet-meta-grid">
                   <div class="sheet-meta-cell wide cost-tracker-name-meta">COST TRACKER NAME:<strong id="sheetTrackerNameDisplay">Untitled Cost Tracker</strong></div>
-                  <label class="sheet-meta-cell">DATE:<input name="cost_tracker_date" type="date" /></label>
+                  <label class="sheet-meta-cell project-dates-cell">PROJECT DATES:<input name="cost_tracker_date" type="text" readonly placeholder="Project dates" /></label>
                   <div class="sheet-meta-cell">T&amp;M/AFE<strong id="sheetJobNumber">—</strong></div>
                   <div class="sheet-meta-cell">CLIENT Requestor:<strong id="sheetClientName">—</strong></div>
                   <div class="sheet-meta-cell wide">PROJECT NAME:<strong id="sheetJobName">—</strong></div>
@@ -376,6 +345,7 @@
             </div>
                       <div class="form-actions sticky-actions builder-save-strip cost-tracker-save-strip">
               <button class="btn ghost" id="costTrackerBottomClearBtn" type="button">Clear</button>
+              <button class="btn ghost" id="downloadCostTrackerDraftBtn" type="button">Download Excel</button>
               <button class="btn primary builder-save-btn" type="submit">Save Cost Tracker</button>
             </div>
 
@@ -860,6 +830,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script src="app.js?v=20260609-dashboard-doc-indicators-short"></script>
+  <script src="app.js?v=20260616-timesheet-folder-save-fix"></script>
 </body>
 </html>

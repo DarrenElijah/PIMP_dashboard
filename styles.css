@@ -9818,3 +9818,1089 @@ body.job-timesheet-modal-open .topbar {
   opacity: 0.65;
   cursor: progress;
 }
+
+/* ========================================================================
+   OPEN JOBS / CLOSED JOBS INVOICE STATUS TABLE POLISH
+   ======================================================================== */
+.dashboard-active-jobs-table,
+.closed-jobs-table {
+  width: 100% !important;
+  min-width: 1280px !important;
+  table-layout: fixed !important;
+}
+
+.dashboard-active-jobs-table th,
+.dashboard-active-jobs-table td,
+.closed-jobs-table th,
+.closed-jobs-table td {
+  padding: 11px 9px !important;
+  vertical-align: middle !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(1),
+.dashboard-active-jobs-table td:nth-child(1),
+.closed-jobs-table th:nth-child(1),
+.closed-jobs-table td:nth-child(1) {
+  width: 8% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(2),
+.dashboard-active-jobs-table td:nth-child(2),
+.closed-jobs-table th:nth-child(2),
+.closed-jobs-table td:nth-child(2) {
+  width: 24% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(3),
+.dashboard-active-jobs-table td:nth-child(3),
+.closed-jobs-table th:nth-child(3),
+.closed-jobs-table td:nth-child(3) {
+  width: 13% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(4),
+.dashboard-active-jobs-table td:nth-child(4),
+.closed-jobs-table th:nth-child(4),
+.closed-jobs-table td:nth-child(4) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(5),
+.dashboard-active-jobs-table td:nth-child(5),
+.closed-jobs-table th:nth-child(5),
+.closed-jobs-table td:nth-child(5) {
+  width: 13% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(6),
+.dashboard-active-jobs-table td:nth-child(6),
+.closed-jobs-table th:nth-child(6),
+.closed-jobs-table td:nth-child(6) {
+  width: 12% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(7),
+.dashboard-active-jobs-table td:nth-child(7),
+.closed-jobs-table th:nth-child(7),
+.closed-jobs-table td:nth-child(7) {
+  width: 9% !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(8),
+.dashboard-active-jobs-table td:nth-child(8),
+.closed-jobs-table th:nth-child(8),
+.closed-jobs-table td:nth-child(8) {
+  width: 9% !important;
+  display: table-cell !important;
+}
+
+.dashboard-active-jobs-table th:nth-child(9),
+.dashboard-active-jobs-table td:nth-child(9),
+.closed-jobs-table th:nth-child(9),
+.closed-jobs-table td:nth-child(9) {
+  display: none !important;
+}
+
+.invoice-status-workflow-select {
+  width: min(210px, 100%) !important;
+  border-radius: 999px !important;
+  padding: 8px 32px 8px 11px !important;
+  font-size: 0.78rem !important;
+  font-weight: 900 !important;
+  cursor: pointer !important;
+}
+
+.invoice-status-workflow-select.is-saving {
+  opacity: 0.65;
+  cursor: progress !important;
+}
+
+.dashboard-no-invoice {
+  white-space: nowrap;
+}
+
+.closed-job-row .status.paid,
+.closed-job-row .invoice-status-workflow-select.paid {
+  background: #dcfce7 !important;
+  color: #166534 !important;
+}
+
+@media (max-width: 1200px) {
+  .dashboard-active-jobs-table,
+  .closed-jobs-table {
+    min-width: 1180px !important;
+  }
+}
+
+
+/* ========================================================================
+   FINAL COST TRACKER WINDOW CLEANUP + FIT-TO-SCREEN PATCH
+   ======================================================================== */
+#costTrackerForm .cost-tracker-setup-card,
+#costTrackerForm #costTrackerSetupCard,
+#costTrackerTemplateModalOverlay #costTrackerForm .cost-tracker-setup-card,
+#costTrackerTemplateModalOverlay #costTrackerForm #costTrackerSetupCard {
+  display: none !important;
+}
+
+#costTrackerForm .sheet-page-header.cost-tracker-window-toolbar,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-page-header.cost-tracker-window-toolbar {
+  position: static !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  padding: 10px 12px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #ffffff !important;
+  margin: 0 !important;
+}
+
+#costTrackerForm .sheet-page-header > div:first-child:not(.sheet-header-actions),
+#costTrackerForm #clearCostTrackerJobBtn,
+#costTrackerForm .sheet-page-header #resetCostTrackerBtn,
+#costTrackerForm .sheet-page-header #downloadCostTrackerDraftBtn,
+#costTrackerForm .sheet-page-header button[type="submit"] {
+  display: none !important;
+}
+
+#costTrackerForm .sheet-header-actions,
+#costTrackerForm .sheet-header-actions-only {
+  width: 100% !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+}
+
+#costTrackerForm .sheet-job-picker {
+  width: min(420px, 100%) !important;
+  margin-left: auto !important;
+}
+
+#costTrackerForm .sheet-scroll,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-scroll {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  padding: 8px !important;
+  background: #f8fafc !important;
+}
+
+#costTrackerForm .cost-sheet,
+#costTrackerTemplateModalOverlay #costTrackerForm .cost-sheet {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 6px 6px 14px !important;
+  box-shadow: none !important;
+}
+
+#costTrackerForm .sheet-title-row {
+  font-size: clamp(1rem, 1.25vw, 1.35rem) !important;
+  padding: 8px 0 7px !important;
+}
+
+#costTrackerForm .sheet-meta-grid {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(72px, 0.65fr) minmax(0, 1.35fr) !important;
+  width: 100% !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-meta-cell {
+  min-width: 0 !important;
+  gap: 4px !important;
+  padding: 2px 4px !important;
+  font-size: clamp(0.55rem, 0.62vw, 0.78rem) !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-meta-cell input,
+#costTrackerForm .sheet-meta-cell strong {
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+}
+
+#costTrackerForm .project-dates-cell input {
+  min-width: 92px !important;
+  font-weight: 700 !important;
+}
+
+#costTrackerForm .sheet-grid-layout,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 63.8%) minmax(0, 36.2%) !important;
+  gap: 6px !important;
+}
+
+#costTrackerForm .sheet-left-column,
+#costTrackerForm .sheet-right-column {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-table,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-table {
+  width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed !important;
+  font-size: clamp(0.5rem, 0.5vw, 0.72rem) !important;
+}
+
+#costTrackerForm .sheet-table th,
+#costTrackerForm .sheet-table td {
+  height: 18px !important;
+  min-height: 18px !important;
+  padding: 0 !important;
+  line-height: 1.02 !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-table input,
+#costTrackerForm .sheet-table select {
+  min-height: 17px !important;
+  height: 17px !important;
+  padding: 1px 2px !important;
+  font-size: inherit !important;
+}
+
+#costTrackerForm .desc-col { width: 19% !important; }
+#costTrackerForm .qty-col { width: 5.5% !important; }
+#costTrackerForm .hours-col { width: 7% !important; }
+#costTrackerForm .money-col { width: 7.5% !important; }
+#costTrackerForm .total-col { width: 9.2% !important; }
+#costTrackerForm .action-col { width: 3% !important; }
+#costTrackerForm .right-desc-col { width: 45% !important; }
+#costTrackerForm .right-cost-col { width: 17% !important; }
+#costTrackerForm .right-markup-col { width: 16% !important; }
+#costTrackerForm .right-total-col { width: 19% !important; }
+
+#costTrackerForm .sheet-summary-block {
+  margin: 18px 0 0 auto !important;
+  width: min(100%, 430px) !important;
+  grid-template-columns: minmax(0, 1.35fr) minmax(70px, 0.55fr) minmax(86px, 0.8fr) !important;
+  gap: 6px 0 !important;
+}
+
+#costTrackerForm .summary-label,
+#costTrackerForm .summary-profit-label {
+  font-size: clamp(0.8rem, 1vw, 1.25rem) !important;
+}
+
+#costTrackerForm .summary-profit-label {
+  padding-right: 64px !important;
+  margin-top: 12px !important;
+}
+
+#costTrackerForm .sheet-manual-total-overrides {
+  max-width: 100% !important;
+}
+
+#costTrackerForm .sheet-comments-grid {
+  width: 100% !important;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 0.35fr) !important;
+  gap: 6px !important;
+  margin-top: 18px !important;
+}
+
+#costTrackerForm .sheet-comments-grid textarea {
+  min-height: 92px !important;
+}
+
+#costTrackerForm .builder-save-strip.cost-tracker-save-strip,
+#costTrackerTemplateModalOverlay #costTrackerForm .builder-save-strip.cost-tracker-save-strip {
+  position: sticky !important;
+  bottom: 0 !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border-left: 0 !important;
+  border-right: 0 !important;
+  border-bottom: 0 !important;
+  padding: 12px 16px !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-card.cost-modal-card,
+#costTrackerTemplateModalOverlay .template-modal-card {
+  width: calc(100vw - 18px) !important;
+  max-width: calc(100vw - 18px) !important;
+  height: calc(100vh - 18px) !important;
+  max-height: calc(100vh - 18px) !important;
+  border-radius: 18px !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-header {
+  padding: 8px 12px !important;
+  min-height: 48px !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-header .eyebrow,
+#costTrackerTemplateModalOverlay .template-modal-header .template-modal-subtitle {
+  display: none !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-header h3 {
+  margin: 0 !important;
+  font-size: 1rem !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-body {
+  padding: 8px !important;
+  overflow-x: hidden !important;
+}
+
+@media (max-width: 980px) {
+  #costTrackerForm .sheet-grid-layout,
+  #costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
+    grid-template-columns: 1fr !important;
+  }
+  #costTrackerForm .sheet-comments-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ========================================================================
+   FINAL READABLE FULLSCREEN COST TRACKER + CLOSED JOBS CLEANUP
+   ======================================================================== */
+
+/* Closed Jobs should only show the closed jobs table/search area. */
+#jobsView .jobs-page-action-bar {
+  display: none !important;
+}
+
+#jobsView .jobs-page-layout {
+  gap: 0 !important;
+}
+
+/* Keep the removed T&M/AFE toolbar from appearing if older cached markup is present. */
+#costTrackerForm .cost-tracker-window-toolbar,
+#costTrackerTemplateModalOverlay #costTrackerForm .cost-tracker-window-toolbar,
+#costTrackerForm .sheet-job-picker,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-job-picker {
+  display: none !important;
+}
+
+/* Make the cost tracker edit popup use the full browser window. */
+#costTrackerTemplateModalOverlay.template-modal-overlay {
+  padding: 0 !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-card.cost-modal-card,
+#costTrackerTemplateModalOverlay .template-modal-card {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  border-radius: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-header {
+  flex: 0 0 auto !important;
+  min-height: 42px !important;
+  padding: 6px 12px !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-header h3 {
+  font-size: 1.05rem !important;
+  font-weight: 900 !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  background: #eef2f7 !important;
+}
+
+#costTrackerTemplateModalOverlay #costTrackerForm,
+#costTrackerForm.template-popup-form {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+/* Main page and popup both use all available width without clipping the sheet. */
+#costTrackerForm.sheet-panel {
+  width: 100% !important;
+}
+
+#costTrackerForm .sheet-scroll,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-scroll {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  overflow: auto !important;
+  padding: 8px !important;
+  background: #eef2f7 !important;
+}
+
+#costTrackerForm .cost-sheet,
+#costTrackerTemplateModalOverlay #costTrackerForm .cost-sheet {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  margin: 0 auto !important;
+  padding: 8px 8px 14px !important;
+  border: 2px solid #111827 !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+
+#costTrackerForm .sheet-title-row {
+  font-size: clamp(1.35rem, 1.65vw, 2rem) !important;
+  line-height: 1.05 !important;
+  font-weight: 900 !important;
+  padding: 8px 0 7px !important;
+}
+
+#costTrackerForm .sheet-meta-grid {
+  grid-template-columns: minmax(160px, 1.35fr) minmax(180px, 1.05fr) minmax(120px, 0.9fr) minmax(150px, 1.05fr) minmax(84px, 0.55fr) minmax(160px, 1.15fr) !important;
+  width: 100% !important;
+  overflow: visible !important;
+}
+
+#costTrackerForm .sheet-meta-cell {
+  min-height: 34px !important;
+  padding: 3px 5px !important;
+  font-size: clamp(0.78rem, 0.78vw, 1rem) !important;
+  line-height: 1.05 !important;
+  font-weight: 900 !important;
+  overflow: visible !important;
+}
+
+#costTrackerForm .sheet-meta-cell input,
+#costTrackerForm .sheet-meta-cell strong {
+  font-size: inherit !important;
+  font-weight: 900 !important;
+  line-height: 1.05 !important;
+}
+
+#costTrackerForm .sheet-grid-layout,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 64%) minmax(0, 36%) !important;
+  gap: 6px !important;
+  align-items: start !important;
+  overflow: visible !important;
+}
+
+#costTrackerForm .sheet-left-column,
+#costTrackerForm .sheet-right-column {
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+}
+
+#costTrackerForm .sheet-table,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-table {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+  border-collapse: collapse !important;
+  font-size: clamp(0.74rem, 0.72vw, 0.98rem) !important;
+  font-weight: 800 !important;
+}
+
+#costTrackerForm .sheet-table th,
+#costTrackerForm .sheet-table td {
+  height: 24px !important;
+  min-height: 24px !important;
+  padding: 1px 3px !important;
+  line-height: 1.05 !important;
+  font-weight: 800 !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  vertical-align: middle !important;
+}
+
+#costTrackerForm .sheet-table thead tr:not(.section-row) th {
+  font-size: clamp(0.64rem, 0.64vw, 0.88rem) !important;
+  font-weight: 900 !important;
+  white-space: normal !important;
+}
+
+#costTrackerForm .sheet-table .section-row th {
+  height: 26px !important;
+  font-size: clamp(0.8rem, 0.8vw, 1rem) !important;
+  font-weight: 900 !important;
+}
+
+#costTrackerForm .sheet-table input,
+#costTrackerForm .sheet-table select,
+#costTrackerForm .sheet-table .money-input,
+#costTrackerForm .sheet-table .money-output,
+#costTrackerForm .sheet-table .rate-output,
+#costTrackerForm .sheet-table td[id^="sheet"],
+#costTrackerForm .sheet-table tfoot td,
+#costTrackerForm .sheet-table tfoot th {
+  min-height: 22px !important;
+  height: 22px !important;
+  padding: 1px 3px !important;
+  font-size: clamp(0.78rem, 0.76vw, 1rem) !important;
+  font-weight: 900 !important;
+  line-height: 1.05 !important;
+  overflow: visible !important;
+}
+
+#costTrackerForm .sheet-table input[type="number"],
+#costTrackerForm .sheet-table .money-input,
+#costTrackerForm .sheet-table .money-output,
+#costTrackerForm .sheet-table .rate-output,
+#costTrackerForm .sheet-table td[id$="Cost"],
+#costTrackerForm .sheet-table td[id$="Rate"],
+#costTrackerForm .sheet-table tfoot td {
+  text-align: right !important;
+  white-space: nowrap !important;
+}
+
+#costTrackerForm .sheet-table input,
+#costTrackerForm .sheet-table select {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+#costTrackerForm .desc-col { width: 18.8% !important; }
+#costTrackerForm .qty-col { width: 5.2% !important; }
+#costTrackerForm .hours-col { width: 6.8% !important; }
+#costTrackerForm .money-col { width: 7.4% !important; }
+#costTrackerForm .total-col { width: 8.8% !important; }
+#costTrackerForm .action-col { width: 2.4% !important; }
+#costTrackerForm .right-desc-col { width: 42% !important; }
+#costTrackerForm .right-cost-col { width: 17% !important; }
+#costTrackerForm .right-markup-col { width: 15% !important; }
+#costTrackerForm .right-total-col { width: 23% !important; }
+
+#costTrackerForm .sheet-add-btn,
+#costTrackerForm .sheet-remove-btn {
+  font-size: 0.8rem !important;
+  font-weight: 900 !important;
+  padding: 0 2px !important;
+}
+
+#costTrackerForm .sheet-summary-block {
+  width: min(100%, 500px) !important;
+  margin: 14px 0 0 auto !important;
+  gap: 6px 0 !important;
+}
+
+#costTrackerForm .summary-label,
+#costTrackerForm .summary-value,
+#costTrackerForm .summary-mirror,
+#costTrackerForm .summary-profit-label,
+#costTrackerForm .summary-profit,
+#costTrackerForm .summary-margin-label,
+#costTrackerForm .summary-margin {
+  font-size: clamp(0.9rem, 0.95vw, 1.25rem) !important;
+  font-weight: 900 !important;
+  line-height: 1.08 !important;
+}
+
+#costTrackerForm .sheet-manual-total-overrides input,
+#costTrackerForm .sheet-comments-grid textarea,
+#costTrackerForm .sheet-comments-grid input {
+  font-size: clamp(0.9rem, 0.85vw, 1.05rem) !important;
+  font-weight: 800 !important;
+}
+
+#costTrackerForm .sheet-comments-grid {
+  width: 100% !important;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.34fr) !important;
+  gap: 6px !important;
+  margin-top: 12px !important;
+}
+
+#costTrackerForm .sheet-comments-grid textarea {
+  min-height: 86px !important;
+}
+
+#costTrackerForm .builder-save-strip.cost-tracker-save-strip,
+#costTrackerTemplateModalOverlay #costTrackerForm .builder-save-strip.cost-tracker-save-strip {
+  flex: 0 0 auto !important;
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 20 !important;
+  padding: 10px 14px !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  border-top: 1px solid #cbd5e1 !important;
+}
+
+@media (max-width: 1280px) {
+  #costTrackerForm .sheet-table,
+  #costTrackerTemplateModalOverlay #costTrackerForm .sheet-table {
+    font-size: 0.7rem !important;
+  }
+
+  #costTrackerForm .sheet-table input,
+  #costTrackerForm .sheet-table select,
+  #costTrackerForm .sheet-table .money-input,
+  #costTrackerForm .sheet-table .money-output,
+  #costTrackerForm .sheet-table .rate-output,
+  #costTrackerForm .sheet-table td[id^="sheet"],
+  #costTrackerForm .sheet-table tfoot td,
+  #costTrackerForm .sheet-table tfoot th {
+    font-size: 0.72rem !important;
+  }
+}
+
+@media (max-width: 980px) {
+  #costTrackerForm .sheet-grid-layout,
+  #costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  #costTrackerForm .sheet-meta-grid,
+  #costTrackerForm .sheet-comments-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ========================================================================
+   FINAL COST TRACKER FIT-TO-WINDOW VISUAL POLISH
+   ------------------------------------------------------------------------
+   This replaces the previous oversized text treatment with a cleaner,
+   spreadsheet-style fit. It prevents the right side from clipping by letting
+   CSS grid gaps participate in the layout instead of adding width beyond 100%.
+   ======================================================================== */
+
+/* The edit popup should be the full browser window, with no wasted margins. */
+#costTrackerTemplateModalOverlay.template-modal-overlay {
+  padding: 0 !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+  overflow: hidden !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-card.cost-modal-card,
+#costTrackerTemplateModalOverlay .template-modal-card {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  border-radius: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-header {
+  flex: 0 0 auto !important;
+  min-height: 40px !important;
+  padding: 6px 12px !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+  background: #ffffff !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-header h3 {
+  font-size: 1rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+}
+
+#costTrackerTemplateModalOverlay .template-modal-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  background: #eef2f7 !important;
+}
+
+#costTrackerTemplateModalOverlay #costTrackerForm,
+#costTrackerForm.template-popup-form {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+}
+
+/* Keep the old T&M/AFE toolbar hidden even if an older cached HTML copy appears. */
+#costTrackerForm .cost-tracker-window-toolbar,
+#costTrackerTemplateModalOverlay #costTrackerForm .cost-tracker-window-toolbar,
+#costTrackerForm .sheet-job-picker,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-job-picker {
+  display: none !important;
+}
+
+/* Full-width sheet area. The sheet scrolls vertically, but it no longer clips horizontally. */
+#costTrackerForm.sheet-panel {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+#costTrackerForm .sheet-scroll,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-scroll {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: auto !important;
+  padding: 6px !important;
+  background: #eef2f7 !important;
+}
+
+#costTrackerForm .cost-sheet,
+#costTrackerTemplateModalOverlay #costTrackerForm .cost-sheet {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 auto !important;
+  padding: 7px 7px 12px !important;
+  box-sizing: border-box !important;
+  border: 1.5px solid #111827 !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+}
+
+#costTrackerForm .sheet-title-row {
+  font-size: clamp(1.05rem, 1.15vw, 1.35rem) !important;
+  line-height: 1.08 !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em !important;
+  padding: 7px 0 6px !important;
+}
+
+#costTrackerForm .sheet-meta-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.08fr) minmax(0, 0.82fr) minmax(0, 1.02fr) minmax(68px, 0.48fr) minmax(0, 1.12fr) !important;
+  gap: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-meta-cell {
+  min-width: 0 !important;
+  min-height: 29px !important;
+  padding: 2px 4px !important;
+  font-size: clamp(0.62rem, 0.58vw, 0.78rem) !important;
+  line-height: 1.08 !important;
+  font-weight: 700 !important;
+  overflow: hidden !important;
+  white-space: normal !important;
+}
+
+#costTrackerForm .sheet-meta-cell input,
+#costTrackerForm .sheet-meta-cell strong {
+  min-width: 0 !important;
+  font-size: inherit !important;
+  font-weight: 700 !important;
+  line-height: 1.08 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Use fractional columns instead of percent + fixed gap, which caused the right side to overrun. */
+#costTrackerForm .sheet-grid-layout,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
+  width: 100% !important;
+  max-width: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.72fr) minmax(0, 0.98fr) !important;
+  gap: 5px !important;
+  align-items: start !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-left-column,
+#costTrackerForm .sheet-right-column,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-left-column,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-right-column {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+/* Cleaner spreadsheet sizing: readable, but not cartoonishly large. */
+#costTrackerForm .sheet-table,
+#costTrackerTemplateModalOverlay #costTrackerForm .sheet-table {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed !important;
+  border-collapse: collapse !important;
+  font-size: clamp(0.58rem, 0.52vw, 0.74rem) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.005em !important;
+}
+
+#costTrackerForm .sheet-table th,
+#costTrackerForm .sheet-table td {
+  height: 20px !important;
+  min-height: 20px !important;
+  padding: 1px 2px !important;
+  line-height: 1.1 !important;
+  font-weight: 600 !important;
+  overflow: hidden !important;
+  text-overflow: clip !important;
+  vertical-align: middle !important;
+}
+
+#costTrackerForm .sheet-table thead tr:not(.section-row) th {
+  font-size: clamp(0.54rem, 0.48vw, 0.66rem) !important;
+  font-weight: 700 !important;
+  line-height: 1.05 !important;
+  white-space: normal !important;
+}
+
+#costTrackerForm .sheet-table .section-row th {
+  height: 22px !important;
+  font-size: clamp(0.64rem, 0.58vw, 0.78rem) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.02em !important;
+}
+
+#costTrackerForm .sheet-table input,
+#costTrackerForm .sheet-table select,
+#costTrackerForm .sheet-table .money-input,
+#costTrackerForm .sheet-table .money-output,
+#costTrackerForm .sheet-table .rate-output,
+#costTrackerForm .sheet-table td[id^="sheet"],
+#costTrackerForm .sheet-table tfoot td,
+#costTrackerForm .sheet-table tfoot th {
+  min-height: 19px !important;
+  height: 19px !important;
+  padding: 1px 2px !important;
+  font-size: clamp(0.6rem, 0.54vw, 0.76rem) !important;
+  font-weight: 700 !important;
+  line-height: 1.08 !important;
+  overflow: hidden !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+#costTrackerForm .sheet-table input[type="number"],
+#costTrackerForm .sheet-table .money-input,
+#costTrackerForm .sheet-table .money-output,
+#costTrackerForm .sheet-table .rate-output,
+#costTrackerForm .sheet-table td[id$="Cost"],
+#costTrackerForm .sheet-table td[id$="Rate"],
+#costTrackerForm .sheet-table tfoot td {
+  text-align: right !important;
+  white-space: nowrap !important;
+}
+
+#costTrackerForm .sheet-table input,
+#costTrackerForm .sheet-table select {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Balanced column proportions to keep all 11-column left tables and 5-column right tables inside the sheet. */
+#costTrackerForm .desc-col { width: 20% !important; }
+#costTrackerForm .qty-col { width: 5% !important; }
+#costTrackerForm .hours-col { width: 6.2% !important; }
+#costTrackerForm .money-col { width: 7.2% !important; }
+#costTrackerForm .total-col { width: 8.4% !important; }
+#costTrackerForm .action-col { width: 2.4% !important; }
+#costTrackerForm .right-desc-col { width: 43% !important; }
+#costTrackerForm .right-cost-col { width: 17% !important; }
+#costTrackerForm .right-markup-col { width: 15% !important; }
+#costTrackerForm .right-total-col { width: 22.6% !important; }
+
+#costTrackerForm .sheet-add-btn,
+#costTrackerForm .sheet-remove-btn {
+  font-size: 0.68rem !important;
+  font-weight: 700 !important;
+  padding: 0 2px !important;
+  line-height: 1 !important;
+}
+
+#costTrackerForm .sheet-summary-block {
+  width: min(100%, 430px) !important;
+  margin: 10px 0 0 auto !important;
+  gap: 5px 0 !important;
+}
+
+#costTrackerForm .summary-label,
+#costTrackerForm .summary-value,
+#costTrackerForm .summary-mirror,
+#costTrackerForm .summary-profit-label,
+#costTrackerForm .summary-profit,
+#costTrackerForm .summary-margin-label,
+#costTrackerForm .summary-margin {
+  font-size: clamp(0.74rem, 0.72vw, 0.98rem) !important;
+  font-weight: 800 !important;
+  line-height: 1.08 !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+#costTrackerForm .sheet-manual-total-overrides input,
+#costTrackerForm .sheet-comments-grid textarea,
+#costTrackerForm .sheet-comments-grid input {
+  font-size: clamp(0.74rem, 0.68vw, 0.9rem) !important;
+  font-weight: 650 !important;
+}
+
+#costTrackerForm .sheet-comments-grid {
+  width: 100% !important;
+  max-width: 100% !important;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 0.32fr) !important;
+  gap: 6px !important;
+  margin-top: 9px !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-comments-grid textarea {
+  min-height: 72px !important;
+}
+
+#costTrackerForm .builder-save-strip.cost-tracker-save-strip,
+#costTrackerTemplateModalOverlay #costTrackerForm .builder-save-strip.cost-tracker-save-strip {
+  flex: 0 0 auto !important;
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 20 !important;
+  padding: 8px 12px !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  border-top: 1px solid #cbd5e1 !important;
+}
+
+/* Cost tracker preview/view window gets the same full-window fit treatment. */
+#costTrackerPreviewDialog.invoice-preview-dialog {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  overflow: hidden !important;
+}
+
+#costTrackerPreviewDialog .invoice-preview-card {
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  border-radius: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+#costTrackerPreviewContent.invoice-preview-content {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  width: 100% !important;
+  overflow: auto !important;
+  padding: 8px !important;
+  background: #eef2f7 !important;
+}
+
+#costTrackerPreviewContent .cost-tracker-preview-shell,
+#costTrackerPreviewContent .spreadsheet-preview-shell,
+#costTrackerPreviewContent .preview-sheet-scroll,
+#costTrackerPreviewContent .print-cost-tracker,
+#costTrackerPreviewContent .print-cost-sheet {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+#costTrackerPreviewContent .cost-sheet-preview,
+#costTrackerPreviewContent .original-cost-template-preview {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  margin: 0 auto !important;
+  overflow: hidden !important;
+}
+
+#costTrackerPreviewContent .original-cost-template-preview .sheet-grid-layout,
+#costTrackerPreviewContent .cost-sheet-preview .sheet-grid-layout {
+  width: 100% !important;
+  max-width: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.72fr) minmax(0, 0.98fr) !important;
+  gap: 5px !important;
+  overflow: hidden !important;
+}
+
+#costTrackerPreviewContent .cost-sheet-preview .sheet-left-column,
+#costTrackerPreviewContent .cost-sheet-preview .sheet-right-column,
+#costTrackerPreviewContent .original-cost-template-preview .sheet-left-column,
+#costTrackerPreviewContent .original-cost-template-preview .sheet-right-column {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+#costTrackerPreviewContent .cost-sheet-preview .sheet-table,
+#costTrackerPreviewContent .original-cost-template-preview .sheet-table {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  table-layout: fixed !important;
+  font-size: clamp(0.58rem, 0.52vw, 0.74rem) !important;
+}
+
+#costTrackerPreviewContent .cost-sheet-preview td,
+#costTrackerPreviewContent .cost-sheet-preview th,
+#costTrackerPreviewContent .original-cost-template-preview td,
+#costTrackerPreviewContent .original-cost-template-preview th {
+  height: 20px !important;
+  padding: 1px 2px !important;
+  line-height: 1.08 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  font-weight: 650 !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+@media (max-width: 1180px) {
+  #costTrackerForm .sheet-table,
+  #costTrackerTemplateModalOverlay #costTrackerForm .sheet-table,
+  #costTrackerPreviewContent .cost-sheet-preview .sheet-table,
+  #costTrackerPreviewContent .original-cost-template-preview .sheet-table {
+    font-size: 0.55rem !important;
+  }
+
+  #costTrackerForm .sheet-table input,
+  #costTrackerForm .sheet-table select,
+  #costTrackerForm .sheet-table .money-input,
+  #costTrackerForm .sheet-table .money-output,
+  #costTrackerForm .sheet-table .rate-output,
+  #costTrackerForm .sheet-table td[id^="sheet"] {
+    font-size: 0.57rem !important;
+  }
+}
+
+@media (max-width: 980px) {
+  #costTrackerForm .sheet-grid-layout,
+  #costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout,
+  #costTrackerPreviewContent .original-cost-template-preview .sheet-grid-layout,
+  #costTrackerPreviewContent .cost-sheet-preview .sheet-grid-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  #costTrackerForm .sheet-meta-grid,
+  #costTrackerForm .sheet-comments-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -18243,15 +18243,8 @@ This removes it from the job documents list.`)) return;
       if (headerTitle) headerTitle.id = "jobFormTitle";
     }
 
-    if (!qs("#openJobModalBtn")) {
-      const header = qs("#jobsView .table-panel-header") || qs("#jobsView");
-      const button = document.createElement("button");
-      button.className = "btn primary";
-      button.id = "openJobModalBtn";
-      button.type = "button";
-      button.textContent = "+ Create Job";
-      header?.appendChild(button);
-    }
+    // Closed Jobs should not show a local create-job panel or button.
+    // The global "+ New Job" button still opens this modal when a new job is needed.
 
     return overlay;
   }
@@ -28847,4 +28840,1479 @@ This removes it from the job documents list.`)) return;
   window.setTimeout(initialize, 0);
   window.setTimeout(initialize, 250);
   window.setTimeout(initialize, 1000);
+})();
+
+/* ========================================================================
+   FINAL OPEN / CLOSED JOBS WORKFLOW BY INVOICE STATUS
+   ------------------------------------------------------------------------
+   - Dashboard page is now Open Jobs.
+   - Jobs page is now Closed Jobs.
+   - Dashboard table shows Invoice Status instead of Project Status.
+   - Changing an invoice to Paid removes it from Open Jobs and moves it to
+     Closed Jobs. Changing it away from Paid moves it back to Open Jobs.
+   - Open Jobs sort by latest job year first, then lower job number first,
+     then invoice status: Unsent, Awaiting Approval, Approved.
+   ======================================================================== */
+(function installOpenClosedJobsByInvoiceStatusFinal() {
+  if (window.__pimpOpenClosedJobsByInvoiceStatusFinalInstalled) return;
+  window.__pimpOpenClosedJobsByInvoiceStatusFinalInstalled = true;
+
+  const qs = (selector, root = document) => root.querySelector(selector);
+  const html = (value) => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+  const attr = html;
+  const toNumber = (value) => {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const invoiceOrder = { unsent: 0, awaiting_approval: 1, approved: 2, paid: 3 };
+
+  function parseJsonSafe(value) {
+    if (!value) return {};
+    if (typeof value === "object") return value || {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function timeValue(row) {
+    const candidates = [
+      row?.last_synced_at,
+      row?.updated_at,
+      row?.created_at,
+      row?.start_date,
+      row?.invoice_date,
+      row?.due_date,
+      row?.work_date
+    ];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const parsed = Date.parse(candidate);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  }
+
+  function normalizeInvoiceStatus(status) {
+    const value = String(status || "unsent").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    if (["awaiting_approval", "awaitingapproval", "awaiting", "pending", "draft"].includes(value)) return "awaiting_approval";
+    if (["approved", "approve"].includes(value)) return "approved";
+    if (value === "paid") return "paid";
+    return "unsent";
+  }
+
+  function invoiceStatusLabel(status) {
+    return {
+      unsent: "Unsent",
+      awaiting_approval: "Awaiting Approval",
+      approved: "Approved",
+      paid: "Paid"
+    }[normalizeInvoiceStatus(status)] || "Unsent";
+  }
+
+  function invoiceStatusOptions(current) {
+    const selected = normalizeInvoiceStatus(current);
+    return ["unsent", "awaiting_approval", "approved", "paid"]
+      .map((value) => `<option value="${value}"${value === selected ? " selected" : ""}>${invoiceStatusLabel(value)}</option>`)
+      .join("");
+  }
+
+  function latestInvoiceForJob(jobId) {
+    return (state?.data?.invoices || [])
+      .filter((invoice) => String(invoice.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function latestCostTrackerForJob(jobId) {
+    return (state?.data?.costTrackers || [])
+      .filter((tracker) => String(tracker.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function moneyLabel(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return toNumber(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+
+  function dateLabel(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    if (!value) return "-";
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-US");
+  }
+
+  function rateTotalForTracker(tracker) {
+    if (!tracker) return null;
+    try {
+      if (typeof costTrackerQuoted === "function") {
+        const quoted = toNumber(costTrackerQuoted(tracker));
+        if (quoted || tracker.quoted_price !== undefined) return quoted;
+      }
+    } catch {}
+    const summary = parseJsonSafe(tracker.summary);
+    const candidates = [
+      summary.rateTotal,
+      summary.rate_total,
+      summary.quotedTotal,
+      summary.quoted_total,
+      summary.quotedPrice,
+      summary.quoted_price,
+      tracker.rate_total,
+      tracker.quoted_price
+    ];
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null && candidate !== "") return toNumber(candidate);
+    }
+    return 0;
+  }
+
+  function workdaysForJob(job) {
+    try { if (typeof window.__pimpWeekdayCount === "function") return toNumber(window.__pimpWeekdayCount(job?.start_date, job?.end_date || job?.start_date)); } catch {}
+    try { if (typeof window.__pimpWorkdaysForJobFinal === "function") return toNumber(window.__pimpWorkdaysForJobFinal(job)); } catch {}
+    return toNumber(job?.total_job_days || job?.total_days || job?.job_days);
+  }
+
+  function uniqueDailyTimesheets(jobId) {
+    try { if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") return window.__pimpUniqueDailyTimesheetsForJob(jobId); } catch {}
+    const seen = new Set();
+    (state?.data?.timesheets || []).forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      const summary = parseJsonSafe(entry.summary);
+      const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+
+  function uploadedDocsForJob(jobId) {
+    return (state?.data?.documents || []).filter((doc) => String(doc.job_id || "") === String(jobId || ""));
+  }
+
+  function documentIndicators(job) {
+    const docs = uploadedDocsForJob(job.id);
+    const trackerMade = Boolean(latestCostTrackerForJob(job.id)) || docs.some((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const invoiceMade = Boolean(latestInvoiceForJob(job.id)) || docs.some((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const timesheetsMade = uniqueDailyTimesheets(job.id) > 0 || docs.some((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    return `
+      <div class="job-summary-chips professional-job-chips dashboard-job-chips dashboard-document-indicators" aria-label="Saved job documents">
+        <span class="job-doc-chip dashboard-doc-indicator ${trackerMade ? "made" : "missing"}">Cost Tracker</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${invoiceMade ? "made" : "missing"}">Invoice</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${timesheetsMade ? "made" : "missing"}">Timesheets</span>
+      </div>
+    `;
+  }
+
+  function firstJobNumber(job) {
+    const text = String(job?.job_number || "");
+    const match = text.match(/\d+/);
+    return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+  }
+
+  function jobYear(job) {
+    const text = String(job?.job_number || "");
+    const dashed = text.match(/(?:^|[-\s])(\d{2,4})\s*$/);
+    if (dashed) {
+      const raw = Number(dashed[1]);
+      if (Number.isFinite(raw)) return raw < 100 ? 2000 + raw : raw;
+    }
+    const explicitDate = job?.start_date || job?.end_date || job?.created_at || job?.last_synced_at || job?.updated_at;
+    const parsed = Date.parse(explicitDate || "");
+    return Number.isFinite(parsed) ? new Date(parsed).getFullYear() : 0;
+  }
+
+  function compareOpenJobs(a, b) {
+    const yearDiff = jobYear(b) - jobYear(a);
+    if (yearDiff) return yearDiff;
+
+    const numberDiff = firstJobNumber(a) - firstJobNumber(b);
+    if (numberDiff) return numberDiff;
+
+    const invoiceA = latestInvoiceForJob(a.id);
+    const invoiceB = latestInvoiceForJob(b.id);
+    const statusDiff = (invoiceOrder[normalizeInvoiceStatus(invoiceA?.status)] ?? 0) - (invoiceOrder[normalizeInvoiceStatus(invoiceB?.status)] ?? 0);
+    if (statusDiff) return statusDiff;
+
+    const timeDiff = timeValue(b) - timeValue(a);
+    if (timeDiff) return timeDiff;
+    return String(a.job_number || "").localeCompare(String(b.job_number || ""), undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function matchesTerm(job, invoice, term) {
+    if (!term) return true;
+    const tracker = latestCostTrackerForJob(job.id);
+    const terms = [
+      job.job_number,
+      job.job_name,
+      job.company_name,
+      job.location,
+      invoiceStatusLabel(invoice?.status),
+      invoice?.invoice_number,
+      tracker ? "cost tracker made" : "cost tracker missing",
+      invoice ? "invoice made" : "invoice missing",
+      uniqueDailyTimesheets(job.id) ? "timesheets made" : "timesheets missing"
+    ];
+    if (!invoice) terms.push("unsent", "no invoice");
+    return terms.join(" ").toLowerCase().includes(term);
+  }
+
+  function openJobs() {
+    const term = String(qs("#dashboardActiveJobsSearch")?.value || "").toLowerCase().trim();
+    return (state?.data?.jobs || [])
+      .filter((job) => normalizeInvoiceStatus(latestInvoiceForJob(job.id)?.status) !== "paid")
+      .filter((job) => matchesTerm(job, latestInvoiceForJob(job.id), term))
+      .sort(compareOpenJobs);
+  }
+
+  function closedJobs() {
+    const term = String(qs("#jobsSearch")?.value || "").toLowerCase().trim();
+    return (state?.data?.jobs || [])
+      .filter((job) => normalizeInvoiceStatus(latestInvoiceForJob(job.id)?.status) === "paid")
+      .filter((job) => matchesTerm(job, latestInvoiceForJob(job.id), term))
+      .sort(compareOpenJobs);
+  }
+
+  function normalizeDashboardLabels() {
+    const dashboardNav = qs('.nav-btn[data-view="dashboard"]');
+    const jobsNav = qs('.nav-btn[data-view="jobs"]');
+    if (dashboardNav) dashboardNav.textContent = "Open Jobs";
+    if (jobsNav) jobsNav.textContent = "Closed Jobs";
+
+    if (state?.view === "dashboard") {
+      const title = qs("#viewTitle");
+      if (title) title.textContent = "Open Jobs";
+    } else if (state?.view === "jobs") {
+      const title = qs("#viewTitle");
+      if (title) title.textContent = "Closed Jobs";
+    }
+
+    const dashboardTitle = qs("#dashboardMainJobsPanel h3");
+    if (dashboardTitle) dashboardTitle.textContent = "Open Jobs";
+    const dashboardCopy = qs("#dashboardMainJobsPanel .tiny");
+    if (dashboardCopy) dashboardCopy.textContent = "Review open jobs by invoice status, update invoice status, view document status, review rate totals, and open job details.";
+    const dashboardSearch = qs("#dashboardActiveJobsSearch");
+    if (dashboardSearch) dashboardSearch.placeholder = "Search open jobs...";
+
+    const jobsActionEyebrow = qs("#jobsView .jobs-page-action-bar .eyebrow");
+    if (jobsActionEyebrow) jobsActionEyebrow.textContent = "Closed Jobs";
+    const jobsActionTitle = qs("#jobsView .jobs-page-action-bar h3");
+    if (jobsActionTitle) jobsActionTitle.textContent = "Manage closed jobs";
+    const jobsActionCopy = qs("#jobsView .jobs-page-action-bar .tiny");
+    if (jobsActionCopy) jobsActionCopy.textContent = "Jobs move here automatically when their invoice status is marked Paid.";
+    const jobsTableTitle = qs("#jobsView .table-panel .panel-header h3");
+    if (jobsTableTitle) jobsTableTitle.textContent = "Closed Jobs";
+    const jobsSearch = qs("#jobsSearch");
+    if (jobsSearch) jobsSearch.placeholder = "Search closed jobs...";
+  }
+
+  function normalizeDashboardHeader() {
+    const headerRow = qs(".dashboard-active-jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Invoice Status", "Dates", "Rate Total", "Actions"]
+      .map((label) => `<th>${html(label)}</th>`)
+      .join("");
+  }
+
+  function normalizeClosedJobsHeader() {
+    const table = qs("#jobsTable")?.closest("table");
+    const headerRow = table?.querySelector("thead tr");
+    if (!headerRow) return;
+    table.classList.add("closed-jobs-table");
+    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Invoice Status", "Dates", "Rate Total", "Actions"]
+      .map((label) => `<th>${html(label)}</th>`)
+      .join("");
+  }
+
+  function jobDateMarkup(job) {
+    const days = workdaysForJob(job);
+    const dateRange = `${dateLabel(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${dateLabel(job.end_date)}` : ""}`;
+    const daysText = days ? `${days} workday${toNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
+    return `
+      <span class="job-date-range">${html(dateRange)}</span>
+      <span class="job-workday-count">${html(daysText)}</span>
+    `;
+  }
+
+  function invoiceStatusControl(invoice, title, context) {
+    if (!invoice) return `<span class="status unsent dashboard-no-invoice" title="No invoice is attached yet">No Invoice</span>`;
+    const status = normalizeInvoiceStatus(invoice.status);
+    return `
+      <select class="dashboard-inline-status-select invoice-status-workflow-select status ${attr(status)}"
+        data-${context}-invoice-status-id="${attr(invoice.id)}"
+        aria-label="Change invoice status for ${attr(invoice.invoice_number || title)}">
+        ${invoiceStatusOptions(status)}
+      </select>
+    `;
+  }
+
+  function renderOpenJobsDashboardFinal() {
+    normalizeDashboardLabels();
+    normalizeDashboardHeader();
+    const table = qs("#dashboardActiveJobsTable");
+    const count = qs("#dashboardActiveJobsCount");
+    if (!table) return;
+
+    const rows = openJobs();
+    if (count) count.textContent = rows.length;
+
+    table.innerHTML = rows.map((job) => {
+      const tracker = latestCostTrackerForJob(job.id);
+      const invoice = latestInvoiceForJob(job.id);
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      return `
+        <tr class="job-main-row professional-job-row dashboard-active-job-row open-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
+          <td data-label="Project Name" class="job-name-cell">
+            <div class="job-name-stack dashboard-project-stack">
+              <strong>${html(job.job_name || "-")}</strong>
+              ${documentIndicators(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
+          <td data-label="Invoice Status" class="dashboard-invoice-status-cell">${invoiceStatusControl(invoice, title, "open-jobs")}</td>
+          <td data-label="Dates" class="job-dates-cell">${jobDateMarkup(job)}</td>
+          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
+          <td data-label="Actions" class="dashboard-actions-cell">
+            <div class="dashboard-actions-inline">
+              <button class="link-btn job-table-action view" data-open-job-details-modal="${attr(job.id)}" type="button" title="Open job details">Details</button>
+              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="8" class="muted">No open jobs found.</td></tr>`;
+  }
+
+  function renderClosedJobsFinal() {
+    normalizeDashboardLabels();
+    normalizeClosedJobsHeader();
+    const table = qs("#jobsTable");
+    const count = qs("#jobsCount");
+    if (!table) return;
+
+    const rows = closedJobs();
+    if (count) count.textContent = rows.length;
+
+    table.innerHTML = rows.map((job) => {
+      const tracker = latestCostTrackerForJob(job.id);
+      const invoice = latestInvoiceForJob(job.id);
+      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      return `
+        <tr class="job-main-row professional-job-row closed-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
+          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
+          <td data-label="Project Name" class="job-name-cell">
+            <div class="job-name-stack">
+              <strong>${html(job.job_name || "-")}</strong>
+              ${documentIndicators(job)}
+            </div>
+          </td>
+          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
+          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
+          <td data-label="Invoice Status" class="job-status-cell">${invoiceStatusControl(invoice, title, "closed-jobs")}</td>
+          <td data-label="Dates" class="job-dates-cell">${jobDateMarkup(job)}</td>
+          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
+          <td data-label="Actions" class="actions-cell job-actions-cell">
+            <button class="link-btn job-table-action view" data-open-job-details-modal="${attr(job.id)}" type="button" title="Open job details">Details</button>
+            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join("") || `<tr><td colspan="8" class="muted">No closed jobs found.</td></tr>`;
+  }
+
+  async function saveInvoiceStatus(invoiceId, nextStatus, selectElement) {
+    const status = normalizeInvoiceStatus(nextStatus);
+    const existing = (state?.data?.invoices || []).find((invoice) => String(invoice.id || "") === String(invoiceId || ""));
+    if (!existing) return;
+    if (!state?.supabase || !state?.session) {
+      if (typeof showToast === "function") showToast("Sign in before changing invoice status.", true);
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      return;
+    }
+
+    if (selectElement) {
+      selectElement.disabled = true;
+      selectElement.classList.add("is-saving");
+    }
+
+    try {
+      const now = new Date().toISOString();
+      const { error } = await state.supabase.from("invoices").update({ status, last_synced_at: now }).eq("id", invoiceId);
+      if (error) throw error;
+
+      state.data.invoices = (state.data.invoices || []).map((invoice) =>
+        String(invoice.id || "") === String(invoiceId || "")
+          ? { ...invoice, status, last_synced_at: now }
+          : invoice
+      );
+
+      try { if (typeof renderInvoices === "function") renderInvoices(); } catch {}
+      try { if (typeof renderStats === "function") renderStats(); } catch {}
+      renderOpenJobsDashboardFinal();
+      renderClosedJobsFinal();
+
+      if (typeof showToast === "function") {
+        showToast(status === "paid" ? "Invoice marked Paid. Job moved to Closed Jobs." : `Invoice status changed to ${invoiceStatusLabel(status)}.`);
+      }
+    } catch (error) {
+      if (selectElement) selectElement.value = normalizeInvoiceStatus(existing.status);
+      if (typeof showToast === "function") showToast(error?.message || "Invoice status could not be updated.", true);
+    } finally {
+      if (selectElement) {
+        selectElement.disabled = false;
+        selectElement.classList.remove("is-saving");
+      }
+    }
+  }
+
+  function editDashboardJob(jobId) {
+    if (!jobId) return;
+    try {
+      if (typeof window.loadJobIntoForm === "function") window.loadJobIntoForm((state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || "")));
+      else if (typeof loadJobIntoForm === "function") loadJobIntoForm((state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || "")));
+    } catch {}
+  }
+
+  function deleteDashboardJob(jobId) {
+    if (!jobId) return;
+    if (typeof window.deleteDashboardRecord === "function") window.deleteDashboardRecord("jobs", jobId);
+    else if (typeof deleteDashboardRecord === "function") deleteDashboardRecord("jobs", jobId);
+  }
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.("#dashboardActiveJobsSearch")) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      renderOpenJobsDashboardFinal();
+    }
+    if (event.target?.matches?.("#jobsSearch")) {
+      window.setTimeout(renderClosedJobsFinal, 0);
+    }
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    const openSelect = event.target?.closest?.("[data-open-jobs-invoice-status-id]");
+    const closedSelect = event.target?.closest?.("[data-closed-jobs-invoice-status-id]");
+    if (!openSelect && !closedSelect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    const select = openSelect || closedSelect;
+    const invoiceId = openSelect?.dataset.openJobsInvoiceStatusId || closedSelect?.dataset.closedJobsInvoiceStatusId;
+    saveInvoiceStatus(invoiceId, select.value, select);
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const editButton = event.target?.closest?.("[data-dashboard-edit-job]");
+    const deleteButton = event.target?.closest?.("[data-dashboard-delete-job]");
+    if (!editButton && !deleteButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    if (editButton) editDashboardJob(editButton.dataset.dashboardEditJob);
+    if (deleteButton) deleteDashboardJob(deleteButton.dataset.dashboardDeleteJob);
+  }, true);
+
+  window.renderDashboardActiveJobs = renderOpenJobsDashboardFinal;
+  window.renderJobs = renderClosedJobsFinal;
+  try { renderDashboardActiveJobs = renderOpenJobsDashboardFinal; } catch {}
+  try { renderJobs = renderClosedJobsFinal; } catch {}
+
+  const previousShowView = typeof window.showView === "function" ? window.showView : (typeof showView === "function" ? showView : null);
+  if (previousShowView && !previousShowView.__openClosedJobsInvoiceStatusWrapped) {
+    const wrappedShowView = function showOpenClosedJobsView(viewName) {
+      const result = previousShowView.apply(this, arguments);
+      normalizeDashboardLabels();
+      if (viewName === "dashboard") renderOpenJobsDashboardFinal();
+      if (viewName === "jobs") renderClosedJobsFinal();
+      return result;
+    };
+    wrappedShowView.__openClosedJobsInvoiceStatusWrapped = true;
+    window.showView = wrappedShowView;
+    try { showView = wrappedShowView; } catch {}
+  }
+
+  const previousDashboardLists = typeof window.renderDashboardLists === "function" ? window.renderDashboardLists : (typeof renderDashboardLists === "function" ? renderDashboardLists : null);
+  if (previousDashboardLists && !previousDashboardLists.__openClosedJobsInvoiceStatusWrapped) {
+    const wrappedDashboardLists = function renderDashboardListsOpenJobsFinal() {
+      const result = previousDashboardLists.apply(this, arguments);
+      renderOpenJobsDashboardFinal();
+      return result;
+    };
+    wrappedDashboardLists.__openClosedJobsInvoiceStatusWrapped = true;
+    window.renderDashboardLists = wrappedDashboardLists;
+    try { renderDashboardLists = wrappedDashboardLists; } catch {}
+  }
+
+  const previousRenderAll = typeof window.renderAll === "function" ? window.renderAll : (typeof renderAll === "function" ? renderAll : null);
+  if (previousRenderAll && !previousRenderAll.__openClosedJobsInvoiceStatusWrapped) {
+    const wrappedRenderAll = function renderAllOpenClosedJobsFinal() {
+      const result = previousRenderAll.apply(this, arguments);
+      normalizeDashboardLabels();
+      renderOpenJobsDashboardFinal();
+      renderClosedJobsFinal();
+      return result;
+    };
+    wrappedRenderAll.__openClosedJobsInvoiceStatusWrapped = true;
+    window.renderAll = wrappedRenderAll;
+    try { renderAll = wrappedRenderAll; } catch {}
+  }
+
+  function initialize() {
+    normalizeDashboardLabels();
+    renderOpenJobsDashboardFinal();
+    renderClosedJobsFinal();
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  window.setTimeout(initialize, 0);
+  window.setTimeout(initialize, 250);
+  window.setTimeout(initialize, 1000);
+})();
+
+
+/* ========================================================================
+   FINAL COST TRACKER WINDOW CLEANUP REQUEST PATCH
+   ------------------------------------------------------------------------
+   - Removes the editable Cost Tracker Name card from the cost tracker window.
+   - Keeps a hidden auto-generated tracker name so saving still works.
+   - Uses the project date range instead of today's date in the sheet header.
+   - Adds Material/Labor/Total fill-in lines to Internal Comments.
+   ======================================================================== */
+(function finalCostTrackerWindowCleanupPatch() {
+  const PATCH_FLAG = "__pimpFinalCostTrackerWindowCleanupPatch";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  const INTERNAL_TEMPLATE = "Material: $\nLabor: $\nTotal: $";
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function text(value) {
+    return String(value ?? "").replace(/\s+/g, " ").trim();
+  }
+
+  function setValue(form, name, value) {
+    const field = form?.querySelector?.(`[name="${CSS.escape(name)}"]`);
+    if (field) field.value = value ?? "";
+  }
+
+  function getValue(form, name) {
+    return form?.querySelector?.(`[name="${CSS.escape(name)}"]`)?.value ?? "";
+  }
+
+  function getJob(jobId) {
+    const id = String(jobId || "");
+    if (!id) return null;
+    try {
+      if (typeof findJob === "function") return findJob(id) || null;
+    } catch {}
+    try {
+      return (state?.data?.jobs || []).find((job) => String(job.id || "") === id) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function selectedCostTrackerJob() {
+    const form = qs("#costTrackerForm");
+    return getJob(getValue(form, "job_id"));
+  }
+
+  function trackerNameForJob(job) {
+    if (!job) return "Unassigned Cost Tracker";
+    const parts = [job.job_number, job.job_name].map(text).filter(Boolean);
+    return parts.join(" ") || text(job.job_number) || text(job.job_name) || "Cost Tracker";
+  }
+
+  function usDate(value) {
+    if (!value) return "";
+    try {
+      if (typeof formatDate === "function") return formatDate(value);
+    } catch {}
+    const date = new Date(`${value}T00:00:00`);
+    if (!Number.isNaN(date.getTime())) return date.toLocaleDateString("en-US");
+    return String(value);
+  }
+
+  function projectDateRange(job) {
+    if (!job) return "";
+    const saved = text(job.job_dates);
+    if (saved && !/^t\s*&\s*m$/i.test(saved)) return saved;
+    const start = usDate(job.start_date);
+    const end = usDate(job.end_date || job.start_date);
+    if (start && end && start !== end) return `${start} to ${end}`;
+    return start || end || "";
+  }
+
+  function ensureHiddenTrackerName() {
+    const form = qs("#costTrackerForm");
+    if (!form) return null;
+
+    let hidden = qs('#costTrackerForm input[name="cost_tracker_name"]');
+    const existingValue = hidden?.value || qs("#sheetTrackerNameDisplay")?.textContent || "";
+
+    const card = qs("#costTrackerSetupCard");
+    if (card) {
+      const cardHidden = qs('input[type="hidden"][name="cost_tracker_name"]', card);
+      const hasEditableName = Boolean(qs('input:not([type="hidden"])[name="cost_tracker_name"]', card));
+      if (card.dataset.finalHiddenNameOnly !== "true" || hasEditableName || !cardHidden) {
+        card.innerHTML = '<input type="hidden" name="cost_tracker_name" value="" />';
+        card.dataset.finalHiddenNameOnly = "true";
+      }
+      card.classList.add("hidden");
+      card.setAttribute("aria-hidden", "true");
+      hidden = qs('input[name="cost_tracker_name"]', card);
+    }
+
+    if (!hidden) {
+      hidden = document.createElement("input");
+      hidden.type = "hidden";
+      hidden.name = "cost_tracker_name";
+      form.prepend(hidden);
+    }
+
+    hidden.type = "hidden";
+    hidden.required = false;
+    if (!hidden.value) hidden.value = text(existingValue) || trackerNameForJob(selectedCostTrackerJob());
+    return hidden;
+  }
+
+  function syncTrackerNameDisplay() {
+    const hidden = ensureHiddenTrackerName();
+    if (!hidden) return;
+    const job = selectedCostTrackerJob();
+    const name = trackerNameForJob(job);
+    if (job || !text(hidden.value)) hidden.value = name;
+    const display = qs("#sheetTrackerNameDisplay");
+    if (display && name) display.textContent = name;
+  }
+
+  function syncProjectDates(job = null) {
+    const form = qs("#costTrackerForm");
+    const input = qs('[name="cost_tracker_date"]', form || document);
+    if (!input) return;
+    const activeJob = job || selectedCostTrackerJob();
+    const range = projectDateRange(activeJob);
+    try { input.type = "text"; } catch {}
+    input.readOnly = true;
+    input.placeholder = "Project dates";
+    input.value = range || "";
+  }
+
+  function ensureInternalCommentsTemplate() {
+    const form = qs("#costTrackerForm");
+    if (!form) return;
+    const grid = qs(".sheet-comments-grid", form);
+    if (!grid) return;
+
+    let label = qs('[name="internal_comments"]', form)?.closest("label");
+    if (!label) {
+      label = document.createElement("label");
+      label.className = "internal-comments-field";
+      label.innerHTML = '<span>Internal Comments:</span><textarea name="internal_comments" rows="7" placeholder="Internal notes only. These do not transfer to the invoice."></textarea><span class="tiny">These comments stay on the cost tracker only.</span>';
+      const byWhom = qs('[name="by_whom"]', form)?.closest("label");
+      if (byWhom) grid.insertBefore(label, byWhom);
+      else grid.appendChild(label);
+    }
+
+    label.classList.add("internal-comments-field");
+    const area = qs('[name="internal_comments"]', label);
+    if (!area) return;
+    area.placeholder = INTERNAL_TEMPLATE;
+    const current = String(area.value || "").trim();
+    if (!current) area.value = INTERNAL_TEMPLATE;
+  }
+
+  function finalizeCostTrackerWindow(job = null) {
+    const form = qs("#costTrackerForm");
+    if (!form) return;
+    ensureHiddenTrackerName();
+    syncTrackerNameDisplay();
+    syncProjectDates(job);
+    ensureInternalCommentsTemplate();
+
+    qsa("#clearCostTrackerJobBtn", form).forEach((button) => button.remove());
+    qsa(".sheet-page-header #resetCostTrackerBtn, .sheet-page-header #downloadCostTrackerDraftBtn, .sheet-page-header button[type='submit']", form).forEach((button) => button.remove());
+    qsa(".sheet-page-header h3, .sheet-page-header p.tiny", form).forEach((node) => node.remove());
+  }
+
+  function reassignFunction(name, replacement) {
+    try { window[name] = replacement; } catch {}
+    try { globalThis[name] = replacement; } catch {}
+    try { eval(`${name} = window["${name}"]`); } catch {}
+  }
+
+  function wrapFunction(name, after) {
+    let previous = null;
+    try { previous = window[name]; } catch {}
+    if (typeof previous !== "function") {
+      try { previous = eval(name); } catch {}
+    }
+    if (typeof previous !== "function" || previous.__pimpFinalCostTrackerWindowWrapped) return;
+    const wrapped = function finalCostTrackerWindowWrapper() {
+      const result = previous.apply(this, arguments);
+      const maybeJob = arguments[0] && typeof arguments[0] === "object" ? arguments[0] : null;
+      window.setTimeout(() => after(maybeJob), 0);
+      window.setTimeout(() => after(maybeJob), 100);
+      return result;
+    };
+    wrapped.__pimpFinalCostTrackerWindowWrapped = true;
+    reassignFunction(name, wrapped);
+  }
+
+  const previousDefaultDate = typeof window.setDefaultCostTrackerDate === "function"
+    ? window.setDefaultCostTrackerDate
+    : (typeof setDefaultCostTrackerDate === "function" ? setDefaultCostTrackerDate : null);
+  if (previousDefaultDate && !previousDefaultDate.__pimpProjectDateRangeWrapped) {
+    const wrappedDefaultDate = function setDefaultCostTrackerDateProjectRange() {
+      let result;
+      try { result = previousDefaultDate.apply(this, arguments); } catch {}
+      syncProjectDates();
+      return result;
+    };
+    wrappedDefaultDate.__pimpProjectDateRangeWrapped = true;
+    reassignFunction("setDefaultCostTrackerDate", wrappedDefaultDate);
+  }
+
+  wrapFunction("updateCostSheetHeaderFromJob", finalizeCostTrackerWindow);
+  wrapFunction("updateCostSheetHeaderFromSelectedJob", finalizeCostTrackerWindow);
+  wrapFunction("loadCostTrackerIntoForm", finalizeCostTrackerWindow);
+  wrapFunction("loadCostTrackerForJob", finalizeCostTrackerWindow);
+  wrapFunction("populateCostTrackerFromTemplateForJob", finalizeCostTrackerWindow);
+  wrapFunction("resetCostTrackerForm", finalizeCostTrackerWindow);
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id !== "costTrackerForm") return;
+    finalizeCostTrackerWindow();
+  }, true);
+
+  document.addEventListener("change", (event) => {
+    if (event.target?.matches?.('#costTrackerForm [name="job_id"]')) {
+      [0, 80, 220].forEach((delay) => window.setTimeout(finalizeCostTrackerWindow, delay));
+    }
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.('[data-edit-cost], [data-open-cost], [data-create-cost], [data-job-create-cost], [data-create-cost-tracker], .nav-btn[data-view="costTrackers"], [data-view-jump="costTrackers"], #costTrackerBottomClearBtn')) {
+      [0, 80, 220, 500].forEach((delay) => window.setTimeout(finalizeCostTrackerWindow, delay));
+    }
+  }, true);
+
+  const observer = new MutationObserver(() => {
+    window.clearTimeout(observer._timer);
+    observer._timer = window.setTimeout(finalizeCostTrackerWindow, 40);
+  });
+
+  function initialize() {
+    finalizeCostTrackerWindow();
+    const form = qs("#costTrackerForm");
+    if (form && !form.dataset.finalCostWindowObserved) {
+      form.dataset.finalCostWindowObserved = "true";
+      try { observer.observe(form, { childList: true, subtree: true }); } catch {}
+    }
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initialize);
+  else initialize();
+  [0, 250, 800, 1600].forEach((delay) => window.setTimeout(initialize, delay));
+  window.PIMP_finalizeCostTrackerWindow = finalizeCostTrackerWindow;
+})();
+
+
+/* ========================================================================
+   FINAL DATA TABLE LOADING SAFETY PATCH
+   ------------------------------------------------------------------------
+   Fixes blank tables caused by one failed Supabase table request stopping
+   the entire dashboard load. Jobs, invoices, and cost trackers now render
+   even if an optional table is missing, blocked by RLS, or has an older
+   schema. Also forces the Open Jobs / Closed Jobs tables to refresh after
+   data is loaded.
+   ======================================================================== */
+(function installFinalDataTableLoadingSafetyPatch() {
+  if (window.__pimpFinalDataTableLoadingSafetyPatchInstalled) return;
+  window.__pimpFinalDataTableLoadingSafetyPatchInstalled = true;
+
+  const TABLES_TO_LOAD = [
+    { key: "clients", table: "clients", order: "company_name", ascending: true },
+    { key: "jobs", table: "jobs", order: "last_synced_at", ascending: false, required: true },
+    { key: "costTrackers", table: "cost_trackers", order: "last_synced_at", ascending: false },
+    { key: "invoices", table: "invoices", order: "invoice_date", ascending: false },
+    { key: "employees", table: "employees", order: "full_name", ascending: true },
+    { key: "assignments", table: "job_assignments", order: "created_at", ascending: false },
+    { key: "timesheets", table: "timesheets", order: "work_date", ascending: false },
+    { key: "documents", table: "documents", order: "last_synced_at", ascending: false }
+  ];
+
+  function toast(message, isError = false) {
+    try {
+      if (typeof showToast === "function") showToast(message, isError);
+    } catch {}
+  }
+
+  async function selectTableSafely(config) {
+    if (!state?.supabase) return { key: config.key, rows: [], error: null };
+
+    try {
+      let query = state.supabase
+        .from(config.table)
+        .select("*")
+        .order(config.order, { ascending: config.ascending })
+        .limit(1000);
+
+      let response = await query;
+
+      if (response.error) {
+        const message = String(response.error.message || "").toLowerCase();
+        const canRetryWithoutOrder = message.includes("column") || message.includes("pgrst") || message.includes("schema cache");
+        if (canRetryWithoutOrder) {
+          response = await state.supabase.from(config.table).select("*").limit(1000);
+        }
+      }
+
+      if (response.error) throw response.error;
+      return { key: config.key, rows: response.data || [], error: null };
+    } catch (error) {
+      console.warn(`Could not load ${config.table}:`, error);
+      return { key: config.key, rows: [], error, required: Boolean(config.required), table: config.table };
+    }
+  }
+
+  function assignLoadedRows(results) {
+    state.data = state.data || {};
+    results.forEach((result) => {
+      state.data[result.key] = Array.isArray(result.rows) ? result.rows : [];
+    });
+
+    // Keep arrays stable for any older render helpers that expect them.
+    ["clients", "jobs", "costTrackers", "invoices", "employees", "assignments", "timesheets", "documents"].forEach((key) => {
+      if (!Array.isArray(state.data[key])) state.data[key] = [];
+    });
+  }
+
+  function renderTablesSafely() {
+    try { if (typeof hydrateSelects === "function") hydrateSelects(); } catch (error) { console.warn("hydrateSelects failed:", error); }
+
+    try {
+      if (typeof renderAll === "function") renderAll();
+    } catch (error) {
+      console.warn("renderAll failed; rendering core tables directly:", error);
+    }
+
+    // Always refresh the tables the user sees, even if an older renderAll wrapper failed.
+    try { if (typeof window.renderDashboardActiveJobs === "function") window.renderDashboardActiveJobs(); } catch (error) { console.warn("Open Jobs table render failed:", error); }
+    try { if (typeof window.renderJobs === "function") window.renderJobs(); } catch (error) { console.warn("Closed Jobs table render failed:", error); }
+    try { if (typeof renderInvoices === "function") renderInvoices(); } catch (error) { console.warn("Invoices table render failed:", error); }
+    try { if (typeof renderCostTrackers === "function") renderCostTrackers(); } catch (error) { console.warn("Cost trackers table render failed:", error); }
+  }
+
+  async function loadAllDataSafely(options = {}) {
+    if (!state?.supabase || !state?.session) return;
+    const silent = Boolean(options.silent);
+
+    const results = await Promise.all(TABLES_TO_LOAD.map(selectTableSafely));
+    assignLoadedRows(results);
+    renderTablesSafely();
+
+    const requiredFailure = results.find((result) => result.required && result.error);
+    if (requiredFailure) {
+      toast(`Jobs could not load: ${requiredFailure.error?.message || "check Supabase permissions"}`, true);
+      return;
+    }
+
+    const failedOptional = results.filter((result) => result.error && !result.required);
+    if (!silent) {
+      if (failedOptional.length) {
+        toast("Jobs loaded. Some optional tables could not load; check the browser console for details.", true);
+      } else {
+        toast("Dashboard data refreshed.");
+      }
+    }
+  }
+
+  window.loadAllData = loadAllDataSafely;
+  try { globalThis.loadAllData = loadAllDataSafely; } catch {}
+  try { eval('loadAllData = window.loadAllData'); } catch {}
+
+  document.addEventListener("click", (event) => {
+    if (!event.target?.closest?.("#refreshBtn")) return;
+    window.setTimeout(() => loadAllDataSafely({ silent: false }), 0);
+  }, true);
+})();
+
+/* ========================================================================
+   FINAL TIMESHEET SAVE + UPLOADED TIMESHEET FOLDER FIX
+   ------------------------------------------------------------------------
+   - Uploaded timesheet documents no longer show Open File / Download File /
+     Create Editable Timesheet buttons in the top Timesheets status card.
+   - Uploaded timesheet documents are shown inside the Timesheets Folder.
+   - The timesheet save button uses a single robust save handler with
+     Supabase schema fallback so older/newer timesheets tables can save.
+   ======================================================================== */
+(function installFinalTimesheetSaveAndUploadedFolderFix() {
+  if (window.__pimpFinalTimesheetSaveAndUploadedFolderFixInstalled) return;
+  window.__pimpFinalTimesheetSaveAndUploadedFolderFixInstalled = true;
+
+  const TIMESHEET_TABLE_NAME = "timesheets";
+  const expandedFolders = window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS || new Set();
+  window.PIMP_JOB_DETAILS_TIMESHEET_FOLDERS = expandedFolders;
+
+  function qs(selector, root = document) {
+    return root.querySelector(selector);
+  }
+
+  function qsa(selector, root = document) {
+    return Array.from(root.querySelectorAll(selector));
+  }
+
+  function html(value) {
+    try { if (typeof escapeHtml === "function") return escapeHtml(value); } catch {}
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function attr(value) {
+    try { if (typeof escapeAttr === "function") return escapeAttr(value); } catch {}
+    return html(value);
+  }
+
+  function toNumber(value) {
+    try { if (typeof number === "function") return number(value); } catch {}
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function cleanNumber(value) {
+    const numeric = toNumber(value);
+    return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2).replace(/\.?0+$/, "");
+  }
+
+  function todayValue() {
+    try { if (typeof today === "function") return today(); } catch {}
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function formatDateSafe(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    if (!value) return "-";
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-US");
+  }
+
+  function toast(message, isError = false) {
+    try { if (typeof showToast === "function") showToast(message, isError); } catch {}
+  }
+
+  function currentJob(jobId) {
+    try { if (typeof findJob === "function") return findJob(jobId); } catch {}
+    return (state?.data?.jobs || []).find((job) => String(job.id || "") === String(jobId || "")) || null;
+  }
+
+  function parseJson(value, fallback) {
+    if (!value) return fallback;
+    if (Array.isArray(value) || typeof value === "object") return value;
+    try { return JSON.parse(value); } catch { return fallback; }
+  }
+
+  function safeFileSize(bytes) {
+    const size = Number(bytes || 0);
+    if (!size) return "";
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function documentId(doc) {
+    return doc?.id || doc?.external_id || "";
+  }
+
+  function isTimesheetDocument(doc) {
+    return /timesheet|time sheet|timecard|time card/i.test(`${doc?.document_type || ""} ${doc?.file_name || ""} ${doc?.original_file_name || ""}`);
+  }
+
+  function uploadedDocsForJobSafe(jobId) {
+    return (state?.data?.documents || [])
+      .filter((doc) => String(doc.job_id || "") === String(jobId || ""));
+  }
+
+  function uploadedTimesheetDocsForJob(jobId) {
+    return uploadedDocsForJobSafe(jobId).filter(isTimesheetDocument);
+  }
+
+  function getJobIdFromDetailsBody(body = qs("#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody")) {
+    if (!body) return "";
+    return body.querySelector("[data-doc-guide-job]")?.dataset.docGuideJob ||
+      body.querySelector("[data-open-cost-for-job]")?.dataset.openCostForJob ||
+      body.querySelector("[data-open-invoice-for-job]")?.dataset.openInvoiceForJob ||
+      body.querySelector("[data-create-timesheet-for-job]")?.dataset.createTimesheetForJob ||
+      "";
+  }
+
+  function dailyGroupKey(entry) {
+    const summary = parseJson(entry?.summary, {});
+    return String(summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry?.timesheet_group_id || entry?.group_id || entry?.sheet_id || entry?.id || "");
+  }
+
+  function savedDailyTimesheetsForJob(jobId) {
+    const groups = new Map();
+    (state?.data?.timesheets || [])
+      .filter((entry) => String(entry.job_id || "") === String(jobId || ""))
+      .forEach((entry) => {
+        const key = dailyGroupKey(entry) || `${entry.job_id || "job"}:${entry.work_date || "date"}:${entry.id || Math.random()}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(entry);
+      });
+
+    return Array.from(groups.entries()).map(([id, rows]) => {
+      const first = rows[0] || {};
+      const job = currentJob(first.job_id || jobId);
+      const savedLines = parseJson(first.line_items, null);
+      const lines = Array.isArray(savedLines) && savedLines.length ? savedLines : rows.map((row) => ({
+        employee_id: row.employee_id || "",
+        employee_identifier: row.employee_identifier || "",
+        employee_name: row.employee_name || "",
+        classification: row.classification || "",
+        hours: toNumber(row.hours),
+        tr: Boolean(row.tr || toNumber(row.travel_hours) > 0),
+        pd: Boolean(row.pd || toNumber(row.per_diem) > 0),
+        notes: row.notes || ""
+      }));
+      const totalHours = lines.reduce((sum, line) => sum + toNumber(line.hours), 0);
+      return {
+        id,
+        type: "created",
+        rows,
+        first,
+        job,
+        date: first.work_date || first.date || "",
+        customer: first.customer || job?.company_name || "",
+        jobNumber: first.job_number || job?.job_number || "",
+        location: first.location || job?.location || "",
+        ticket: first.ticket_number || "",
+        employeeCount: lines.length,
+        totalHours
+      };
+    }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  }
+
+  function dateRange(dailySheets, uploadedDocs) {
+    const dates = dailySheets.map((sheet) => sheet.date).filter(Boolean).sort();
+    if (dates.length > 1) return `${formatDateSafe(dates[0])} to ${formatDateSafe(dates[dates.length - 1])}`;
+    if (dates.length === 1) return formatDateSafe(dates[0]);
+    if (uploadedDocs.length) return `${uploadedDocs.length} uploaded file${uploadedDocs.length === 1 ? "" : "s"}`;
+    return "No dates";
+  }
+
+  function jobLabel(jobId) {
+    const job = currentJob(jobId);
+    return [job?.job_number || "Job", job?.job_name || ""].filter(Boolean).join(" — ");
+  }
+
+  function timesheetFolderSignature(jobId) {
+    const folderId = `job-details-timesheet-folder:${jobId}`;
+    const dailySheets = savedDailyTimesheetsForJob(jobId);
+    const uploadedDocs = uploadedTimesheetDocsForJob(jobId);
+    return [
+      String(jobId || ""),
+      expandedFolders.has(folderId) ? "open" : "closed",
+      dailySheets.map((sheet) => `${sheet.id}:${sheet.date}:${sheet.employeeCount}:${sheet.totalHours}`).join("|"),
+      uploadedDocs.map((doc) => `${documentId(doc)}:${doc.file_name || doc.original_file_name || ""}:${doc.file_status || ""}`).join("|")
+    ].join("::");
+  }
+
+  function buildCombinedTimesheetFolder(jobId) {
+    const dailySheets = savedDailyTimesheetsForJob(jobId);
+    const uploadedDocs = uploadedTimesheetDocsForJob(jobId);
+    const signature = timesheetFolderSignature(jobId);
+
+    if (!dailySheets.length && !uploadedDocs.length) {
+      return `<p class="muted job-detail-empty" data-pimp-timesheet-folder-fixed="true" data-pimp-timesheet-folder-signature="${attr(signature)}">No timesheets have been saved for this job yet.</p>`;
+    }
+
+    const folderId = `job-details-timesheet-folder:${jobId}`;
+    const isOpen = expandedFolders.has(folderId);
+    const totalHours = dailySheets.reduce((sum, sheet) => sum + toNumber(sheet.totalHours), 0);
+    const totalEmployees = dailySheets.reduce((sum, sheet) => sum + toNumber(sheet.employeeCount), 0);
+    const sheetCount = dailySheets.length + uploadedDocs.length;
+
+    const createdRows = dailySheets.map((sheet) => `
+      <article class="job-timesheet-folder-row">
+        <div class="job-timesheet-folder-main">
+          <strong>${html(formatDateSafe(sheet.date))}</strong>
+          <span>${html(cleanNumber(sheet.employeeCount))} employee line${sheet.employeeCount === 1 ? "" : "s"} • ${html(cleanNumber(sheet.totalHours))} total hours${sheet.ticket ? ` • Ticket ${html(sheet.ticket)}` : ""}</span>
+        </div>
+        <div class="job-timesheet-folder-actions">
+          <button class="link-btn" data-edit-timesheet-daily="${attr(sheet.id)}" type="button">Edit</button>
+          <button class="link-btn" data-view-timesheet-daily="${attr(sheet.id)}" type="button">View</button>
+          <button class="link-btn" data-download-timesheet-daily="${attr(sheet.id)}" type="button">Download</button>
+          <button class="link-btn danger-text" data-delete-timesheet-daily="${attr(sheet.id)}" type="button">Delete</button>
+        </div>
+      </article>
+    `).join("");
+
+    const uploadedRows = uploadedDocs.map((doc) => {
+      const docKey = documentId(doc);
+      const name = doc.file_name || doc.original_file_name || "Uploaded timesheet";
+      const detail = ["Uploaded file", safeFileSize(doc.file_size), doc.file_status || "uploaded"].filter(Boolean).join(" • ");
+      return `
+        <article class="job-timesheet-folder-row uploaded-timesheet-folder-row">
+          <div class="job-timesheet-folder-main">
+            <strong>${html(name)}</strong>
+            <span>${html(detail)}</span>
+          </div>
+          <div class="job-timesheet-folder-actions">
+            <button class="link-btn" data-open-uploaded-doc="${attr(docKey)}" type="button">Open</button>
+            <button class="link-btn" data-download-uploaded-doc="${attr(docKey)}" type="button">Download</button>
+            <button class="link-btn danger-text" data-delete-type="documents" data-delete-id="${attr(docKey)}" type="button">Delete</button>
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    return `
+      <div class="job-timesheet-folder-card ${isOpen ? "open" : ""}" data-job-timesheet-folder-card="${attr(folderId)}" data-pimp-timesheet-folder-fixed="true" data-pimp-timesheet-folder-signature="${attr(signature)}">
+        <button class="job-timesheet-folder-summary" data-toggle-job-detail-timesheet-folder="${attr(folderId)}" type="button" aria-expanded="${isOpen ? "true" : "false"}">
+          <span class="job-timesheet-folder-icon">📁</span>
+          <span class="job-timesheet-folder-title">
+            <strong>${html(jobLabel(jobId))} Timesheets</strong>
+            <small>${sheetCount} item${sheetCount === 1 ? "" : "s"} • ${html(dateRange(dailySheets, uploadedDocs))}</small>
+          </span>
+          <span class="job-timesheet-folder-stats">
+            <strong>${html(cleanNumber(totalHours))}</strong>
+            <small>hours</small>
+          </span>
+          <span class="job-timesheet-folder-chevron">${isOpen ? "▲" : "▼"}</span>
+        </button>
+        <div class="job-timesheet-folder-body ${isOpen ? "" : "hidden"}">
+          <div class="job-timesheet-folder-summary-line">${html(cleanNumber(totalEmployees))} employee line${totalEmployees === 1 ? "" : "s"} across created timesheets. ${uploadedDocs.length ? `${html(uploadedDocs.length)} uploaded timesheet file${uploadedDocs.length === 1 ? "" : "s"}.` : ""}</div>
+          ${createdRows}${uploadedRows}
+        </div>
+      </div>
+    `;
+  }
+
+  function removeTopUploadedTimesheetButtons(body) {
+    if (!body) return;
+    qsa(".job-document-status-card, .job-documents-status-card, .document-status-card", body).forEach((card) => {
+      const title = card.querySelector("strong, h4, h5")?.textContent || card.textContent || "";
+      if (!/timesheets?/i.test(title)) return;
+      qsa("button", card).forEach((button) => {
+        const text = String(button.textContent || "").trim();
+        const isUploadedAction = button.matches("[data-open-uploaded-doc], [data-download-uploaded-doc]") || /^(open\s*file|download\s*file|create\s+editable\s+timesheet)$/i.test(text);
+        if (isUploadedAction) button.remove();
+      });
+    });
+  }
+
+  function updateTimesheetFolderInJobDetails() {
+    const body = qs("#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody");
+    if (!body) return;
+    const jobId = getJobIdFromDetailsBody(body);
+    if (!jobId) return;
+
+    removeTopUploadedTimesheetButtons(body);
+
+    const headers = qsa(".job-detail-section-header h5", body);
+    const header = headers.find((h5) => /timesheets\s+folder|all\s+timesheets\s+for\s+this\s+job/i.test(h5.textContent || ""));
+    const section = header?.closest(".job-detail-section");
+    if (!section) return;
+    header.textContent = "Timesheets Folder";
+
+    const signature = timesheetFolderSignature(jobId);
+    const replacement = buildCombinedTimesheetFolder(jobId);
+    const target = section.querySelector(".job-timesheet-folder-card, .job-detail-mini-list, .job-detail-empty");
+    if (target && target.getAttribute("data-pimp-timesheet-folder-signature") === signature) {
+      removeTopUploadedTimesheetButtons(body);
+      return;
+    }
+    if (target) target.outerHTML = replacement;
+    else section.insertAdjacentHTML("beforeend", replacement);
+
+    removeTopUploadedTimesheetButtons(body);
+  }
+
+  function extractTimesheetLines() {
+    return qsa("#timesheetEmployeeRows .timesheet-employee-row").map((row) => ({
+      employee_id: row.querySelector('[data-ts-field="employee_id"]')?.value || "",
+      employee_identifier: row.querySelector('[data-ts-field="employee_identifier"]')?.value?.trim() || "",
+      employee_name: row.querySelector('[data-ts-field="employee_name"]')?.value?.trim() || "",
+      classification: row.querySelector('[data-ts-field="classification"]')?.value?.trim() || "",
+      hours: toNumber(row.querySelector('[data-ts-field="hours"]')?.value),
+      tr: Boolean(row.querySelector('[data-ts-field="tr"]')?.checked),
+      pd: Boolean(row.querySelector('[data-ts-field="pd"]')?.checked),
+      notes: row.querySelector('[data-ts-field="notes"]')?.value?.trim() || ""
+    })).filter((line) => line.employee_id || line.employee_identifier || line.employee_name || line.classification || line.hours > 0 || line.tr || line.pd || line.notes);
+  }
+
+  function timesheetFormData(form) {
+    const values = Object.fromEntries(new FormData(form).entries());
+    const job = currentJob(values.job_id);
+    const lines = extractTimesheetLines();
+    const totalHours = lines.reduce((sum, line) => sum + toNumber(line.hours), 0);
+    const groupId = values.timesheet_group_id || `timecard:${values.job_id || "job"}:${values.work_date || todayValue()}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    return {
+      groupId,
+      job_id: values.job_id || "",
+      job,
+      work_date: values.work_date || todayValue(),
+      customer: values.customer || job?.company_name || "",
+      customer_afe_no: values.customer_afe_no || job?.job_number || "",
+      pms_job_number: values.pms_job_number || job?.job_number || "",
+      location: values.location || job?.location || "",
+      ticket_number: values.ticket_number || "",
+      description_of_services: values.description_of_services || "",
+      status: values.status || "submitted",
+      lines,
+      summary: {
+        timesheetGroupId: groupId,
+        timesheet_group_id: groupId,
+        employee_count: lines.length,
+        total_hours: totalHours,
+        customer: values.customer || job?.company_name || "",
+        job_number: values.customer_afe_no || job?.job_number || "",
+        pms_job_number: values.pms_job_number || job?.job_number || "",
+        location: values.location || job?.location || "",
+        ticket_number: values.ticket_number || "",
+        description_of_services: values.description_of_services || ""
+      }
+    };
+  }
+
+  function timesheetFileName(data) {
+    const raw = `timesheet_${data.customer_afe_no || data.job?.job_number || "job"}_${data.work_date || todayValue()}${data.ticket_number ? `_${data.ticket_number}` : ""}.pdf`;
+    return raw.replace(/[\\/:*?"<>|]+/g, "-");
+  }
+
+  function buildSimpleTimesheetHtml(data) {
+    const rows = [...data.lines].slice(0, 21);
+    while (rows.length < 21) rows.push({});
+    return `
+      <article class="timesheet-template-document timesheet-print-document">
+        <div class="timesheet-top-rule"></div>
+        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-logo-wrap"><img src="NEW_logo.png" alt="PIMP" /><strong>PIMP</strong></div>
+        <div class="ts-label ts-customer-label">Customer:</div><div class="ts-cell ts-customer-value">${html(data.customer)}</div>
+        <div class="ts-label ts-afe-label">Customer AFE / No:</div><div class="ts-cell ts-afe-value">${html(data.customer_afe_no)}</div>
+        <div class="ts-label ts-pms-label">PMS Job Number:</div><div class="ts-cell ts-pms-value">${html(data.pms_job_number)}</div>
+        <div class="ts-label ts-date-label">Date :</div><div class="ts-cell ts-date-value">${html(formatDateSafe(data.work_date))}</div>
+        <div class="ts-label ts-location-label">Location:</div><div class="ts-cell ts-location-value">${html(data.location)}</div>
+        <div class="ts-label ts-ticket-label">Ticket Number:</div><div class="ts-cell ts-ticket-value">${html(data.ticket_number)}</div>
+        <div class="ts-label ts-description-label">Description of Services:</div><div class="ts-cell ts-description-value static-multiline">${html(data.description_of_services)}</div>
+        <table class="timesheet-employee-grid"><thead><tr><th>Emp ID</th><th>Emp Name</th><th>Classification</th><th>Hours</th><th>TR</th><th>PD</th><th>Notes</th><th></th></tr></thead><tbody>
+          ${rows.map((line) => `<tr><td>${html(line.employee_identifier || "")}</td><td>${html(line.employee_name || "")}</td><td>${html(line.classification || "")}</td><td class="hours-cell">${line.hours ? html(cleanNumber(line.hours)) : ""}</td><td class="check-cell">${line.tr ? "✓" : ""}</td><td class="check-cell">${line.pd ? "✓" : ""}</td><td>${html(line.notes || "")}</td><td></td></tr>`).join("")}
+        </tbody></table>
+      </article>
+    `;
+  }
+
+  function removeEmptyValues(row) {
+    return Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+  }
+
+  function rowVariants(row) {
+    const mediumKeys = ["timesheet_group_id", "job_id", "employee_id", "work_date", "hours", "travel_hours", "per_diem", "status", "notes", "line_items", "summary", "html_snapshot", "download_filename", "external_source", "external_id", "last_synced_at"];
+    const summaryKeys = ["timesheet_group_id", "job_id", "employee_id", "work_date", "hours", "travel_hours", "per_diem", "status", "notes", "summary", "external_source", "external_id", "last_synced_at"];
+    const baseKeys = ["job_id", "employee_id", "work_date", "hours", "travel_hours", "per_diem", "status", "notes"];
+    const pick = (keys) => removeEmptyValues(Object.fromEntries(keys.map((key) => [key, row[key]])));
+    return [removeEmptyValues(row), pick(mediumKeys), pick(summaryKeys), pick(baseKeys)];
+  }
+
+  function buildInsertRows(data) {
+    const htmlSnapshot = buildSimpleTimesheetHtml(data);
+    const filename = timesheetFileName(data);
+    const created = new Date().toISOString();
+    const rows = data.lines.map((line, index) => ({
+      timesheet_group_id: data.groupId,
+      group_id: data.groupId,
+      sheet_id: data.groupId,
+      job_id: data.job_id,
+      employee_id: line.employee_id || null,
+      employee_identifier: line.employee_identifier || null,
+      employee_name: line.employee_name || null,
+      classification: line.classification || null,
+      work_date: data.work_date,
+      hours: toNumber(line.hours),
+      travel_hours: line.tr ? 1 : 0,
+      per_diem: line.pd ? 1 : 0,
+      tr: Boolean(line.tr),
+      pd: Boolean(line.pd),
+      customer: data.customer || null,
+      job_number: data.customer_afe_no || null,
+      pms_job_number: data.pms_job_number || null,
+      location: data.location || null,
+      ticket_number: data.ticket_number || null,
+      description_of_services: data.description_of_services || null,
+      status: data.status || "submitted",
+      notes: line.notes || null,
+      line_items: data.lines,
+      summary: data.summary,
+      html_snapshot: htmlSnapshot,
+      download_filename: filename,
+      external_source: "dashboard",
+      external_id: `${data.groupId}:${line.employee_id || line.employee_name || index}`,
+      last_synced_at: created
+    }));
+
+    return rows.map(rowVariants);
+  }
+
+  async function tryDeleteExistingTimesheetGroup(groupId) {
+    if (!groupId || !state?.supabase) return;
+    try {
+      const { error } = await state.supabase.from(TIMESHEET_TABLE_NAME).delete().eq("timesheet_group_id", groupId);
+      if (error && !/column|schema cache|does not exist|could not find/i.test(String(error.message || ""))) throw error;
+    } catch (error) {
+      console.warn("Timesheet group delete skipped:", error);
+    }
+  }
+
+  function insertErrorAllowsFallback(error) {
+    const message = String(error?.message || error || "");
+    return /column|schema cache|does not exist|could not find|violates|invalid input|check constraint|enum|foreign key|not-null|PGRST/i.test(message);
+  }
+
+  async function insertTimesheetRowsWithFallback(rowVariantSets) {
+    let lastError = null;
+    const variantCount = Math.max(...rowVariantSets.map((set) => set.length));
+
+    for (let variantIndex = 0; variantIndex < variantCount; variantIndex += 1) {
+      const rows = rowVariantSets.map((set) => set[Math.min(variantIndex, set.length - 1)]);
+      try {
+        const { data, error } = await state.supabase.from(TIMESHEET_TABLE_NAME).insert(rows).select("*");
+        if (error) throw error;
+        return data && data.length ? data : rows;
+      } catch (error) {
+        lastError = error;
+        if (!insertErrorAllowsFallback(error)) break;
+      }
+    }
+
+    throw lastError || new Error("Timesheet could not be saved.");
+  }
+
+  function setHiddenGroupId(form, groupId) {
+    let input = form.querySelector('[name="timesheet_group_id"]');
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "timesheet_group_id";
+      form.prepend(input);
+    }
+    input.value = groupId || "";
+  }
+
+  async function saveTimesheetForm(event) {
+    if (event?.target?.id !== "timesheetForm") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+
+    const form = event.target;
+    if (!state?.supabase || !state?.session) {
+      toast("Sign in before saving a timesheet.", true);
+      return;
+    }
+
+    const data = timesheetFormData(form);
+    if (!data.job_id) {
+      toast("Select a job before saving the timesheet.", true);
+      return;
+    }
+    if (!data.work_date) {
+      toast("Enter a date before saving the timesheet.", true);
+      return;
+    }
+    if (!data.lines.length) {
+      toast("Add at least one employee row before saving the timesheet.", true);
+      return;
+    }
+
+    const submitButton = form.querySelector('button[type="submit"]');
+    const originalText = submitButton?.textContent || "Save Timesheet";
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Saving...";
+    }
+
+    try {
+      if (form.querySelector('[name="timesheet_group_id"]')?.value) {
+        await tryDeleteExistingTimesheetGroup(data.groupId);
+      }
+
+      const insertedRows = await insertTimesheetRowsWithFallback(buildInsertRows(data));
+      state.data = state.data || {};
+      state.data.timesheets = Array.isArray(state.data.timesheets) ? state.data.timesheets : [];
+      state.data.timesheets = state.data.timesheets
+        .filter((entry) => dailyGroupKey(entry) !== data.groupId)
+        .concat(insertedRows);
+
+      setHiddenGroupId(form, data.groupId);
+      try { if (typeof loadAllData === "function") await loadAllData({ silent: true }); } catch { try { if (typeof renderAll === "function") renderAll(); } catch {} }
+      updateTimesheetFolderInJobDetails();
+      toast("Timesheet saved.");
+    } catch (error) {
+      console.error("Timesheet save failed:", error);
+      toast(`Timesheet could not save: ${error?.message || error}`, true);
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = originalText === "Saving..." ? "Save Timesheet" : originalText;
+      }
+    }
+  }
+
+  document.addEventListener("submit", saveTimesheetForm, true);
+
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.("#jobDetailsModalBody [data-toggle-job-detail-timesheet-folder]")) {
+      const button = event.target.closest("[data-toggle-job-detail-timesheet-folder]");
+      const folderId = button?.dataset.toggleJobDetailTimesheetFolder;
+      window.setTimeout(() => {
+        const card = button?.closest?.("[data-job-timesheet-folder-card]");
+        const open = button?.getAttribute("aria-expanded") === "true" || card?.classList.contains("open");
+        if (folderId) {
+          if (open) expandedFolders.add(folderId);
+          else expandedFolders.delete(folderId);
+        }
+        updateTimesheetFolderInJobDetails();
+      }, 60);
+    }
+    window.setTimeout(updateTimesheetFolderInJobDetails, 120);
+  }, true);
+
+  const observer = new MutationObserver(() => {
+    window.clearTimeout(observer.timer);
+    observer.timer = window.setTimeout(updateTimesheetFolderInJobDetails, 80);
+  });
+
+  function start() {
+    try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
+    updateTimesheetFolderInJobDetails();
+    [100, 400, 1000].forEach((delay) => window.setTimeout(updateTimesheetFolderInJobDetails, delay));
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+
+  window.PIMP_updateTimesheetFolderInJobDetails = updateTimesheetFolderInJobDetails;
 })();
