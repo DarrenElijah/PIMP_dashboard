@@ -10911,3 +10911,70 @@ body.job-timesheet-modal-open .topbar {
   border-right: 0;
 }
 
+
+
+/* ========================================================================
+   FINAL SUBMITTED INVOICE STATUS + OPEN JOB STATUS SECTIONS
+   ======================================================================== */
+.status.submitted,
+.status.approved,
+select.status.submitted,
+select.status.approved,
+.dashboard-inline-status-select.status.submitted,
+.dashboard-inline-status-select.status.approved,
+.invoice-status-workflow-select.status.submitted,
+.invoice-status-workflow-select.status.approved,
+#dashboardActiveJobsTable .status.submitted,
+#dashboardActiveJobsTable .status.approved,
+#jobsTable .status.submitted,
+#jobsTable .status.approved {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #fbbf24 !important;
+}
+
+.open-jobs-section-row td,
+.pimp-open-section-row td {
+  background: #eef2ff !important;
+  border-top: 2px solid #c7d2fe;
+  border-bottom: 1px solid #c7d2fe;
+  padding: 12px 14px;
+}
+
+.open-jobs-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #1e3a8a;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.open-jobs-section-title strong {
+  color: #3730a3;
+  background: #e0e7ff;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+
+/* Final approved-to-submitted invoice status display safety */
+.status.submitted,
+.status.approved,
+select.status.submitted,
+select.status.approved,
+.invoice-status-workflow-select.status.submitted,
+.invoice-status-workflow-select.status.approved,
+.dashboard-inline-status-select.status.submitted,
+.dashboard-inline-status-select.status.approved,
+#dashboardActiveJobsTable .status.submitted,
+#dashboardActiveJobsTable .status.approved,
+#jobsTable .status.submitted,
+#jobsTable .status.approved {
+  background: #fef3c7 !important;
+  color: #92400e !important;
+  border-color: #f59e0b !important;
+}

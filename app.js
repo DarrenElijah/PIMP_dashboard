@@ -10247,7 +10247,7 @@ function printDocumentCss() {
   const INVOICE_STATUSES = [
     { value: "unsent", label: "Unsent" },
     { value: "awaiting_approval", label: "Awaiting Approval" },
-    { value: "approved", label: "Approved" },
+    { value: "approved", label: "Submitted" },
     { value: "paid", label: "Paid" }
   ];
 
@@ -10882,7 +10882,7 @@ document.addEventListener("click", (event) => {
       document.querySelectorAll('#invoiceForm select[name="status"]').forEach((select) => {
         const current = String(select.value || "").toLowerCase().replace(/ /g, "_") || "unsent";
         const normalized = ({ draft: "unsent", sent: "awaiting_approval", overdue: "awaiting_approval", cancelled: "unsent" })[current] || current;
-        select.innerHTML = '<option value="unsent">Unsent</option><option value="awaiting_approval">Awaiting Approval</option><option value="approved">Approved</option><option value="paid">Paid</option>';
+        select.innerHTML = '<option value="unsent">Unsent</option><option value="awaiting_approval">Awaiting Approval</option><option value="approved">Submitted</option><option value="paid">Paid</option>';
         select.value = ["unsent", "awaiting_approval", "approved", "paid"].includes(normalized) ? normalized : "unsent";
       });
     }, 50);
@@ -25283,7 +25283,7 @@ This removes it from the job documents list.`)) return;
   const INVOICE_STATUS_CHOICES_FINAL = [
     { value: "unsent", label: "Unsent" },
     { value: "awaiting_approval", label: "Awaiting Approval" },
-    { value: "approved", label: "Approved" },
+    { value: "approved", label: "Submitted" },
     { value: "paid", label: "Paid" }
   ];
 
@@ -27907,7 +27907,7 @@ This removes it from the job documents list.`)) return;
     const labels = {
       unsent: "Unsent",
       awaiting_approval: "Awaiting Approval",
-      approved: "Approved",
+      approved: "Submitted",
       paid: "Paid"
     };
     return labels[normalizeInvoiceStatus(status)] || "Unsent";
@@ -28292,7 +28292,7 @@ This removes it from the job documents list.`)) return;
     const labels = {
       unsent: "Unsent",
       awaiting_approval: "Awaiting Approval",
-      approved: "Approved",
+      approved: "Submitted",
       paid: "Paid"
     };
     return labels[normalizeInvoiceStatus(status)] || "Unsent";
@@ -28666,7 +28666,7 @@ This removes it from the job documents list.`)) return;
     return {
       unsent: "Unsent",
       awaiting_approval: "Awaiting Approval",
-      approved: "Approved",
+      approved: "Submitted",
       paid: "Paid"
     }[normalizeInvoiceStatus(status)] || "Unsent";
   }
@@ -29018,7 +29018,7 @@ This removes it from the job documents list.`)) return;
    - Changing an invoice to Paid removes it from Open Jobs and moves it to
      Closed Jobs. Changing it away from Paid moves it back to Open Jobs.
    - Open Jobs sort by latest job year first, then lower job number first,
-     then invoice status: Unsent, Awaiting Approval, Approved.
+     then invoice status: Unsent, Awaiting Approval, Submitted.
    ======================================================================== */
 (function installOpenClosedJobsByInvoiceStatusFinal() {
   if (window.__pimpOpenClosedJobsByInvoiceStatusFinalInstalled) return;
@@ -29079,7 +29079,7 @@ This removes it from the job documents list.`)) return;
     return {
       unsent: "Unsent",
       awaiting_approval: "Awaiting Approval",
-      approved: "Approved",
+      approved: "Submitted",
       paid: "Paid"
     }[normalizeInvoiceStatus(status)] || "Unsent";
   }
@@ -30863,4 +30863,630 @@ This removes it from the job documents list.`)) return;
 
   document.addEventListener("DOMContentLoaded", applySearchesSoon);
   applySearchesSoon();
+})();
+
+
+/* ========================================================================
+   FINAL INVOICE SUBMITTED LABEL + OPEN JOB STATUS SECTIONS PATCH
+   ------------------------------------------------------------------------
+   - Keeps the saved database value as approved for compatibility, but shows it
+     as Submitted everywhere in the dashboard UI.
+   - Makes Submitted yellow in job tables.
+   - Groups Open Jobs into two status sections:
+       1) No Invoice / Unsent Invoices
+       2) Awaiting Approval / Submitted
+   - Each status group is sub-sorted by invoice number.
+   ======================================================================== */
+(function installSubmittedInvoiceStatusAndOpenJobSectionsPatch() {
+  const PATCH_FLAG = "__pimpSubmittedInvoiceStatusAndOpenJobSectionsPatch";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  const qs = (selector, root = document) => {
+    try { return root.querySelector(selector); } catch { return null; }
+  };
+
+  const qsa = (selector, root = document) => {
+    try { return Array.from(root.querySelectorAll(selector)); } catch { return []; }
+  };
+
+  const html = (value) => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+  const attr = html;
+
+  const toNumber = (value) => {
+    const parsed = Number(value || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  function parseJsonSafe(value) {
+    if (!value) return {};
+    if (typeof value === "object") return value || {};
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function timeValue(row) {
+    const candidates = [
+      row?.last_synced_at,
+      row?.updated_at,
+      row?.created_at,
+      row?.invoice_date,
+      row?.due_date,
+      row?.start_date,
+      row?.work_date
+    ];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const parsed = Date.parse(candidate);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return 0;
+  }
+
+  function normalizeInvoiceStatus(status) {
+    const value = String(status || "unsent").toLowerCase().trim().replace(/[\s-]+/g, "_");
+    if (["awaiting_approval", "awaitingapproval", "awaiting", "pending", "sent", "overdue", "draft"].includes(value)) return "awaiting_approval";
+    if (["approved", "approve", "submitted", "submit"].includes(value)) return "approved";
+    if (value === "paid") return "paid";
+    return "unsent";
+  }
+
+  function invoiceStatusLabel(status) {
+    return {
+      unsent: "Unsent",
+      awaiting_approval: "Awaiting Approval",
+      approved: "Submitted",
+      paid: "Paid"
+    }[normalizeInvoiceStatus(status)] || "Unsent";
+  }
+
+  function invoiceStatusClass(status) {
+    const normalized = normalizeInvoiceStatus(status);
+    return normalized === "approved" ? "submitted" : normalized;
+  }
+
+  function invoiceStatusOptions(current) {
+    const selected = normalizeInvoiceStatus(current);
+    return ["unsent", "awaiting_approval", "approved", "paid"]
+      .map((value) => `<option value="${value}"${value === selected ? " selected" : ""}>${invoiceStatusLabel(value)}</option>`)
+      .join("");
+  }
+
+  function latestInvoiceForJob(jobId) {
+    return (window.state?.data?.invoices || state?.data?.invoices || [])
+      .filter((invoice) => String(invoice.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function latestCostTrackerForJob(jobId) {
+    return (window.state?.data?.costTrackers || state?.data?.costTrackers || [])
+      .filter((tracker) => String(tracker.job_id || "") === String(jobId || ""))
+      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  }
+
+  function allJobs() {
+    return window.state?.data?.jobs || state?.data?.jobs || [];
+  }
+
+  function allDocs() {
+    return window.state?.data?.documents || state?.data?.documents || [];
+  }
+
+  function allTimesheets() {
+    return window.state?.data?.timesheets || state?.data?.timesheets || [];
+  }
+
+  function moneyLabel(value) {
+    try { if (typeof money === "function") return money(value); } catch {}
+    return toNumber(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  }
+
+  function dateLabel(value) {
+    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
+    if (!value) return "-";
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-US");
+  }
+
+  function rateTotalForTracker(tracker) {
+    if (!tracker) return null;
+    try {
+      if (typeof costTrackerQuoted === "function") {
+        const quoted = toNumber(costTrackerQuoted(tracker));
+        if (quoted || tracker.quoted_price !== undefined) return quoted;
+      }
+    } catch {}
+    const summary = parseJsonSafe(tracker.summary);
+    const candidates = [
+      summary.rateTotal,
+      summary.rate_total,
+      summary.quotedTotal,
+      summary.quoted_total,
+      summary.quotedPrice,
+      summary.quoted_price,
+      tracker.rate_total,
+      tracker.quoted_price
+    ];
+    for (const candidate of candidates) {
+      if (candidate !== undefined && candidate !== null && candidate !== "") return toNumber(candidate);
+    }
+    return 0;
+  }
+
+  function workdaysForJob(job) {
+    try { if (typeof window.__pimpWeekdayCount === "function") return toNumber(window.__pimpWeekdayCount(job?.start_date, job?.end_date || job?.start_date)); } catch {}
+    try { if (typeof window.__pimpWorkdaysForJobFinal === "function") return toNumber(window.__pimpWorkdaysForJobFinal(job)); } catch {}
+    return toNumber(job?.total_job_days || job?.total_days || job?.job_days);
+  }
+
+  function uniqueDailyTimesheets(jobId) {
+    try { if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") return window.__pimpUniqueDailyTimesheetsForJob(jobId); } catch {}
+    const seen = new Set();
+    allTimesheets().forEach((entry) => {
+      if (String(entry.job_id || "") !== String(jobId || "")) return;
+      const summary = parseJsonSafe(entry.summary);
+      const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
+      if (key) seen.add(String(key));
+    });
+    return seen.size;
+  }
+
+  function uploadedDocsForJob(jobId) {
+    return allDocs().filter((doc) => String(doc.job_id || "") === String(jobId || ""));
+  }
+
+  function documentIndicators(job) {
+    const docs = uploadedDocsForJob(job.id);
+    const trackerMade = Boolean(latestCostTrackerForJob(job.id)) || docs.some((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const invoiceMade = Boolean(latestInvoiceForJob(job.id)) || docs.some((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    const timesheetsMade = uniqueDailyTimesheets(job.id) > 0 || docs.some((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
+    return `
+      <div class="job-summary-chips professional-job-chips dashboard-job-chips dashboard-document-indicators" aria-label="Saved job documents">
+        <span class="job-doc-chip dashboard-doc-indicator ${trackerMade ? "made" : "missing"}">Cost Tracker</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${invoiceMade ? "made" : "missing"}">Invoice</span>
+        <span class="job-doc-chip dashboard-doc-indicator ${timesheetsMade ? "made" : "missing"}">Timesheets</span>
+      </div>
+    `;
+  }
+
+  function firstJobNumber(job) {
+    const text = String(job?.job_number || "");
+    const match = text.match(/\d+/);
+    return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+  }
+
+  function invoiceNumber(invoice) {
+    return String(invoice?.invoice_number || "").trim();
+  }
+
+  function compareInvoiceNumbers(aInvoice, bInvoice, aJob, bJob) {
+    const aNumber = invoiceNumber(aInvoice);
+    const bNumber = invoiceNumber(bInvoice);
+    if (aNumber || bNumber) {
+      const byInvoice = aNumber.localeCompare(bNumber, undefined, { numeric: true, sensitivity: "base" });
+      if (byInvoice) return byInvoice;
+    }
+    const byJobNumber = firstJobNumber(aJob) - firstJobNumber(bJob);
+    if (byJobNumber) return byJobNumber;
+    return String(aJob?.job_number || "").localeCompare(String(bJob?.job_number || ""), undefined, { numeric: true, sensitivity: "base" });
+  }
+
+  function openStatusBucket(job) {
+    const invoice = latestInvoiceForJob(job.id);
+    if (!invoice) return "no_invoice";
+    const status = normalizeInvoiceStatus(invoice.status);
+    if (status === "paid") return "paid";
+    if (status === "approved") return "submitted";
+    return status;
+  }
+
+  function openSection(job) {
+    const bucket = openStatusBucket(job);
+    return ["no_invoice", "unsent"].includes(bucket) ? "needs_invoice" : "review";
+  }
+
+  function compareOpenJobsBySectionAndInvoice(a, b) {
+    const bucketOrder = {
+      no_invoice: 0,
+      unsent: 1,
+      awaiting_approval: 2,
+      submitted: 3
+    };
+    const aBucket = openStatusBucket(a);
+    const bBucket = openStatusBucket(b);
+    const statusDiff = (bucketOrder[aBucket] ?? 99) - (bucketOrder[bBucket] ?? 99);
+    if (statusDiff) return statusDiff;
+    const invoiceDiff = compareInvoiceNumbers(latestInvoiceForJob(a.id), latestInvoiceForJob(b.id), a, b);
+    if (invoiceDiff) return invoiceDiff;
+    return timeValue(b) - timeValue(a);
+  }
+
+  function openJobsForSection(section) {
+    return allJobs()
+      .filter((job) => openStatusBucket(job) !== "paid")
+      .filter((job) => openSection(job) === section)
+      .sort(compareOpenJobsBySectionAndInvoice);
+  }
+
+  function jobDateMarkup(job) {
+    const days = workdaysForJob(job);
+    const dateRange = `${dateLabel(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${dateLabel(job.end_date)}` : ""}`;
+    const daysText = days ? `${days} workday${toNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
+    return `
+      <span class="job-date-range">${html(dateRange)}</span>
+      <span class="job-workday-count">${html(daysText)}</span>
+    `;
+  }
+
+  function invoiceStatusControl(invoice, title, context) {
+    if (!invoice) return `<span class="status unsent dashboard-no-invoice" title="No invoice is attached yet">No Invoice</span>`;
+    const status = normalizeInvoiceStatus(invoice.status);
+    const statusClass = invoiceStatusClass(status);
+    return `
+      <select class="dashboard-inline-status-select invoice-status-workflow-select status ${attr(statusClass)}"
+        data-${context}-invoice-status-id="${attr(invoice.id)}"
+        aria-label="Change invoice status for ${attr(invoice.invoice_number || title)}">
+        ${invoiceStatusOptions(status)}
+      </select>
+    `;
+  }
+
+  function normalizeDashboardHeader() {
+    const headerRow = qs(".dashboard-active-jobs-table thead tr");
+    if (!headerRow) return;
+    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Invoice Status", "Dates", "Rate Total", "Actions"]
+      .map((label) => `<th>${html(label)}</th>`)
+      .join("");
+  }
+
+  function sectionHeader(title, count) {
+    return `
+      <tr class="open-jobs-section-row pimp-open-section-row" data-open-job-section="${attr(title)}">
+        <td colspan="8">
+          <div class="open-jobs-section-title">
+            <span>${html(title)}</span>
+            <strong>${html(count)} job${count === 1 ? "" : "s"}</strong>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  function renderOpenJobRow(job) {
+    const tracker = latestCostTrackerForJob(job.id);
+    const invoice = latestInvoiceForJob(job.id);
+    const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+    const invoiceSearchText = invoice ? `${invoice.invoice_number || ""} ${invoiceStatusLabel(invoice.status)}` : "No Invoice Unsent";
+    return `
+      <tr class="job-main-row professional-job-row dashboard-active-job-row open-job-row" data-dashboard-job-row-id="${attr(job.id)}" data-invoice-search-text="${attr(invoiceSearchText)}" title="Open job details for ${attr(title)}">
+        <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
+        <td data-label="Project Name" class="job-name-cell">
+          <div class="job-name-stack dashboard-project-stack">
+            <strong>${html(job.job_name || "-")}</strong>
+            ${documentIndicators(job)}
+          </div>
+        </td>
+        <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
+        <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
+        <td data-label="Invoice Status" class="dashboard-invoice-status-cell">${invoiceStatusControl(invoice, title, "open-jobs")}</td>
+        <td data-label="Dates" class="job-dates-cell">${jobDateMarkup(job)}</td>
+        <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
+        <td data-label="Actions" class="dashboard-actions-cell">
+          <div class="dashboard-actions-inline">
+            <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
+            <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  let renderingOpenJobs = false;
+
+  function renderOpenJobsGroupedByInvoiceStatus() {
+    const table = qs("#dashboardActiveJobsTable");
+    const count = qs("#dashboardActiveJobsCount");
+    if (!table) return;
+
+    renderingOpenJobs = true;
+    normalizeDashboardHeader();
+
+    const needsInvoice = openJobsForSection("needs_invoice");
+    const review = openJobsForSection("review");
+    const total = needsInvoice.length + review.length;
+    if (count) count.textContent = String(total);
+
+    const pieces = [];
+    if (needsInvoice.length) {
+      pieces.push(sectionHeader("No Invoice / Unsent Invoices", needsInvoice.length));
+      pieces.push(needsInvoice.map(renderOpenJobRow).join(""));
+    }
+    if (review.length) {
+      pieces.push(sectionHeader("Awaiting Approval / Submitted", review.length));
+      pieces.push(review.map(renderOpenJobRow).join(""));
+    }
+
+    table.innerHTML = pieces.join("") || `<tr><td colspan="8" class="muted">No open jobs found.</td></tr>`;
+    table.dataset.pimpOpenJobsSubmittedGrouped = "true";
+
+    cleanupSubmittedLabelsAndClasses(table);
+    renderingOpenJobs = false;
+    reapplyDomOnlySearch();
+  }
+
+  function cleanupSubmittedLabelsAndClasses(root = document) {
+    qsa('option[value="approved"]', root).forEach((option) => {
+      option.textContent = "Submitted";
+    });
+
+    qsa("select", root).forEach((select) => {
+      qsa('option[value="approved"]', select).forEach((option) => { option.textContent = "Submitted"; });
+      if (normalizeInvoiceStatus(select.value) === "approved") {
+        select.classList.remove("approved");
+        select.classList.add("submitted");
+      }
+    });
+
+    qsa(".status", root).forEach((node) => {
+      const visibleText = String(node.textContent || "").trim().toLowerCase();
+      if (visibleText === "approved") {
+        node.textContent = "Submitted";
+        node.classList.remove("approved");
+        node.classList.add("submitted");
+      }
+      if (node.classList.contains("approved")) {
+        node.classList.add("submitted");
+      }
+    });
+  }
+
+  function reapplyDomOnlySearch() {
+    const applyAll = window.PIMP_applyAllActiveTableSearchesOnly;
+    if (typeof applyAll !== "function") return;
+    window.setTimeout(applyAll, 0);
+    window.setTimeout(applyAll, 80);
+  }
+
+  function renderOpenJobsSoon() {
+    window.setTimeout(renderOpenJobsGroupedByInvoiceStatus, 0);
+    window.setTimeout(renderOpenJobsGroupedByInvoiceStatus, 80);
+  }
+
+  function wrapFunction(name, after) {
+    const previous = typeof window[name] === "function" ? window[name] : null;
+    if (!previous || previous.__pimpSubmittedOpenJobsWrapped) return;
+    const wrapped = function submittedOpenJobsWrapped() {
+      const result = previous.apply(this, arguments);
+      after();
+      return result;
+    };
+    wrapped.__pimpSubmittedOpenJobsWrapped = true;
+    window[name] = wrapped;
+    try { globalThis[name] = wrapped; } catch {}
+    try { eval(`${name} = window["${name}"]`); } catch {}
+  }
+
+  wrapFunction("renderAll", () => { renderOpenJobsGroupedByInvoiceStatus(); cleanupSubmittedLabelsAndClasses(); });
+  wrapFunction("renderDashboardLists", renderOpenJobsGroupedByInvoiceStatus);
+  wrapFunction("showView", () => { renderOpenJobsGroupedByInvoiceStatus(); cleanupSubmittedLabelsAndClasses(); });
+  wrapFunction("renderInvoices", () => cleanupSubmittedLabelsAndClasses(qs("#invoicesTable") || document));
+  wrapFunction("renderJobs", () => cleanupSubmittedLabelsAndClasses(qs("#jobsTable") || document));
+
+  window.renderDashboardActiveJobs = renderOpenJobsGroupedByInvoiceStatus;
+  try { renderDashboardActiveJobs = renderOpenJobsGroupedByInvoiceStatus; } catch {}
+  window.PIMP_renderOpenJobsGroupedByInvoiceStatus = renderOpenJobsGroupedByInvoiceStatus;
+  window.PIMP_invoiceStatusLabelFinal = invoiceStatusLabel;
+  window.PIMP_invoiceStatusOptionsFinal = invoiceStatusOptions;
+
+  document.addEventListener("change", (event) => {
+    const select = event.target?.closest?.('select[data-open-jobs-invoice-status-id], select[data-closed-jobs-invoice-status-id], select[data-dashboard-final-invoice-status-id], select[data-dashboard-invoice-status-id], select[data-invoice-status-id], select[data-job-details-invoice-status-id]');
+    if (!select) return;
+    qsa('option[value="approved"]', select).forEach((option) => { option.textContent = "Submitted"; });
+    if (normalizeInvoiceStatus(select.value) === "approved") {
+      select.classList.remove("approved");
+      select.classList.add("submitted");
+    }
+    renderOpenJobsSoon();
+    window.setTimeout(() => cleanupSubmittedLabelsAndClasses(), 120);
+    window.setTimeout(() => cleanupSubmittedLabelsAndClasses(), 500);
+  }, true);
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.("#dashboardActiveJobsSearch")) {
+      // Keep search DOM-only. The existing search guard will hide/show rows;
+      // this just keeps Submitted labels/classes intact after typing.
+      window.setTimeout(() => cleanupSubmittedLabelsAndClasses(qs("#dashboardActiveJobsTable") || document), 0);
+    }
+  }, true);
+
+  const observer = new MutationObserver(() => {
+    if (renderingOpenJobs) return;
+    window.clearTimeout(observer.__submittedTimer);
+    observer.__submittedTimer = window.setTimeout(() => {
+      cleanupSubmittedLabelsAndClasses();
+      const table = qs("#dashboardActiveJobsTable");
+      if (table && !table.querySelector(".pimp-open-section-row")) {
+        renderOpenJobsGroupedByInvoiceStatus();
+      }
+    }, 60);
+  });
+
+  function initializeSubmittedStatusPatch() {
+    cleanupSubmittedLabelsAndClasses();
+    renderOpenJobsGroupedByInvoiceStatus();
+    try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initializeSubmittedStatusPatch);
+  else initializeSubmittedStatusPatch();
+  window.setTimeout(initializeSubmittedStatusPatch, 0);
+  window.setTimeout(initializeSubmittedStatusPatch, 300);
+  window.setTimeout(initializeSubmittedStatusPatch, 1000);
+})();
+
+
+/* ========================================================================
+   FINAL LEGACY-INVOICE-STATUS TO SUBMITTED DISPLAY PATCH
+   ------------------------------------------------------------------------
+   Any old renderer may still output the raw database status "approved".
+   This patch keeps storage compatibility, but every user-facing invoice
+   status label shown on the website is changed to "Submitted".
+   ======================================================================== */
+(function installLegacyInvoiceStatusToSubmittedDisplayPatchFinal() {
+  const PATCH_FLAG = "__pimpLegacyInvoiceStatusToSubmittedDisplayPatchFinal";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  const qsa = (selector, root = document) => {
+    try { return Array.from(root.querySelectorAll(selector)); } catch { return []; }
+  };
+
+  function normalizeStatusText(text) {
+    return String(text || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  }
+
+  function isLegacySubmittedStatusText(text) {
+    return normalizeStatusText(text) === "approved";
+  }
+
+  function submittedLabelForStatus(value) {
+    const normalized = normalizeStatusText(value);
+    if (["approved", "approve", "submitted", "submit"].includes(normalized)) return "Submitted";
+    if (["awaiting_approval", "awaitingapproval", "awaiting", "pending", "sent", "overdue", "draft"].includes(normalized)) return "Awaiting Approval";
+    if (normalized === "paid") return "Paid";
+    if (normalized === "unsent" || normalized === "no_invoice" || normalized === "none") return "Unsent";
+    return value ? String(value) : "Unsent";
+  }
+
+  function markSubmittedClass(element) {
+    if (!element?.classList) return;
+    if (element.classList.contains("approved") || normalizeStatusText(element.value || element.textContent) === "approved") {
+      element.classList.remove("approved");
+      element.classList.add("submitted");
+      element.dataset.invoiceStatusDisplay = "submitted";
+    }
+  }
+
+  function fixSelect(select) {
+    if (!select) return;
+    qsa("option", select).forEach((option) => {
+      if (String(option.value || "").toLowerCase() === "approved" || isLegacySubmittedStatusText(option.textContent)) {
+        option.textContent = "Submitted";
+      }
+    });
+    markSubmittedClass(select);
+  }
+
+  function fixStatusElement(element) {
+    if (!element) return;
+    if (isLegacySubmittedStatusText(element.textContent)) {
+      element.textContent = "Submitted";
+    }
+    markSubmittedClass(element);
+  }
+
+  function fixExactLegacyStatusTextNodes(root) {
+    const scope = root || document.body;
+    if (!scope || !document.createTreeWalker) return;
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (["SCRIPT", "STYLE", "TEXTAREA", "INPUT"].includes(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        return /\bapproved\b/i.test(node.nodeValue || "") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((node) => {
+      const text = String(node.nodeValue || "");
+      // Only replace standalone visible status text, not unrelated prose.
+      if (isLegacySubmittedStatusText(text)) node.nodeValue = "Submitted";
+    });
+  }
+
+  function cleanupLegacyStatusLabels(root = document) {
+    qsa('option[value="approved"], option', root).forEach((option) => {
+      if (String(option.value || "").toLowerCase() === "approved" || isLegacySubmittedStatusText(option.textContent)) {
+        option.textContent = "Submitted";
+      }
+    });
+
+    qsa('select, .status, [class*="invoice-status"], [data-label="Invoice Status"], .dashboard-invoice-status-cell', root).forEach((element) => {
+      if (element.tagName === "SELECT") fixSelect(element);
+      else fixStatusElement(element);
+    });
+
+    fixExactLegacyStatusTextNodes(root === document ? document.body : root);
+  }
+
+  function wrap(name) {
+    const previous = typeof window[name] === "function" ? window[name] : null;
+    if (!previous || previous.__legacyStatusToSubmittedDisplayWrapped) return;
+    const wrapped = function legacyStatusToSubmittedDisplayWrapped() {
+      const result = previous.apply(this, arguments);
+      setTimeout(() => cleanupLegacyStatusLabels(), 0);
+      setTimeout(() => cleanupLegacyStatusLabels(), 80);
+      return result;
+    };
+    wrapped.__legacyStatusToSubmittedDisplayWrapped = true;
+    window[name] = wrapped;
+    try { globalThis[name] = wrapped; } catch {}
+    try { eval(`${name} = window["${name}"]`); } catch {}
+  }
+
+  [
+    "renderAll",
+    "renderDashboardLists",
+    "renderDashboardActiveJobs",
+    "renderJobs",
+    "renderInvoices",
+    "renderJobDetails",
+    "openJobDetailsModal",
+    "showView"
+  ].forEach(wrap);
+
+  // Override exposed helpers used by recent patches so future renders use Submitted.
+  window.PIMP_invoiceStatusLabelFinal = submittedLabelForStatus;
+  window.PIMP_invoiceStatusDisplayLabel = submittedLabelForStatus;
+
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (target?.matches?.('select, [class*="invoice-status"]')) {
+      setTimeout(() => cleanupLegacyStatusLabels(), 0);
+      setTimeout(() => cleanupLegacyStatusLabels(), 120);
+    }
+  }, true);
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.('.table-search, input, select')) {
+      setTimeout(() => cleanupLegacyStatusLabels(), 0);
+    }
+  }, true);
+
+  const observer = new MutationObserver(() => {
+    clearTimeout(observer.__legacyStatusToSubmittedTimer);
+    observer.__legacyStatusToSubmittedTimer = setTimeout(() => cleanupLegacyStatusLabels(), 40);
+  });
+
+  function initLegacyStatusToSubmittedDisplayPatch() {
+    cleanupLegacyStatusLabels();
+    try { observer.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch {}
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initLegacyStatusToSubmittedDisplayPatch);
+  else initLegacyStatusToSubmittedDisplayPatch();
+
+  setTimeout(initLegacyStatusToSubmittedDisplayPatch, 0);
+  setTimeout(initLegacyStatusToSubmittedDisplayPatch, 250);
+  setTimeout(initLegacyStatusToSubmittedDisplayPatch, 1000);
 })();

@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pro Insulation MP Dashboard</title>
-  <link rel="stylesheet" href="styles.css?v=20260616-dom-only-table-search-fix" />
+  <link rel="stylesheet" href="styles.css?v=20260616-login-fetch-fix" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -151,7 +151,16 @@
 
       <section id="jobsView" class="view">
         <div class="jobs-page-layout">
-<section class="panel table-panel jobs-table-panel">
+          <div class="jobs-page-action-bar panel">
+            <div>
+              <p class="eyebrow">Closed Jobs</p>
+              <h3>Manage closed jobs</h3>
+              <p class="tiny">Jobs move here automatically when their invoice status is marked Paid.</p>
+            </div>
+            <button class="btn primary" id="openJobModalBtn" type="button">+ Create Job</button>
+          </div>
+
+          <section class="panel table-panel jobs-table-panel">
             <div class="panel-header table-panel-header">
               <h3>Closed Jobs</h3>
               <div class="table-toolbar-inline">
@@ -419,7 +428,7 @@
                 <select name="status">
                   <option value="unsent">Unsent</option>
                   <option value="awaiting_approval">Awaiting Approval</option>
-                  <option value="approved">Approved</option>
+                  <option value="approved">Submitted</option>
                   <option value="paid">Paid</option>
                 </select>
               </label>
@@ -833,6 +842,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script src="app.js?v=20260616-dom-only-table-search-fix"></script>
+  <script src="app.js?v=20260616-login-fetch-fix"></script>
 </body>
 </html>
