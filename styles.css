@@ -11587,3 +11587,241 @@ select.status.approved,
     grid-template-columns: 1fr !important;
   }
 }
+
+
+/* ========================================================================
+   FINAL CREATE/EDIT INVOICE = VIEW INVOICE LAYOUT
+   ------------------------------------------------------------------------
+   The live create/edit invoice uses form fields, while the View invoice uses
+   a rendered static invoice. Older editor-only inch-based overrides moved the
+   payment block into the totals block. These final rules force the editor,
+   preview, and PDF/export invoice to share the same A4 portrait coordinates.
+   ======================================================================== */
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor,
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor.one-page-invoice,
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor.a4-invoice-page,
+.invoice-preview-content .invoice-template-document,
+.invoice-preview-content .invoice-template-document.one-page-invoice,
+.invoice-preview-content .invoice-template-document.a4-invoice-page {
+  width: 210mm !important;
+  height: 297mm !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  display: block !important;
+  position: relative !important;
+  padding: 0 !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  overflow: hidden !important;
+  background: #fff !important;
+  color: #111 !important;
+  font-family: Arial, Helvetica, sans-serif !important;
+  border: 1px solid #d8dde6 !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-logo,
+.invoice-preview-content .invoice-template-document .invoice-template-logo {
+  left: 18mm !important;
+  top: 17mm !important;
+  width: 42mm !important;
+  height: 18mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-company,
+.invoice-preview-content .invoice-template-document .invoice-template-company {
+  left: 18mm !important;
+  top: 39mm !important;
+  width: 78mm !important;
+  height: 25mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-title,
+.invoice-preview-content .invoice-template-document .invoice-template-title {
+  left: 142mm !important;
+  top: 18mm !important;
+  width: 50mm !important;
+  height: 12mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-date-label,
+.invoice-preview-content .invoice-template-document .invoice-template-date-label {
+  left: 141mm !important;
+  top: 43mm !important;
+  width: 46mm !important;
+  height: 6mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-date-value,
+.invoice-preview-content .invoice-template-document .invoice-template-date-value {
+  left: 141mm !important;
+  top: 49mm !important;
+  width: 46mm !important;
+  height: 7mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-number-label,
+.invoice-preview-content .invoice-template-document .invoice-template-number-label {
+  left: 141mm !important;
+  top: 59mm !important;
+  width: 46mm !important;
+  height: 6mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-number-value,
+.invoice-preview-content .invoice-template-document .invoice-template-number-value {
+  left: 141mm !important;
+  top: 65mm !important;
+  width: 46mm !important;
+  height: 7mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-bill-label,
+.invoice-preview-content .invoice-template-document .invoice-template-bill-label {
+  left: 18mm !important;
+  top: 78mm !important;
+  width: 90mm !important;
+  height: 7mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-bill-value,
+.invoice-preview-content .invoice-template-document .invoice-template-bill-value {
+  left: 18mm !important;
+  top: 85mm !important;
+  width: 90mm !important;
+  height: 28mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-po-label,
+.invoice-preview-content .invoice-template-document .invoice-template-po-label {
+  left: 108mm !important;
+  top: 99mm !important;
+  width: 33mm !important;
+  height: 7mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-terms-label,
+.invoice-preview-content .invoice-template-document .invoice-template-terms-label {
+  left: 141mm !important;
+  top: 99mm !important;
+  width: 25mm !important;
+  height: 7mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-project-label,
+.invoice-preview-content .invoice-template-document .invoice-template-project-label {
+  left: 166mm !important;
+  top: 99mm !important;
+  width: 26mm !important;
+  height: 7mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-po-value,
+.invoice-preview-content .invoice-template-document .invoice-template-po-value {
+  left: 108mm !important;
+  top: 106mm !important;
+  width: 33mm !important;
+  height: 8mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-terms-value,
+.invoice-preview-content .invoice-template-document .invoice-template-terms-value {
+  left: 141mm !important;
+  top: 106mm !important;
+  width: 25mm !important;
+  height: 8mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-project-value,
+.invoice-preview-content .invoice-template-document .invoice-template-project-value {
+  left: 166mm !important;
+  top: 106mm !important;
+  width: 26mm !important;
+  height: 8mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines,
+.invoice-preview-content .invoice-template-document .invoice-template-lines {
+  left: 12mm !important;
+  top: 122mm !important;
+  width: 186mm !important;
+  height: 78mm !important;
+  max-height: 78mm !important;
+  overflow: hidden !important;
+  z-index: 5 !important;
+  background: #fff !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines table,
+.invoice-preview-content .invoice-template-document .invoice-template-lines table {
+  height: 100% !important;
+  min-height: 100% !important;
+  table-layout: fixed !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines tbody tr,
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-empty-row td,
+.invoice-preview-content .invoice-template-document .invoice-template-lines tbody tr,
+.invoice-preview-content .invoice-template-document .invoice-empty-row td {
+  height: 8.875mm !important;
+  min-height: 8.875mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-description,
+.invoice-preview-content .invoice-template-document .invoice-template-description {
+  left: 12mm !important;
+  top: 204mm !important;
+  width: 104mm !important;
+  height: 24mm !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-payee,
+.invoice-preview-content .invoice-template-document .invoice-template-payee {
+  left: 18mm !important;
+  top: 232mm !important;
+  width: 94mm !important;
+  height: 9mm !important;
+  z-index: 60 !important;
+  background: #fff !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire-title,
+.invoice-preview-content .invoice-template-document .invoice-template-wire-title {
+  left: 18mm !important;
+  top: 241mm !important;
+  width: 94mm !important;
+  height: 7mm !important;
+  z-index: 60 !important;
+  background: #fff !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire,
+.invoice-preview-content .invoice-template-document .invoice-template-wire {
+  left: 18mm !important;
+  top: 248mm !important;
+  width: 94mm !important;
+  height: 31mm !important;
+  z-index: 60 !important;
+  background: #fff !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-totals,
+.invoice-preview-content .invoice-template-document .invoice-template-totals {
+  left: 116mm !important;
+  top: 232mm !important;
+  width: 82mm !important;
+  height: 47mm !important;
+  z-index: 60 !important;
+  background: #fff !important;
+}
+
+/* Keep a visible gutter between bank details and totals in the editor. */
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-payee,
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire-title,
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire {
+  right: auto !important;
+}
+
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-totals {
+  right: auto !important;
+}
