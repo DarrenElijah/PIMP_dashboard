@@ -10978,3 +10978,612 @@ select.status.approved,
   color: #92400e !important;
   border-color: #f59e0b !important;
 }
+
+/* ========================================================================
+   FINAL INVOICE MODAL WIDTH + PROJECT DATES COLUMN PATCH
+   ------------------------------------------------------------------------
+   Keeps the invoice editor design/function intact, but removes nested invoice
+   scrollbars in the create/edit popup and fits the invoice page to the window.
+   ======================================================================== */
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode,
+#invoiceTemplateModalOverlay.invoice-modal-overlay,
+#invoiceTemplateModalOverlay.template-modal-overlay {
+  overflow: hidden !important;
+  align-items: flex-start !important;
+  padding: 14px !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-modal-card,
+#invoiceTemplateModalOverlay .template-modal-card.invoice-modal-card {
+  width: min(1280px, calc(100vw - 28px)) !important;
+  max-width: calc(100vw - 28px) !important;
+  max-height: calc(100vh - 28px) !important;
+  overflow: hidden !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .template-modal-body,
+#invoiceTemplateModalOverlay .invoice-modal-card .template-modal-body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding: 14px !important;
+  max-height: calc(100vh - 106px) !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode #invoiceForm.invoice-template-panel,
+#invoiceTemplateModalOverlay .invoice-modal-card #invoiceForm.invoice-template-panel {
+  overflow: visible !important;
+  max-width: 100% !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-template-scroll,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-template-scroll {
+  overflow: visible !important;
+  height: auto !important;
+  max-height: none !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode #invoiceTemplateEditor.invoice-template-document,
+#invoiceTemplateModalOverlay .invoice-modal-card #invoiceTemplateEditor.invoice-template-document {
+  transform: none !important;
+  transform-origin: top center !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  flex: 0 0 auto !important;
+}
+
+#invoiceTemplateEditor .invoice-template-lines th.qty-col,
+#invoiceTemplateEditor .invoice-template-lines th.project-dates-col,
+.invoice-template-document .invoice-template-lines th.project-dates-col {
+  white-space: normal !important;
+  line-height: 1.1 !important;
+}
+
+#invoiceTemplateEditor .invoice-project-dates-cell,
+.invoice-template-document .invoice-project-dates-cell {
+  vertical-align: top !important;
+  text-align: left !important;
+  font-size: 0.72rem !important;
+  line-height: 1.15 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+#invoiceTemplateEditor .invoice-project-dates-cell input[data-field="quantity"] {
+  display: none !important;
+}
+
+#invoiceTemplateEditor .invoice-project-dates-display {
+  display: block !important;
+  width: 100% !important;
+  min-height: 100% !important;
+  padding: 2px 3px !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: #111111 !important;
+  font-size: 0.72rem !important;
+  line-height: 1.15 !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
+#invoiceTemplateEditor .invoice-template-wire-title,
+.invoice-template-document .invoice-template-wire-title {
+  color: transparent !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+
+#invoiceTemplateEditor textarea,
+#invoiceTemplateEditor input {
+  text-overflow: clip !important;
+}
+
+#invoiceTemplateEditor .invoice-template-company textarea,
+#invoiceTemplateEditor .invoice-template-wire textarea,
+#invoiceTemplateEditor .invoice-template-bill-value textarea,
+#invoiceTemplateEditor .invoice-template-description textarea {
+  overflow: hidden !important;
+  white-space: pre-wrap !important;
+}
+
+
+/* ========================================================================
+   FINAL CREATE-INVOICE WINDOW OVERLAP / TERMS PATCH
+   ------------------------------------------------------------------------
+   Keeps the invoice sheet above the sticky action bar and ensures the Clear
+   Invoice / Save Invoice buttons remain clickable and visible in the popup.
+   ======================================================================== */
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-modal-card,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-modal-card,
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .template-modal-body,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .template-modal-body,
+#invoiceTemplateModalOverlay .invoice-modal-card .template-modal-body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  scroll-padding-bottom: var(--invoice-actions-reserved-space, 120px) !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved #invoiceForm.invoice-template-panel,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode #invoiceForm.invoice-template-panel,
+#invoiceTemplateModalOverlay .invoice-modal-card #invoiceForm.invoice-template-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: visible !important;
+  padding-bottom: 0 !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-template-scroll,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-template-scroll,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-template-scroll {
+  flex: 0 0 auto !important;
+  margin-bottom: 18px !important;
+  padding-bottom: 28px !important;
+  isolation: isolate !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-template-scroll::after,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-template-scroll::after,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-template-scroll::after {
+  content: "";
+  display: block;
+  height: 18px;
+  clear: both;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-save-strip,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-save-strip,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-save-strip {
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 250 !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 12px 14px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(191, 219, 254, 0.95) !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 -10px 28px rgba(15, 23, 42, 0.16) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-save-strip .btn,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-save-strip .btn,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-save-strip .btn {
+  position: relative !important;
+  z-index: 251 !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved #invoiceTemplateEditor.invoice-template-document,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode #invoiceTemplateEditor.invoice-template-document,
+#invoiceTemplateModalOverlay .invoice-modal-card #invoiceTemplateEditor.invoice-template-document {
+  z-index: 1 !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved #invoiceTemplateEditor .invoice-template-payee,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved #invoiceTemplateEditor .invoice-template-wire,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved #invoiceTemplateEditor .invoice-template-totals,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode #invoiceTemplateEditor .invoice-template-payee,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode #invoiceTemplateEditor .invoice-template-wire,
+#invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode #invoiceTemplateEditor .invoice-template-totals {
+  z-index: 20 !important;
+}
+
+#invoiceTemplateEditor .invoice-template-terms-value input::placeholder {
+  color: #94a3b8;
+}
+
+/* ========================================================================
+   ABSOLUTE FINAL INVOICE MODAL NO-OVERLAP PATCH
+   ------------------------------------------------------------------------
+   Prevents the invoice page from covering the bottom action buttons and keeps
+   the payment block separated from the totals block in create/edit windows.
+   ======================================================================== */
+#invoiceTemplateModalOverlay.invoice-no-overlap-final .invoice-modal-card,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-modal-card,
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-no-overlap-final .template-modal-body,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .template-modal-body,
+#invoiceTemplateModalOverlay .invoice-modal-card .template-modal-body {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-bottom: 28px !important;
+  scroll-padding-bottom: var(--invoice-actions-reserved-space, 150px) !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-no-overlap-final #invoiceForm.invoice-template-panel,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved #invoiceForm.invoice-template-panel,
+#invoiceTemplateModalOverlay .invoice-modal-card #invoiceForm.invoice-template-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: visible !important;
+  gap: 0 !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-no-overlap-final .invoice-template-scroll,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-template-scroll,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-template-scroll {
+  flex: 0 0 auto !important;
+  overflow: visible !important;
+  height: auto !important;
+  max-height: none !important;
+  margin-bottom: 0 !important;
+  padding-bottom: calc(var(--invoice-actions-reserved-space, 150px) + 34px) !important;
+  isolation: isolate !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-no-overlap-final .invoice-template-scroll::after,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-template-scroll::after,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-template-scroll::after {
+  content: "" !important;
+  display: block !important;
+  height: var(--invoice-actions-reserved-space, 150px) !important;
+  clear: both !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-no-overlap-final .invoice-save-strip,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-save-strip,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-save-strip {
+  position: relative !important;
+  bottom: auto !important;
+  z-index: 500 !important;
+  flex: 0 0 auto !important;
+  margin: 24px 0 0 !important;
+  padding: 12px 14px !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(191, 219, 254, 0.95) !important;
+  background: #ffffff !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16) !important;
+}
+
+#invoiceTemplateModalOverlay.invoice-no-overlap-final .invoice-save-strip .btn,
+#invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-save-strip .btn,
+#invoiceTemplateModalOverlay .invoice-modal-card .invoice-save-strip .btn {
+  position: relative !important;
+  z-index: 501 !important;
+}
+
+#invoiceTemplateEditor .invoice-template-payee,
+.invoice-template-document.a4-invoice-page .invoice-template-payee,
+.invoice-template-document.one-page-invoice .invoice-template-payee,
+.invoice-preview-content .invoice-template-document .invoice-template-payee,
+.pdf-workbench .invoice-template-document .invoice-template-payee,
+.invoice-pdf-workbench .invoice-template-document .invoice-template-payee {
+  left: 16mm !important;
+  width: 88mm !important;
+  max-width: 88mm !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: clip !important;
+  font-size: 13px !important;
+  z-index: 20 !important;
+}
+
+#invoiceTemplateEditor .invoice-template-wire-title,
+.invoice-template-document.a4-invoice-page .invoice-template-wire-title,
+.invoice-template-document.one-page-invoice .invoice-template-wire-title,
+.invoice-preview-content .invoice-template-document .invoice-template-wire-title,
+.pdf-workbench .invoice-template-document .invoice-template-wire-title,
+.invoice-pdf-workbench .invoice-template-document .invoice-template-wire-title,
+#invoiceTemplateEditor .invoice-template-wire,
+.invoice-template-document.a4-invoice-page .invoice-template-wire,
+.invoice-template-document.one-page-invoice .invoice-template-wire,
+.invoice-preview-content .invoice-template-document .invoice-template-wire,
+.pdf-workbench .invoice-template-document .invoice-template-wire,
+.invoice-pdf-workbench .invoice-template-document .invoice-template-wire {
+  left: 16mm !important;
+  width: 88mm !important;
+  max-width: 88mm !important;
+  overflow: hidden !important;
+  z-index: 20 !important;
+}
+
+#invoiceTemplateEditor .invoice-template-totals,
+.invoice-template-document.a4-invoice-page .invoice-template-totals,
+.invoice-template-document.one-page-invoice .invoice-template-totals,
+.invoice-preview-content .invoice-template-document .invoice-template-totals,
+.pdf-workbench .invoice-template-document .invoice-template-totals,
+.invoice-pdf-workbench .invoice-template-document .invoice-template-totals {
+  left: 116mm !important;
+  width: 82mm !important;
+  max-width: 82mm !important;
+  z-index: 35 !important;
+  background: #ffffff !important;
+}
+
+
+
+/* Final: keep Open Jobs from flashing an older table while the final renderer runs. */
+#dashboardActiveJobsTable[data-pimp-stable-rendering="true"] {
+  opacity: 0;
+}
+
+/* Final: remove number spinner arrows from timesheet hours inputs only. */
+#timesheetEmployeeRows input[data-ts-field="hours"]::-webkit-outer-spin-button,
+#timesheetEmployeeRows input[data-ts-field="hours"]::-webkit-inner-spin-button,
+.timesheet-employee-row input[data-ts-field="hours"]::-webkit-outer-spin-button,
+.timesheet-employee-row input[data-ts-field="hours"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+#timesheetEmployeeRows input[data-ts-field="hours"],
+.timesheet-employee-row input[data-ts-field="hours"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+/* Final: allow the longer T&M/AFE/WO/PO label to fit in job and cost tracker headers. */
+.tm-afe-field,
+.sheet-job-picker,
+.sheet-meta-cell {
+  min-width: 0;
+}
+
+.tm-afe-input-row {
+  grid-template-columns: minmax(92px, 130px) minmax(0, 1fr);
+}
+
+#jobTmAfeMode {
+  min-width: 92px;
+}
+
+
+/* Final: edit cost tracker header date/label fit fixes. */
+#costTrackerForm .sheet-meta-grid {
+  grid-template-columns:
+    minmax(0, 1.28fr)
+    minmax(126px, 1.08fr)
+    minmax(150px, 1.02fr)
+    minmax(0, 1fr)
+    minmax(70px, 0.48fr)
+    minmax(0, 1.08fr) !important;
+  align-items: stretch !important;
+}
+
+#costTrackerForm .sheet-meta-cell.tm-afe-wo-po-header-cell {
+  font-size: clamp(0.54rem, 0.52vw, 0.72rem) !important;
+  letter-spacing: -0.03em !important;
+  gap: 3px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-meta-cell.tm-afe-wo-po-header-cell strong {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#costTrackerForm .project-dates-cell {
+  white-space: nowrap !important;
+}
+
+#costTrackerForm .project-dates-cell input[name="cost_tracker_date"] {
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  font-size: clamp(0.58rem, 0.52vw, 0.72rem) !important;
+  text-overflow: ellipsis !important;
+}
+
+#costTrackerForm .sheet-job-picker {
+  white-space: normal !important;
+  line-height: 1.15 !important;
+}
+
+
+/* ========================================================================
+   FINAL COST TRACKER HEADER LEFT-SHIFT + VIEW/EDIT MATCH
+   ------------------------------------------------------------------------
+   Project Dates and T&M/AFE/WO/PO are kept near the left side of the header
+   and given enough room to be readable. The view/preview header uses the
+   same layout as the edit cost tracker header.
+   ======================================================================== */
+#costTrackerForm .sheet-meta-grid,
+#costTrackerPreviewContent .cost-sheet-preview .sheet-meta-grid,
+#costTrackerPreviewContent .original-cost-template-preview .sheet-meta-grid {
+  display: grid !important;
+  grid-template-columns:
+    minmax(104px, 0.72fr)
+    minmax(190px, 1.38fr)
+    minmax(188px, 1.30fr)
+    minmax(108px, 0.88fr)
+    minmax(64px, 0.46fr)
+    minmax(145px, 1.06fr) !important;
+  gap: 0 !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+#costTrackerForm .sheet-meta-cell,
+#costTrackerPreviewContent .cost-sheet-preview .sheet-meta-cell,
+#costTrackerPreviewContent .original-cost-template-preview .sheet-meta-cell {
+  min-width: 0 !important;
+  min-height: 29px !important;
+  padding: 2px 4px !important;
+  gap: 3px !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+  font-size: clamp(0.58rem, 0.55vw, 0.76rem) !important;
+  line-height: 1.08 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#costTrackerForm .cost-tracker-name-meta,
+#costTrackerPreviewContent .cost-sheet-preview .sheet-meta-cell:first-child,
+#costTrackerPreviewContent .original-cost-template-preview .sheet-meta-cell:first-child {
+  font-size: clamp(0.52rem, 0.50vw, 0.70rem) !important;
+  letter-spacing: -0.035em !important;
+}
+
+#costTrackerForm .project-dates-cell,
+#costTrackerPreviewContent .cost-sheet-preview .project-dates-cell,
+#costTrackerPreviewContent .original-cost-template-preview .project-dates-cell,
+#costTrackerForm .tm-afe-wo-po-header-cell,
+#costTrackerPreviewContent .cost-sheet-preview .tm-afe-wo-po-header-cell,
+#costTrackerPreviewContent .original-cost-template-preview .tm-afe-wo-po-header-cell {
+  font-size: clamp(0.54rem, 0.52vw, 0.72rem) !important;
+  letter-spacing: -0.045em !important;
+  padding-left: 3px !important;
+  padding-right: 3px !important;
+  flex-wrap: nowrap !important;
+}
+
+#costTrackerForm .project-dates-cell input[name="cost_tracker_date"],
+#costTrackerForm .project-dates-cell strong,
+#costTrackerPreviewContent .cost-sheet-preview .project-dates-cell strong,
+#costTrackerPreviewContent .original-cost-template-preview .project-dates-cell strong,
+#costTrackerForm .tm-afe-wo-po-header-cell strong,
+#costTrackerPreviewContent .cost-sheet-preview .tm-afe-wo-po-header-cell strong,
+#costTrackerPreviewContent .original-cost-template-preview .tm-afe-wo-po-header-cell strong {
+  min-width: 0 !important;
+  width: auto !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  font-size: inherit !important;
+}
+
+#costTrackerPreviewContent .cost-sheet-preview,
+#costTrackerPreviewContent .original-cost-template-preview {
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 980px) {
+  #costTrackerForm .sheet-meta-grid,
+  #costTrackerPreviewContent .cost-sheet-preview .sheet-meta-grid,
+  #costTrackerPreviewContent .original-cost-template-preview .sheet-meta-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ========================================================================
+   FINAL COST TRACKER VIEW = EDIT WINDOW MATCH PATCH
+   ======================================================================== */
+#costTrackerPreviewContent .exact-edit-cost-tracker-view {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  padding: 6px 6px 14px !important;
+  box-shadow: none !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-grid-layout {
+  width: 100% !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 63.8%) minmax(0, 36.2%) !important;
+  gap: 6px !important;
+  align-items: start !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-table {
+  table-layout: fixed !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-table th,
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-table td {
+  height: 18px !important;
+  min-height: 18px !important;
+  padding: 0 !important;
+  line-height: 1.02 !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view input,
+#costTrackerPreviewContent .exact-edit-cost-tracker-view textarea,
+#costTrackerPreviewContent .exact-edit-cost-tracker-view select {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: transparent;
+  color: #111827 !important;
+  font: inherit !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-table input,
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-table select {
+  width: 100% !important;
+  min-height: 17px !important;
+  height: 17px !important;
+  padding: 1px 2px !important;
+  font-size: inherit !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-add-btn,
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-remove-btn {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .desc-col { width: 19% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .qty-col { width: 5.5% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .hours-col { width: 7% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .money-col { width: 7.5% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .total-col { width: 9.2% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .action-col { width: 3% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .right-desc-col { width: 45% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .right-cost-col { width: 17% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .right-markup-col { width: 16% !important; }
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .right-total-col { width: 19% !important; }
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-comments-grid {
+  width: 100% !important;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 0.35fr) !important;
+  gap: 6px !important;
+  margin-top: 18px !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-comments-grid textarea {
+  min-height: 92px !important;
+  resize: none !important;
+  background: #ffffff !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-manual-total-overrides input,
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-comments-grid input,
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-comments-grid textarea {
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  padding: 8px 10px !important;
+}
+
+#costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-summary-block {
+  margin: 18px 0 0 auto !important;
+  width: min(100%, 430px) !important;
+  grid-template-columns: minmax(0, 1.35fr) minmax(70px, 0.55fr) minmax(86px, 0.8fr) !important;
+  gap: 6px 0 !important;
+}
+
+@media (max-width: 980px) {
+  #costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-grid-layout,
+  #costTrackerPreviewContent .exact-edit-cost-tracker-view .sheet-comments-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
