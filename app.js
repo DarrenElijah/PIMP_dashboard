@@ -356,68 +356,9 @@ async function handleSignOut() {
   showCorrectScreen();
 }
 
-async function loadAllData() {
-  if (!state.supabase || !state.session) return;
-
-  try {
-    const [
-      clients,
-      jobs,
-      costTrackers,
-      invoices,
-      employees,
-      assignments,
-      timesheets,
-      documents
-    ] = await Promise.all([
-      selectTable("clients", "*", "company_name", true),
-      selectTable("jobs", "*", "last_synced_at", false),
-      selectTable("cost_trackers", "*", "last_synced_at", false),
-      selectTable("invoices", "*", "invoice_date", false),
-      selectTable("employees", "*", "full_name", true),
-      selectTable("job_assignments", "*", "created_at", false),
-      selectTable("timesheets", "*", "work_date", false),
-      selectTable("documents", "*", "last_synced_at", false)
-    ]);
-
-    state.data.clients = clients;
-    state.data.jobs = jobs;
-    state.data.costTrackers = costTrackers;
-    state.data.invoices = invoices;
-    state.data.employees = employees;
-    state.data.assignments = assignments;
-    state.data.timesheets = timesheets;
-    state.data.documents = documents;
-
-    hydrateSelects();
-    renderAll();
-    showToast("Dashboard data refreshed.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function selectTable(table, columns = "*", orderColumn = "created_at", ascending = false) {
-  const { data, error } = await state.supabase
-    .from(table)
-    .select(columns)
-    .order(orderColumn, { ascending })
-    .limit(500);
-
-  if (error) {
-    if (["employees", "job_assignments", "timesheets"].includes(table)) {
-      console.warn(`${table} not available yet:`, error.message);
-      return [];
-    }
-
-    throw error;
-  }
-
-  return data || [];
-}
-
+/* optimized: removed dead duplicate loadAllData (live copy defined later) */
+/* optimized: removed dead duplicate selectTable (live copy defined later) */
 /* optimized: removed older duplicate function showView */
-
 /* optimized: removed older duplicate function renderAll */
 
 function getActiveSearchTerm() {
@@ -527,154 +468,12 @@ function createMiniCardList(items, renderer) {
 
 /* optimized: removed older duplicate function hydrateSelects */
 
-async function handleCreateJob(event) {
-  event.preventDefault();
+/* optimized: removed dead duplicate handleCreateJob #1 (live copy defined later) */
+/* optimized: removed dead duplicate upsertClient #1 (live copy defined later) */
 
-  const form = event.currentTarget;
-  const values = formToObject(form);
-
-  try {
-    const client = await upsertClient(values.company_name, values.contact_name);
-
-    const payload = {
-      job_number: values.job_number,
-      job_name: values.job_name,
-      client_id: client?.id || null,
-      company_name: values.company_name,
-      location: values.location || null,
-      status: values.status || "active",
-      start_date: values.start_date || null,
-      end_date: values.end_date || values.start_date || null,
-      google_drive_url: values.google_drive_url || null,
-      external_source: "dashboard",
-      external_id: `job:${values.job_number}`,
-      last_synced_at: new Date().toISOString()
-    };
-
-    await insertRow("jobs", payload);
-    form.reset();
-    await loadAllData();
-    showToast("Job created.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function upsertClient(companyName, contactName) {
-  if (!companyName) return null;
-
-  const existing = state.data.clients.find(
-    (client) => (client.company_name || "").toLowerCase() === companyName.toLowerCase()
-  );
-
-  if (existing) return existing;
-
-  return insertRow("clients", {
-    company_name: companyName,
-    contact_name: contactName || null,
-    active: true,
-    external_source: "dashboard",
-    external_id: `client:${companyName}`,
-    last_synced_at: new Date().toISOString()
-  });
-}
-
-async function handleSaveCostTracker(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const job = findJob(values.job_id);
-
-  const labor = number(values.labor_cost);
-  const material = number(values.material_cost);
-  const equipment = number(values.equipment_cost);
-  const subcontractor = number(values.subcontractor_cost);
-  const other = number(values.other_cost);
-  const quoted = number(values.quoted_price);
-  const total = labor + material + equipment + subcontractor + other;
-  const profit = quoted - total;
-  const margin = quoted > 0 ? profit / quoted : 0;
-
-  const payload = {
-    job_id: values.job_id,
-    labor_cost: labor,
-    material_cost: material,
-    equipment_cost: equipment,
-    subcontractor_cost: subcontractor,
-    other_cost: other,
-    quoted_price: quoted,
-    notes: values.notes || null,
-    external_source: "dashboard",
-    external_id: `cost-tracker:${job?.job_number || values.job_id}`,
-    last_synced_at: new Date().toISOString()
-  };
-
-  try {
-    await manualUpsert("cost_trackers", payload, "external_id");
-    form.reset();
-    await loadAllData();
-    showToast("Cost tracker saved.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function handleCreateInvoice(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const job = findJob(values.job_id);
-
-  const payload = {
-    job_id: values.job_id,
-    client_id: job?.client_id || null,
-    invoice_number: values.invoice_number,
-    invoice_date: values.invoice_date || today(),
-    due_date: values.due_date || addDays(today(), 30),
-    subtotal: number(values.subtotal),
-    tax: number(values.tax),
-    status: values.status || "draft",
-    pdf_url: values.pdf_url || null,
-    google_drive_url: values.pdf_url || null,
-    external_source: "dashboard",
-    external_id: `invoice:${values.invoice_number}`,
-    last_synced_at: new Date().toISOString()
-  };
-
-  try {
-    await insertRow("invoices", payload);
-    form.reset();
-    await loadAllData();
-    showToast("Invoice record created.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function handleCreateEmployee(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-
-  try {
-    await insertRow("employees", {
-      full_name: values.full_name,
-      email: values.email || null,
-      phone: values.phone || null,
-      role: values.role || null,
-      status: values.status || "active"
-    });
-
-    form.reset();
-    await loadAllData();
-    showToast("Employee added.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
+/* optimized: removed dead duplicate handleSaveCostTracker #1 (live copy defined later) */
+/* optimized: removed dead duplicate handleCreateInvoice #1 (live copy defined later) */
+/* optimized: removed dead duplicate handleCreateEmployee #1 (live copy defined later) */
 
 async function handleCreateAssignment(event) {
   event.preventDefault();
@@ -1354,129 +1153,9 @@ function summarizeCostItems(items, overrideQuoted = null) {
 
 /* optimized: removed older duplicate function recomputeInvoiceTotals */
 
-async function handleCreateJob(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-
-  try {
-    const client = await upsertClient(values.company_name, values.contact_name);
-
-    const payload = {
-      job_number: values.job_number,
-      job_name: values.job_name,
-      client_id: client?.id || null,
-      company_name: values.company_name,
-      contact_name: values.contact_name || null,
-      location: values.location || null,
-      job_dates: values.job_dates || null,
-      total_job_days: values.total_job_days ? number(values.total_job_days) : null,
-      status: values.status || "active",
-      start_date: values.start_date || null,
-      end_date: values.end_date || values.start_date || null,
-      google_drive_url: values.google_drive_url || null,
-      external_source: "dashboard",
-      external_id: `job:${values.job_number}`,
-      last_synced_at: new Date().toISOString()
-    };
-
-    await manualUpsert("jobs", payload, "external_id");
-    form.reset();
-    await loadAllData();
-    showToast("Job saved to Supabase.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function handleSaveCostTracker(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const job = findJob(values.job_id);
-  const { items, summary } = recomputeCostTrackerTotals();
-
-  const payload = {
-    job_id: values.job_id,
-    labor_cost: summary.laborCost,
-    material_cost: summary.materialCost,
-    equipment_cost: summary.equipmentCost,
-    subcontractor_cost: summary.subcontractorCost,
-    other_cost: summary.otherCost,
-    quoted_price: summary.quotedPrice,
-    notes: values.notes || null,
-    line_items: items,
-    summary: {
-      ...summary,
-      totalJobDays: number(values.total_job_days),
-      quotedPriceOverride: values.quoted_price_override ? number(values.quoted_price_override) : null
-    },
-    external_source: "dashboard_builder",
-    external_id: `cost-tracker:${job?.job_number || values.job_id}`,
-    last_synced_at: new Date().toISOString()
-  };
-
-  try {
-    await manualUpsert("cost_trackers", payload, "external_id");
-    resetCostTrackerForm(true);
-    await loadAllData();
-    showToast("Cost tracker generated and saved to Supabase.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function handleCreateInvoice(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const job = findJob(values.job_id);
-  const { items, summary } = recomputeInvoiceTotals();
-  const invoiceNumber = values.invoice_number || generateInvoiceNumber();
-
-  const invoiceData = buildInvoiceData(values, job, items, summary, invoiceNumber);
-
-  const payload = {
-    job_id: values.job_id,
-    client_id: job?.client_id || null,
-    invoice_number: invoiceNumber,
-    invoice_date: values.invoice_date || today(),
-    due_date: values.due_date || addDays(values.invoice_date || today(), 30),
-    subtotal: summary.subtotal,
-    tax: summary.tax,
-    status: values.status || "draft",
-    pdf_url: values.pdf_url || null,
-    google_drive_url: values.pdf_url || null,
-    bill_to: values.bill_to || null,
-    po_number: values.po_number || job?.job_number || null,
-    terms: values.terms || null,
-    project: values.project || job?.job_name || null,
-    description: values.description || null,
-    tax_rate: number(values.tax_rate),
-    payments: number(values.payments),
-    line_items: items,
-    html_snapshot: renderInvoiceHtml(invoiceData),
-    external_source: "dashboard_builder",
-    external_id: `invoice:${invoiceNumber}`,
-    last_synced_at: new Date().toISOString()
-  };
-
-  try {
-    await manualUpsert("invoices", payload, "external_id");
-    form.reset();
-    clearInvoiceLines();
-    buildDefaultInvoiceRows();
-    setDefaultInvoiceDates();
-    recomputeInvoiceTotals();
-    await loadAllData();
-    showToast("Invoice generated and saved to Supabase.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
+/* optimized: removed dead duplicate handleCreateJob #2 (live copy defined later) */
+/* optimized: removed dead duplicate handleSaveCostTracker #2 (live copy defined later) */
+/* optimized: removed dead duplicate handleCreateInvoice #2 (live copy defined later) */
 
 /* optimized: removed older duplicate function renderCostTrackers */
 
@@ -1557,10 +1236,7 @@ const FACTORY_TEMPLATE_NAME = "Default Cost Tracker Template";
 let currentCostTrackerPreviewHtml = "";
 let currentInvoicePreviewHtml = "";
 
-function on(selector, eventName, handler) {
-  const node = $(selector);
-  if (node) node.addEventListener(eventName, handler);
-}
+/* optimized: removed dead duplicate on() #1 (live copy defined later) */
 
 function init() {
   state.data.rateTemplates = [];
@@ -1578,84 +1254,8 @@ function init() {
 
 /* optimized: removed older duplicate function bindEvents */
 
-async function loadAllData(options = {}) {
-  if (!state.supabase || !state.session) return;
-
-  const silent = options?.silent === true;
-
-  try {
-    const [
-      clients,
-      jobs,
-      costTrackers,
-      invoices,
-      employees,
-      assignments,
-      timesheets,
-      documents,
-      rateTemplates
-    ] = await Promise.all([
-      selectTable("clients", "*", "company_name", true),
-      selectTable("jobs", "*", "last_synced_at", false),
-      selectTable("cost_trackers", "*", "last_synced_at", false),
-      selectTable("invoices", "*", "invoice_date", false),
-      selectTable("employees", "*", "full_name", true),
-      selectTable("job_assignments", "*", "created_at", false),
-      selectTable("timesheets", "*", "work_date", false),
-      selectTable("documents", "*", "last_synced_at", false),
-      selectTable(TEMPLATE_TABLE, "*", "updated_at", false)
-    ]);
-
-    state.data.clients = clients;
-    state.data.jobs = jobs;
-    state.data.costTrackers = costTrackers;
-    state.data.invoices = invoices;
-    state.data.employees = employees;
-    state.data.assignments = assignments;
-    state.data.timesheets = timesheets;
-    state.data.documents = documents;
-    state.data.rateTemplates = rateTemplates;
-
-    hydrateSelects();
-    const selectedCostJob = $('#costTrackerForm [name="job_id"]')?.value;
-    if (!selectedCostJob && rateTemplates.length) {
-      const activeTemplate = rateTemplates.find((template) => template.is_active) || rateTemplates[0];
-      if (activeTemplate?.template_data) loadTemplateIntoCostForm(activeTemplate.template_data, false);
-    }
-    renderAll();
-    if (!silent) showToast("Dashboard data refreshed.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function selectTable(table, columns = "*", orderColumn = "created_at", ascending = false) {
-  let query = state.supabase.from(table).select(columns);
-
-  if (orderColumn) {
-    query = query.order(orderColumn, { ascending });
-  }
-
-  let { data, error } = await query.limit(500);
-
-  // If an older Supabase schema is missing a sort column, retry without ordering
-  // so newly-created jobs still come back to the website list.
-  if (error && String(error.message || "").toLowerCase().includes(orderColumn.toLowerCase())) {
-    const retry = await state.supabase.from(table).select(columns).limit(500);
-    data = retry.data;
-    error = retry.error;
-  }
-
-  if (error) {
-    if (["employees", "job_assignments", "timesheets", TEMPLATE_TABLE].includes(table)) {
-      console.warn(`${table} not available yet:`, error.message);
-      return [];
-    }
-    throw error;
-  }
-
-  return data || [];
-}
+/* optimized: removed dead duplicate loadAllData #2 (live copy defined later) */
+/* optimized: removed dead duplicate selectTable #2 (live copy defined later) */
 
 function mergeStateRow(collectionName, row) {
   if (!row) return;
@@ -1684,7 +1284,7 @@ function refreshWebsiteLists() {
 
 /* optimized: removed older duplicate function showView */
 
-function renderAll() {
+function renderAllNow() {
   renderStats();
   renderDashboardLists();
   renderJobs();
@@ -1695,6 +1295,29 @@ function renderAll() {
   renderAssignments();
   renderTimesheets();
   renderDocuments();
+}
+
+/* Coalesce redundant renderAll() calls within a single tick.
+   The first call in a tick renders synchronously (so any code that reads the DOM
+   right after renderAll() still sees fresh output, exactly as before). Any further
+   calls in the same microtask are collapsed into one trailing render instead of
+   rebuilding all ten tables again. This removes the repeated full re-renders that
+   happen when a handler calls refreshWebsiteLists() and then awaits loadAllData(). */
+let _renderTickActive = false;
+let _renderTrailingNeeded = false;
+function renderAll() {
+  if (_renderTickActive) {
+    _renderTrailingNeeded = true;
+    return;
+  }
+  _renderTickActive = true;
+  _renderTrailingNeeded = false;
+  queueMicrotask(() => {
+    if (_renderTrailingNeeded) renderAllNow();
+    _renderTickActive = false;
+    _renderTrailingNeeded = false;
+  });
+  renderAllNow();
 }
 
 /* optimized: removed older duplicate function initializeCostInvoiceBuilders */
@@ -1782,81 +1405,8 @@ async function restoreFactoryTemplate() {
 
 /* optimized: removed older duplicate function buildTemplateLineItemsForJob */
 
-async function handleCreateJob(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-
-  try {
-    const client = await upsertClient(values.company_name, values.contact_name);
-
-    const payload = {
-      job_number: values.job_number,
-      job_name: values.job_name,
-      client_id: client?.id || null,
-      company_name: values.company_name,
-      contact_name: values.contact_name || null,
-      location: values.location || null,
-      job_dates: values.job_dates || null,
-      total_job_days: values.total_job_days ? number(values.total_job_days) : null,
-      status: values.status || "active",
-      start_date: values.start_date || null,
-      end_date: values.end_date || values.start_date || null,
-      google_drive_url: values.google_drive_url || null,
-      external_source: "dashboard",
-      external_id: `job:${values.job_number}`,
-      last_synced_at: new Date().toISOString()
-    };
-
-    const job = await manualUpsert("jobs", payload, "external_id");
-
-    // Make the new/updated job show in the website immediately, even before the full refresh finishes.
-    mergeStateRow("jobs", job);
-    refreshWebsiteLists();
-
-    let relatedRecordsCreated = true;
-    let relatedErrorMessage = "";
-
-    try {
-      const relatedRecords = await createInitialCostTrackerAndInvoiceForJob(job, values);
-      mergeStateRow("costTrackers", relatedRecords?.tracker);
-      mergeStateRow("invoices", relatedRecords?.invoice);
-      refreshWebsiteLists();
-    } catch (relatedError) {
-      relatedRecordsCreated = false;
-      relatedErrorMessage = relatedError.message || String(relatedError);
-      console.warn("Job was saved, but the automatic cost tracker/invoice creation failed:", relatedError);
-    }
-
-    form.reset();
-    await loadAllData({ silent: true });
-    refreshWebsiteLists();
-
-    if (relatedRecordsCreated) {
-      showToast("Job created and added to the website list with a cost tracker and draft invoice.");
-    } else {
-      showToast(`Job created and added to the website list. Cost tracker/invoice auto-create needs attention: ${relatedErrorMessage}`, true);
-    }
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function createInitialCostTrackerAndInvoiceForJob(job, sourceValues = {}) {
-  if (!job?.id) return null;
-
-  const template = getActiveTemplateData();
-  const items = buildTemplateLineItemsForJob(template);
-  const summary = summarizeCostItems(items, null);
-  summary.totalJobDays = number(sourceValues.total_job_days || job.total_job_days);
-
-  const trackerPayload = buildCostTrackerPayload(job, items, summary, "Created automatically when the job was created.");
-  const tracker = await manualUpsert("cost_trackers", trackerPayload, "external_id");
-  const invoice = await upsertAutoInvoiceFromCostTracker(tracker, job, "draft");
-
-  return { tracker, invoice };
-}
+/* optimized: removed dead duplicate handleCreateJob #3 (live copy defined later) */
+/* optimized: removed dead duplicate createInitialCostTrackerAndInvoiceForJob #1 (live copy defined later) */
 
 function clearCostTrackerJobInfo() {
   const form = $("#costTrackerForm");
@@ -1871,31 +1421,7 @@ function clearCostTrackerJobInfo() {
 
 /* optimized: removed older duplicate function buildCostTrackerPayload */
 
-async function handleSaveCostTracker(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const job = findJob(values.job_id);
-  const totals = recomputeCostTrackerTotals();
-
-  if (!job) {
-    showToast("Select a job before saving the cost tracker.", true);
-    return;
-  }
-
-  const payload = buildCostTrackerPayload(job, totals.items, totals.summary, values.notes || null, values);
-
-  try {
-    const tracker = await manualUpsert("cost_trackers", payload, "external_id");
-    await upsertAutoInvoiceFromCostTracker(tracker, job, values.status || "draft");
-    await loadAllData();
-    loadCostTrackerIntoForm(tracker);
-    showToast("Cost tracker saved and the draft invoice was updated.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
+/* optimized: removed dead duplicate handleSaveCostTracker #3 (live copy defined later) */
 
 async function upsertAutoInvoiceFromCostTracker(tracker, job, status = "draft") {
   const existing = findAutoInvoiceForJob(job.id, job.job_number);
@@ -1953,58 +1479,7 @@ function findAutoInvoiceForJob(jobId, jobNumber = "") {
     || state.data.invoices.find((invoice) => invoice.job_id === jobId && (invoice.status || "draft") === "draft");
 }
 
-async function handleCreateInvoice(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const job = findJob(values.job_id);
-  const { items, summary } = recomputeInvoiceTotals();
-  const invoiceNumber = values.invoice_number || generateInvoiceNumber(job?.job_number);
-
-  if (!job) {
-    showToast("Select a job before saving the invoice.", true);
-    return;
-  }
-
-  const invoiceData = buildInvoiceData(values, job, items, summary, invoiceNumber);
-  const html = renderInvoiceHtml(invoiceData);
-
-  const payload = {
-    job_id: values.job_id,
-    client_id: job?.client_id || null,
-    invoice_number: invoiceNumber,
-    invoice_date: values.invoice_date || today(),
-    due_date: values.due_date || addDays(values.invoice_date || today(), 30),
-    subtotal: summary.subtotal,
-    tax: summary.tax,
-    status: values.status || "draft",
-    pdf_url: values.pdf_url || null,
-    google_drive_url: values.pdf_url || null,
-    bill_to: values.bill_to || null,
-    po_number: values.po_number || job?.job_number || null,
-    terms: values.terms || null,
-    project: values.project || job?.job_name || null,
-    description: values.description || null,
-    tax_rate: number(values.tax_rate),
-    payments: number(values.payments),
-    line_items: items,
-    html_snapshot: html,
-    download_filename: safeFileName(`${invoiceNumber}.html`),
-    auto_generated: false,
-    external_source: "dashboard_builder",
-    external_id: values.external_id || `invoice:${invoiceNumber}`,
-    last_synced_at: new Date().toISOString()
-  };
-
-  try {
-    await manualUpsert("invoices", payload, "external_id");
-    await loadAllData();
-    showToast("Invoice saved to Supabase and is available for preview/download.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
+/* optimized: removed dead duplicate handleCreateInvoice #3 (live copy defined later) */
 
 /* optimized: removed older duplicate function renderJobs */
 
@@ -2574,90 +2049,8 @@ function ensureHiddenInput(formSelector, name) {
   form.prepend(input);
 }
 
-async function loadAllData(options = {}) {
-  if (!state.supabase || !state.session) return;
-
-  const silent = options?.silent === true;
-
-  try {
-    const [
-      clients,
-      jobs,
-      costTrackers,
-      invoices,
-      employees,
-      assignments,
-      timesheets,
-      documents,
-      rateTemplates
-    ] = await Promise.all([
-      selectTable("clients", "*", "company_name", true),
-      selectTable("jobs", "*", "last_synced_at", false),
-      selectTable("cost_trackers", "*", "last_synced_at", false),
-      selectTable("invoices", "*", "invoice_date", false),
-      selectTable("employees", "*", "full_name", true),
-      selectTable("job_assignments", "*", "created_at", false),
-      selectTable("timesheets", "*", "work_date", false),
-      selectTable("documents", "*", "last_synced_at", false),
-      selectTable(TEMPLATE_TABLE, "*", "updated_at", false)
-    ]);
-
-    state.data.clients = clients;
-    state.data.jobs = jobs;
-    state.data.costTrackers = costTrackers;
-    state.data.invoices = invoices;
-    state.data.employees = employees;
-    state.data.assignments = assignments;
-    state.data.timesheets = timesheets;
-    state.data.documents = documents;
-    state.data.rateTemplates = rateTemplates;
-
-    hydrateSelects();
-
-    const selectedCostJob = $('#costTrackerForm [name="job_id"]')?.value;
-    if (!selectedCostJob && rateTemplates.length) {
-      const activeTemplate = rateTemplates.find((template) => template.is_active) || rateTemplates[0];
-      if (activeTemplate?.template_data) loadTemplateIntoCostForm(activeTemplate.template_data, false);
-    }
-
-    renderAll();
-    if (!silent) showToast("Dashboard data refreshed.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function selectTable(table, columns = "*", orderColumn = "created_at", ascending = false) {
-  let query = state.supabase.from(table).select(columns);
-
-  if (orderColumn) {
-    query = query.order(orderColumn, { ascending });
-  }
-
-  let { data, error } = await query.limit(500);
-
-  const missingSortColumn = error && (
-    String(error.message || "").toLowerCase().includes(String(orderColumn || "").toLowerCase()) ||
-    error.code === "42703"
-  );
-
-  if (missingSortColumn) {
-    const retry = await state.supabase.from(table).select(columns).limit(500);
-    data = retry.data;
-    error = retry.error;
-  }
-
-  if (error) {
-    if (["employees", "job_assignments", "timesheets", TEMPLATE_TABLE].includes(table)) {
-      console.warn(`${table} not available yet:`, error.message);
-      return [];
-    }
-
-    throw error;
-  }
-
-  return data || [];
-}
+/* optimized: removed dead duplicate loadAllData #3 (live copy defined later) */
+/* optimized: removed dead duplicate selectTable #3 (live copy defined later) */
 
 async function updateRow(table, id, payload) {
   const { data, error } = await state.supabase
@@ -2671,118 +2064,8 @@ async function updateRow(table, id, payload) {
   return data;
 }
 
-async function handleCreateJob(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const editingId = values.record_id || "";
-
-  try {
-    const client = await upsertClient(values.company_name, values.contact_name);
-
-    const payload = {
-      job_number: values.job_number,
-      job_name: values.job_name,
-      client_id: client?.id || null,
-      company_name: values.company_name,
-      contact_name: values.contact_name || null,
-      location: values.location || null,
-      job_dates: values.job_dates || null,
-      total_job_days: values.total_job_days ? number(values.total_job_days) : null,
-      status: values.status || "active",
-      start_date: values.start_date || null,
-      end_date: values.end_date || values.start_date || null,
-      google_drive_url: values.google_drive_url || null,
-      external_source: "dashboard",
-      external_id: `job:${values.job_number}`,
-      last_synced_at: new Date().toISOString()
-    };
-
-    let job;
-    if (editingId) {
-      job = await updateRow("jobs", editingId, payload);
-      mergeStateRow("jobs", job);
-      refreshWebsiteLists();
-      resetJobFormMode();
-      await loadAllData({ silent: true });
-      showToast("Job updated and website list refreshed.");
-      return;
-    }
-
-    job = await manualUpsert("jobs", payload, "external_id");
-    mergeStateRow("jobs", job);
-    refreshWebsiteLists();
-
-    let relatedRecordsCreated = true;
-    let relatedErrorMessage = "";
-
-    try {
-      const relatedRecords = await createInitialCostTrackerAndInvoiceForJob(job, values);
-      mergeStateRow("costTrackers", relatedRecords?.tracker);
-      mergeStateRow("invoices", relatedRecords?.invoice);
-      refreshWebsiteLists();
-    } catch (relatedError) {
-      relatedRecordsCreated = false;
-      relatedErrorMessage = relatedError.message || String(relatedError);
-      console.warn("Job was saved, but the automatic cost tracker/invoice creation failed:", relatedError);
-    }
-
-    form.reset();
-    resetJobFormMode();
-    await loadAllData({ silent: true });
-    refreshWebsiteLists();
-
-    if (relatedRecordsCreated) {
-      showToast("Job created with a cost tracker and draft invoice.");
-    } else {
-      showToast(`Job created. Cost tracker/invoice auto-create needs attention: ${relatedErrorMessage}`, true);
-    }
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-/* optimized: removed older duplicate function renderJobs */
-
-async function handleCreateEmployee(event) {
-  event.preventDefault();
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const editingId = values.record_id || "";
-
-  const payload = {
-    full_name: values.full_name,
-    email: values.email || null,
-    phone: values.phone || null,
-    role: values.role || null,
-    status: values.status || "active"
-  };
-
-  try {
-    let employee;
-    if (editingId) {
-      employee = await updateRow("employees", editingId, payload);
-      mergeStateRow("employees", employee);
-      refreshWebsiteLists();
-      resetEmployeeFormMode();
-      await loadAllData({ silent: true });
-      showToast("Employee information updated.");
-      return;
-    }
-
-    employee = await insertRow("employees", payload);
-    mergeStateRow("employees", employee);
-    form.reset();
-    resetEmployeeFormMode();
-    await loadAllData({ silent: true });
-    refreshWebsiteLists();
-    showToast("Employee added.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
+/* optimized: removed dead duplicate handleCreateJob #4 (live copy defined later) */
+/* optimized: removed dead duplicate handleCreateEmployee #2 (live copy defined later) */
 
 /* optimized: removed older duplicate function renderEmployees */
 
@@ -3038,77 +2321,8 @@ async function upsertClient(companyName, contactName) {
   return insert.data;
 }
 
-async function handleCreateJob(event) {
-  event.preventDefault();
-
-  if (!state.supabase || !state.session) {
-    showToast("Sign in and connect Supabase before creating jobs.", true);
-    return;
-  }
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const editingId = values.record_id || "";
-
-  try {
-    const client = await upsertClient(values.company_name, values.contact_name);
-    const payload = buildJobPayload(values, client);
-    const job = await saveJobToSupabase(payload, editingId);
-
-    mergeStateRow("jobs", job);
-    hydrateSelects();
-    refreshWebsiteLists();
-
-    if (editingId) {
-      resetJobFormMode();
-      await loadAllData({ silent: true });
-      showToast("Job updated and saved to Supabase.");
-      return;
-    }
-
-    let relatedErrorMessage = "";
-    try {
-      const relatedRecords = await createInitialCostTrackerAndInvoiceForJob(job, values);
-      mergeStateRow("costTrackers", relatedRecords?.tracker);
-      mergeStateRow("invoices", relatedRecords?.invoice);
-    } catch (relatedError) {
-      relatedErrorMessage = relatedError.message || String(relatedError);
-      console.warn("Job saved. Automatic cost tracker/invoice creation failed:", relatedError);
-    }
-
-    form.reset();
-    resetJobFormMode();
-    hydrateSelects();
-    refreshWebsiteLists();
-    await loadAllData({ silent: true });
-
-    if (relatedErrorMessage) {
-      showToast(`Job saved to Supabase and added to the website. Auto cost tracker/invoice needs attention: ${relatedErrorMessage}`, true);
-    } else {
-      showToast("Job saved to Supabase and added to the website list.");
-    }
-  } catch (error) {
-    showToast(error.message || String(error), true);
-  }
-}
-
-async function createInitialCostTrackerAndInvoiceForJob(job, sourceValues = {}) {
-  if (!job?.id) return null;
-
-  const totalJobDays = sourceValues.total_job_days || job.total_job_days || null;
-  const items = buildTemplateLineItemsForJob(createFactoryTemplateData(), totalJobDays);
-  const summary = summarizeCostItems(items, null);
-  summary.totalJobDays = number(totalJobDays);
-
-  const trackerPayload = buildCostTrackerPayload(job, items, summary, "Created automatically when the job was created.", {
-    total_job_days: sourceValues.total_job_days || job.total_job_days || "",
-    cost_tracker_date: today()
-  });
-
-  const tracker = await manualUpsert("cost_trackers", trackerPayload, "external_id");
-  const invoice = await upsertAutoInvoiceFromCostTracker(tracker, job, "draft");
-  return { tracker, invoice };
-}
+/* optimized: removed dead duplicate handleCreateJob #5 (live copy defined later) */
+/* optimized: removed dead duplicate createInitialCostTrackerAndInvoiceForJob #2 (live copy defined later) */
 
 function renderRateTemplates() {
   // Templates/Rates section has been removed from the website.
@@ -3216,38 +2430,7 @@ function buildJobPayload(values, client) {
   };
 }
 
-async function handleCreateJob(event) {
-  event.preventDefault();
-
-  if (!state.supabase || !state.session) {
-    showToast("Sign in and connect Supabase before creating jobs.", true);
-    return;
-  }
-
-  const form = event.currentTarget;
-  syncJobTotalDaysField();
-  const values = formToObject(form);
-  const editingId = values.record_id || "";
-
-  try {
-    const client = await upsertClient(values.company_name, values.contact_name);
-    const payload = buildJobPayload(values, client);
-    const job = await saveJobToSupabase(payload, editingId);
-
-    mergeStateRow("jobs", job);
-    hydrateSelects();
-    refreshWebsiteLists();
-
-    form.reset();
-    resetJobFormMode();
-    await loadAllData({ silent: true });
-    refreshWebsiteLists();
-
-    showToast(editingId ? "Job updated and saved to Supabase." : "Job saved to Supabase. Create or assign a cost tracker when you are ready.");
-  } catch (error) {
-    showToast(error.message || String(error), true);
-  }
-}
+/* optimized: removed dead duplicate handleCreateJob #6 (live copy defined later) */
 
 async function createInitialCostTrackerAndInvoiceForJob() {
   // The workflow no longer auto-creates cost trackers or invoices when a job is created.
@@ -3299,39 +2482,7 @@ function loadJobIntoForm(job) {
 
 /* optimized: removed older duplicate function buildCostTrackerPayload */
 
-async function handleSaveCostTracker(event) {
-  event.preventDefault();
-
-  if (!state.supabase || !state.session) {
-    showToast("Sign in and connect Supabase before saving cost trackers.", true);
-    return;
-  }
-
-  const form = event.currentTarget;
-  const values = formToObject(form);
-  const job = values.job_id ? findJob(values.job_id) : null;
-  const totals = recomputeCostTrackerTotals();
-  const payload = buildCostTrackerPayload(job, totals.items, totals.summary, values.notes || null, values);
-
-  try {
-    let tracker;
-    if (values.record_id) {
-      tracker = await updateRow("cost_trackers", values.record_id, payload);
-    } else if (payload.job_id) {
-      tracker = await manualUpsert("cost_trackers", payload, "external_id");
-    } else {
-      tracker = await insertRow("cost_trackers", payload);
-    }
-
-    mergeStateRow("costTrackers", tracker);
-    await loadAllData({ silent: true });
-    loadCostTrackerIntoForm(tracker);
-    refreshWebsiteLists();
-    showToast(payload.job_id ? "Cost tracker saved and assigned to the selected job." : "Unassigned cost tracker saved. You can assign a job later by editing it and choosing a Job / AFE.");
-  } catch (error) {
-    showToast(error.message || String(error), true);
-  }
-}
+/* optimized: removed dead duplicate handleSaveCostTracker #4 (live copy defined later) */
 
 /* optimized: removed older duplicate function loadCostTrackerIntoForm */
 
@@ -4850,46 +4001,7 @@ function openInvoicePreview(html) {
   dialog.showModal();
 }
 
-async function downloadInvoicePdfFromHtml(html, filename = "invoice.pdf") {
-  if (!html) {
-    showToast("Nothing to download yet.", true);
-    return;
-  }
-
-  if (!window.html2pdf) {
-    printHtmlDocument(html, "Invoice");
-    showToast("PDF library was not available, so the print/save PDF window opened instead.");
-    return;
-  }
-
-  const wrapper = document.createElement("div");
-  wrapper.className = "pdf-workbench";
-  wrapper.innerHTML = html;
-  document.body.appendChild(wrapper);
-
-  const element = wrapper.querySelector(".invoice-template-document") || wrapper;
-
-  try {
-    await window.html2pdf()
-      .set({
-        margin: 0,
-        filename: safeFileName(filename || "invoice.pdf"),
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-        jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
-      })
-      .from(element)
-      .save();
-    showToast("Invoice PDF downloaded.");
-  } catch (error) {
-    showToast("PDF download failed. Opening print/save PDF instead.", true);
-    printHtmlDocument(html, "Invoice");
-  } finally {
-    wrapper.remove();
-  }
-}
-
-/* optimized: removed older duplicate function printDocumentCss */
+/* optimized: removed dead duplicate downloadInvoicePdfFromHtml #1 (live copy defined later) */
 
 
 /* ==========================================================================
@@ -14216,6 +13328,9 @@ async function openUploadedDocument(docId, download = false) {
       window.__pimpExpandedJobId = jobId;
       try { await loadAllData({ silent: true }); } catch {}
       refreshUi();
+      // Repopulate the open Job Details modal (the Attached Files section) right away,
+      // instead of only after a manual page refresh.
+      try { window.__pimpRefreshOpenJobDetails?.(jobId); } catch {}
 
       let message = `${uploadedDocs.length} file${uploadedDocs.length === 1 ? "" : "s"} added to ${job.job_number || job.job_name || "this job"}.`;
       if (importedTrackers.length) message += ` ${importedTrackers.length} editable cost tracker${importedTrackers.length === 1 ? "" : "s"} created.`;
@@ -14471,6 +13586,9 @@ This removes it from the job documents list.`)) return;
       try { refreshWebsiteLists(); } catch {}
       try { renderAll(); } catch {}
       try { renderUploadedFilesPanel(); } catch {}
+      // Update the open Job Details modal (Attached Files section) immediately, so the
+      // deleted file disappears now instead of only after a manual page refresh.
+      try { window.__pimpRefreshOpenJobDetails?.(doc.job_id); } catch {}
       try { showToast("Document deleted from this job."); } catch {}
     } catch (error) {
       try { showToast(error.message || String(error), true); } catch {}
@@ -18802,6 +17920,14 @@ This removes it from the job documents list.`)) return;
     if (body) body.innerHTML = buildJobDetailsMarkup(job);
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
+    // Swap the base markup's timesheet folder for the final combined folder
+    // synchronously, before the browser paints, so the modal never flashes the older
+    // folder design and then "fixes" itself a moment later. The async observers that
+    // also maintain this folder simply stand down once its marker is present.
+    try { window.PIMP_updateTimesheetFolderInJobDetails?.(); } catch {}
+    // Add the Open/Close timesheets button in the same synchronous frame so it is present
+    // the whole time the window is open instead of popping in a moment after open.
+    try { window.PIMP_fixJobDetailsTimesheetFolderToggle?.(); } catch {}
     document.body.classList.add("job-details-modal-open");
     window.__pimpExpandedJobId = null;
     setTimeout(() => qs(".job-details-modal-close", overlay)?.focus?.(), 30);
@@ -21671,6 +20797,10 @@ This removes it from the job documents list.`)) return;
   function updateJobDetailsTimesheetFolder() {
     const body = qs("#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody");
     if (!body) return;
+    // A newer combined timesheet-folder renderer (marked data-pimp-timesheet-folder-fixed)
+    // owns this section. Stand down so the two renderers don't overwrite each other in a
+    // loop, which makes the Edit/View/Download buttons flicker ("shake") and drop clicks.
+    if (body.querySelector("[data-pimp-timesheet-folder-fixed]")) return;
     const jobId = getJobIdFromOpenJobDetailsModal();
     if (!jobId) return;
     const headers = qsa(".job-detail-section-header h5", body);
@@ -21685,7 +20815,11 @@ This removes it from the job documents list.`)) return;
   function replacePreviewTextWithView(root = document) {
     qsa("button, h3, h4, h5, p, span, th, td, strong", root).forEach((element) => {
       if (element.childNodes.length === 1 && element.childNodes[0]?.nodeType === Node.TEXT_NODE) {
-        element.textContent = (element.textContent || "").replace(/\bPreview\b/g, "View");
+        // Only write when the text actually changes. Re-assigning identical textContent
+        // still mutates the DOM and would retrigger the folder observers in a loop.
+        const current = element.textContent || "";
+        const next = current.replace(/\bPreview\b/g, "View");
+        if (next !== current) element.textContent = next;
       }
     });
     const previewInvoiceButton = qs("#previewInvoiceBtn");
@@ -22018,6 +21152,10 @@ This removes it from the job documents list.`)) return;
     overlay.setAttribute("aria-hidden", "true");
     document.body.classList.remove("job-timesheet-modal-open");
     restoreTimesheetForm();
+    // Rebuild the open Job Details window so a just-created/edited timesheet shows in
+    // the Timesheets status card and folder right away, without leaving the window or
+    // refreshing the page.
+    window.setTimeout(() => { try { window.__pimpRefreshOpenJobDetails?.(); } catch {} }, 0);
   }
 
   function openPopupForJob(jobId) {
@@ -22209,7 +21347,16 @@ This removes it from the job documents list.`)) return;
   }
 
   function timesheetGroupKey(entry) {
-    return String(entry?.timesheet_group_id || entry?.id || "");
+    // Must match the job-details folder renderer's dailyGroupKey so the ids on the
+    // Edit / View / Download buttons resolve back to the same saved daily sheet.
+    // Saved rows can carry the group id only inside the summary JSON (e.g. when a
+    // DB insert fell back to a reduced column set), so check summary fields first.
+    let summary = {};
+    try { summary = parseJson(entry?.summary, {}) || {}; } catch {}
+    return String(
+      summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id ||
+      entry?.timesheet_group_id || entry?.group_id || entry?.sheet_id || entry?.id || ""
+    );
   }
 
   function lineItemsFromGroup(rows) {
@@ -22499,6 +21646,9 @@ This removes it from the job documents list.`)) return;
   function refreshJobDetailsFolder() {
     const body = getOpenJobDetailsBody();
     if (!body) return;
+    // Defer to the newer combined timesheet-folder renderer when it is present so the
+    // two renderers don't fight over this section (button flicker + missed clicks).
+    if (body.querySelector("[data-pimp-timesheet-folder-fixed]")) return;
     const jobId = getJobIdFromJobDetails(body);
     if (!jobId) return;
 
@@ -22710,6 +21860,11 @@ This removes it from the job documents list.`)) return;
       state.data.timesheets = (state.data.timesheets || []).filter((entry) => timesheetGroupKey(entry) !== String(dailyId));
       try { if (typeof renderTimesheets === "function") renderTimesheets(); } catch {}
       refreshJobDetailsFolder();
+      // The combined folder renderer owns this section now (refreshJobDetailsFolder
+      // stands down when it is present), so refresh it and its Open/Close button
+      // directly. This updates the Job Details window immediately, without a reload.
+      try { window.PIMP_updateTimesheetFolderInJobDetails?.(); } catch {}
+      try { window.PIMP_fixJobDetailsTimesheetFolderToggle?.(); } catch {}
       try { if (typeof showToast === "function") showToast("Timesheet deleted."); } catch {}
     } catch (error) {
       try { if (typeof showToast === "function") showToast(error.message || String(error), true); } catch {}
@@ -26791,9 +25946,20 @@ This removes it from the job documents list.`)) return;
         if (oldSubtitle) oldSubtitle.replaceWith(control);
         else infoBlock.appendChild(control);
       }
+      // Only (re)build the dropdown when the invoice or its status actually changed.
+      // Rewriting innerHTML on every observer tick replaced the <select> out from under
+      // the user — the dropdown reset on each click so the status looked unchangeable —
+      // and each rewrite retriggered this observer in a loop. Skipping the no-op rewrite
+      // keeps the control stable and interactive.
+      const existingSelect = control.querySelector(".job-details-invoice-status-select");
+      if (existingSelect
+        && existingSelect.dataset.jobDetailsInvoiceStatusId === String(invoice.id || "")
+        && existingSelect.dataset.renderedStatus === status) {
+        return;
+      }
       control.innerHTML = `
         <span class="job-details-invoice-status-label">Invoice Status</span>
-        <select class="job-details-invoice-status-select status ${attr(status)}" data-job-details-invoice-status-id="${attr(invoice.id)}" aria-label="Change invoice status">
+        <select class="job-details-invoice-status-select status ${attr(status)}" data-job-details-invoice-status-id="${attr(invoice.id)}" data-rendered-status="${attr(status)}" aria-label="Change invoice status">
           ${invoiceStatusOptions(status)}
         </select>
       `;
@@ -28114,7 +27280,7 @@ This removes it from the job documents list.`)) return;
     const header = headers.find((h5) => /timesheets\s+folder|all\s+timesheets\s+for\s+this\s+job/i.test(h5.textContent || ""));
     const section = header?.closest(".job-detail-section");
     if (!section) return;
-    header.textContent = "Timesheets Folder";
+    if (header.textContent !== "Timesheets Folder") header.textContent = "Timesheets Folder";
 
     const signature = timesheetFolderSignature(jobId);
     const replacement = buildCombinedTimesheetFolder(jobId);
@@ -30436,7 +29602,7 @@ This removes it from the job documents list.`)) return;
     qsa(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.view === "dashboard"));
 
     const title = qs("#viewTitle");
-    if (title) title.textContent = "Open Jobs:";
+    if (title) title.textContent = "Open Jobs";
 
     // Render synchronously. Browser paint happens after this click stack, so
     // users no longer see the old table before the final grouped/sorted table.
@@ -31534,8 +30700,12 @@ function on(selector, eventName, handler) {
     `;
   }
 
-  function sectionHeader(title, count) {
-    return `<tr class="open-jobs-section-row pimp-open-section-row stable-open-jobs-section-row" data-open-job-section="${attr(title)}"><td colspan="8"><div class="open-jobs-section-title"><span>${esc(title)}</span><strong>${count} job${count === 1 ? "" : "s"}</strong></div></td></tr>`;
+  function sectionRateTotal(jobsList) {
+    return (jobsList || []).reduce((sum, job) => sum + num(rateTotalForTracker(latestCostTrackerForJob(job.id))), 0);
+  }
+
+  function sectionHeader(title, count, total) {
+    return `<tr class="open-jobs-section-row pimp-open-section-row stable-open-jobs-section-row" data-open-job-section="${attr(title)}"><td colspan="6"><div class="open-jobs-section-title"><span>${esc(title)}</span></div></td><td class="dashboard-rate-total-cell open-jobs-section-total-cell"><strong class="open-jobs-section-total" title="Total rate for this section">${esc(moneyLabel(total || 0))}</strong></td><td class="open-jobs-section-count-cell"><strong>${count} job${count === 1 ? "" : "s"}</strong></td></tr>`;
   }
 
   let renderingStableOpenJobs = false;
@@ -31570,11 +30740,11 @@ function on(selector, eventName, handler) {
 
       const pieces = [];
       if (needsInvoice.length) {
-        pieces.push(sectionHeader("No Invoice / Unsent Invoices", needsInvoice.length));
+        pieces.push(sectionHeader("No Invoice / Unsent Invoices", needsInvoice.length, sectionRateTotal(needsInvoice)));
         pieces.push(needsInvoice.map(renderJobRow).join(""));
       }
       if (review.length) {
-        pieces.push(sectionHeader("Awaiting Approval / Submitted", review.length));
+        pieces.push(sectionHeader("Awaiting Approval / Submitted", review.length, sectionRateTotal(review)));
         pieces.push(review.map(renderJobRow).join(""));
       }
       tbody.innerHTML = pieces.join("") || `<tr><td colspan="8" class="muted">No open jobs found.</td></tr>`;
@@ -31592,7 +30762,7 @@ function on(selector, eventName, handler) {
     qsa(".view").forEach((view) => view.classList.toggle("active", view.id === "dashboardView"));
     qsa(".nav-btn").forEach((button) => button.classList.toggle("active", button.dataset.view === "dashboard"));
     const title = qs("#viewTitle");
-    if (title) title.textContent = "Open Jobs:";
+    if (title) title.textContent = "Open Jobs";
     renderStableOpenJobs();
   }
 
