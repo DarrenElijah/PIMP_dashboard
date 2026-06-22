@@ -1,0 +1,844 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pro Insulation MP Dashboard</title>
+  <link rel="stylesheet" href="styles.css?v=20260622-1" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+</head>
+<body>
+  <div id="toast" class="toast hidden"></div>
+
+  <section id="authScreen" class="auth-screen">
+    <div class="auth-card">
+      <div class="brand-mark">PIMP</div>
+      <h1>Pro Insulation MP Hub</h1>
+      <p class="muted">Sign in to manage jobs, cost trackers, invoices, timesheets, employees, and assignments.</p>
+
+      <div class="setup-warning hidden" id="setupWarning" aria-hidden="true"></div>
+
+      <form id="loginForm" class="stack">
+        <label>
+          Email
+          <input id="loginEmail" type="email" placeholder="you@proinsulationmp.com" autocomplete="email" required />
+        </label>
+
+        <label>
+          Password
+          <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password" required />
+        </label>
+
+        <button class="btn primary" type="submit">Sign In</button>
+      </form>
+
+      <p class="tiny">Authorized users can sign in with their Supabase email and password. No setup information is required on this screen.</p>
+    </div>
+  </section>
+
+  <section id="appShell" class="app-shell hidden">
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-logo small">
+                <img src="NEW_logo.png" alt="Pro Insulation MP Logo" />
+            </div>
+
+            <div>
+                <strong>Pro Insulation MP</strong>
+                <span>Operations Hub</span>
+            </div>
+        </div>
+
+      <nav class="nav">
+        <button class="nav-btn active" data-view="dashboard">Open Jobs</button>
+        <button class="nav-btn" data-view="jobs">Closed Jobs</button>
+        <button class="nav-btn" data-view="costTrackers">Cost Trackers</button>
+        <button class="nav-btn" data-view="invoices">Invoices</button>
+        <button class="nav-btn" data-view="timesheets">Timesheets</button>
+        <button class="nav-btn" data-view="employees">Employees</button>
+      </nav>
+
+      <div class="sidebar-actions sidebar-footer-note">
+        <span>Connected workspace</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Database Dashboard</p>
+          <h2 id="viewTitle">Open Jobs</h2>
+        </div>
+        <div class="topbar-actions global-actions">
+          <button class="btn ghost sidebar-toggle-btn" id="sidebarToggleBtn" type="button" aria-pressed="false">Hide Menu</button>
+          <button class="btn primary" id="quickCreateJobBtn" type="button">+ New Job</button>
+          <button class="btn ghost" id="refreshBtn" type="button">Refresh Data</button>
+          <button class="btn danger" id="signOutBtn" type="button">Sign Out</button>
+        </div>
+        <input id="globalSearch" class="hidden" type="search" aria-hidden="true" tabindex="-1" />
+      </header>
+
+      <section id="dashboardView" class="view active">
+        <div class="stats-grid dashboard-hidden-stats hidden" aria-hidden="true">
+          <article class="stat-card">
+            <span>Total Jobs</span>
+            <strong id="statJobs">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Active Jobs</span>
+            <strong id="statActiveJobs">0</strong>
+          </article>
+          <article class="stat-card">
+            <span>Quoted Total</span>
+            <strong id="statQuoted">$0.00</strong>
+          </article>
+          <article class="stat-card">
+            <span>Total Cost</span>
+            <strong id="statCost">$0.00</strong>
+          </article>
+          <article class="stat-card">
+            <span>Estimated Profit</span>
+            <strong id="statProfit">$0.00</strong>
+          </article>
+          <article class="stat-card">
+            <span>Open Invoices</span>
+            <strong id="statOpenInvoices">$0.00</strong>
+          </article>
+        </div>
+
+        <section class="panel table-panel jobs-table-panel dashboard-main-jobs-panel" id="dashboardMainJobsPanel">
+          <div class="panel-header table-panel-header dashboard-main-jobs-header">
+            <div>
+              <p class="eyebrow">Main Dashboard</p>
+              <h3>Open Jobs</h3>
+              <p class="tiny">Review open jobs by invoice status, update invoice status, view document status, review rate totals, and open job details.</p>
+            </div>
+            <div class="table-toolbar-inline">
+              <input id="dashboardActiveJobsSearch" class="table-search dashboard-table-search" type="search" placeholder="Search open jobs..." />
+              <span id="dashboardActiveJobsCount" class="pill">0</span>
+            </div>
+          </div>
+          <div class="table-wrap dashboard-main-table-wrap">
+            <table class="data-table jobs-table dashboard-active-jobs-table">
+              <thead>
+                <tr>
+                  <th>Job #</th>
+                  <th>Project Name</th>
+                  <th>Company</th>
+                  <th>Location</th>
+                  <th>Invoice Status</th>
+                  <th>Dates</th>
+                  <th>Rate Total</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="dashboardActiveJobsTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div class="dashboard-legacy-render-targets hidden" aria-hidden="true">
+          <div id="recentJobs"></div>
+          <div id="openInvoices"></div>
+        </div>
+</section>
+
+      <section id="jobsView" class="view">
+        <div class="jobs-page-layout">
+          <div class="jobs-page-action-bar panel">
+            <div>
+              <p class="eyebrow">Closed Jobs</p>
+              <h3>Manage closed jobs</h3>
+              <p class="tiny">Jobs move here automatically when their invoice status is marked Paid.</p>
+            </div>
+            <button class="btn primary" id="openJobModalBtn" type="button">+ Create Job</button>
+          </div>
+
+          <section class="panel table-panel jobs-table-panel">
+            <div class="panel-header table-panel-header">
+              <h3>Closed Jobs</h3>
+              <div class="table-toolbar-inline">
+                <input id="jobsSearch" class="table-search" type="search" placeholder="Search closed jobs..." />
+                <span id="jobsCount" class="pill">0</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table jobs-table">
+                <thead>
+                  <tr>
+                    <th>Job #</th>
+                    <th>Project Name</th>
+                    <th>Company</th>
+                    <th>Location</th>
+                    <th>Invoice Status</th>
+                    <th>Dates</th>
+                    <th>Rate Total</th>
+                  </tr>
+                </thead>
+                <tbody id="jobsTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <div id="jobModalOverlay" class="job-modal-overlay hidden" aria-hidden="true">
+          <div class="job-modal-card" role="dialog" aria-modal="true" aria-labelledby="jobFormTitle">
+            <div class="job-modal-header">
+              <div>
+                <p class="eyebrow">Job Details</p>
+                <h3 id="jobFormTitle">Create Job</h3>
+              </div>
+              <button class="icon-btn job-modal-close" id="closeJobModalBtn" type="button" aria-label="Close create job popup">×</button>
+            </div>
+
+            <form id="jobForm" class="job-modal-form">
+              <input type="hidden" name="record_id" />
+              <div class="form-grid">
+                <label>Company Name<input name="company_name" required /></label>
+                <label>Client / Contact Name<input name="contact_name" /></label>
+                <label>Project Name<input name="job_name" required /></label>
+                <label>Job number<input name="job_number" required /></label>
+                <label class="tm-afe-field">T&amp;M/AFE
+                  <div class="tm-afe-input-row">
+                    <select name="tm_afe_mode" id="jobTmAfeMode" aria-label="T&amp;M or AFE">
+                      <option value="tm">T&amp;M</option>
+                      <option value="afe">AFE</option>
+                    </select>
+                    <input name="tm_afe_number" id="jobTmAfeNumber" type="text" inputmode="numeric" placeholder="AFE number" aria-label="AFE number" disabled />
+                    <input name="job_dates" type="hidden" value="T&amp;M" />
+                  </div>
+                </label>
+                <label>Location<input name="location" /></label>
+                <label>Status
+                  <select name="status">
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </label>
+                <label>Start Date<input name="start_date" type="date" /></label>
+                <label>End Date<input name="end_date" type="date" /></label>
+                <label>Total Days<input name="total_job_days" type="number" min="0" step="1" readonly placeholder="Auto-calculated" /></label>
+              </div>
+              <div class="form-actions job-modal-actions">
+                <button class="btn ghost hidden" id="cancelJobEditBtn" type="button">Cancel Edit</button>
+                <button class="btn ghost" id="clearJobFormBtn" type="button">Clear All</button>
+                <button class="btn primary" id="jobSubmitBtn" type="submit">Create Job</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section id="costTrackersView" class="view">
+        <div class="sheet-workspace">
+          <form id="costTrackerForm" class="panel sheet-panel">
+            <input type="hidden" name="record_id" />
+            <div class="panel-header compact sheet-page-header cost-tracker-window-toolbar">
+              <div class="sheet-header-actions sheet-header-actions-only">
+                <label class="sheet-job-picker">T&amp;M/AFE <select name="job_id" class="job-select"></select></label>
+              </div>
+            </div>
+
+            <section class="cost-tracker-setup-card hidden" id="costTrackerSetupCard" aria-hidden="true">
+              <input type="hidden" name="cost_tracker_name" value="" />
+            </section>
+
+            <div class="sheet-scroll">
+              <div id="costTrackerSheet" class="cost-sheet">
+                <div class="sheet-title-row">BID/COST TRACKING SHEET</div>
+
+                <div class="sheet-meta-grid">
+                  <div class="sheet-meta-cell wide cost-tracker-name-meta">COST TRACKER NAME:<strong id="sheetTrackerNameDisplay">Untitled Cost Tracker</strong></div>
+                  <label class="sheet-meta-cell project-dates-cell">PROJECT DATES:<input name="cost_tracker_date" type="text" readonly placeholder="Project dates" /></label>
+                  <div class="sheet-meta-cell">T&amp;M/AFE<strong id="sheetJobNumber">—</strong></div>
+                  <div class="sheet-meta-cell">CLIENT Requestor:<strong id="sheetClientName">—</strong></div>
+                  <div class="sheet-meta-cell wide">PROJECT NAME:<strong id="sheetJobName">—</strong></div>
+                  <label class="sheet-meta-cell small">Total Days:<input name="total_job_days" type="number" step="1" min="0" /></label>
+                  <div class="sheet-meta-cell wide">Location:<strong id="sheetLocation">—</strong></div>
+                </div>
+
+                <div class="sheet-grid-layout">
+                  <div class="sheet-left-column">
+                    <table class="sheet-table labor-table">
+                      <colgroup>
+                        <col class="desc-col"><col class="qty-col"><col class="hours-col"><col class="money-col"><col class="hours-col"><col class="money-col"><col class="total-col"><col class="money-col"><col class="money-col"><col class="total-col"><col class="action-col">
+                      </colgroup>
+                      <thead>
+                        <tr class="section-row"><th colspan="11">PERSONNEL <button class="sheet-add-btn" data-sheet-add="labor" type="button">+ row</button></th></tr>
+                        <tr><th></th><th>QTY</th><th>HOURS</th><th>COST</th><th>OT HOURS</th><th>OT COST</th><th>COST TOTAL</th><th>RATE</th><th>OT RATE</th><th>RATE TOTAL</th><th></th></tr>
+                      </thead>
+                      <tbody id="sheetLaborBody"></tbody>
+                      <tfoot>
+                        <tr class="total-row"><th>PERSONNEL TOTAL</th><td id="sheetLaborQty"></td><td id="sheetLaborHours"></td><td></td><td id="sheetLaborOtHours"></td><td></td><td id="sheetLaborCost"></td><td></td><td></td><td id="sheetLaborRate"></td><td></td></tr>
+                      </tfoot>
+                    </table>
+
+                    <table class="sheet-table equipment-table">
+                      <colgroup>
+                        <col class="desc-col"><col class="qty-col"><col class="hours-col"><col class="money-col"><col class="hours-col"><col class="money-col"><col class="total-col"><col class="money-col"><col class="money-col"><col class="total-col"><col class="action-col">
+                      </colgroup>
+                      <thead>
+                        <tr class="section-row"><th colspan="11">EQUIPMENT <button class="sheet-add-btn" data-sheet-add="equipment" type="button">+ row</button></th></tr>
+                        <tr><th></th><th>QTY</th><th>HOURS</th><th>COST</th><th>DAYS</th><th>DAY COST</th><th>COST TOTAL</th><th>HR RATE</th><th>DAY RATE</th><th>RATE TOTAL</th><th></th></tr>
+                      </thead>
+                      <tbody id="sheetEquipmentBody"></tbody>
+                      <tfoot>
+                        <tr class="total-row"><th>EQUIPMENT TOTAL</th><td class="no-equipment-total"></td><td class="no-equipment-total"></td><td></td><td class="no-equipment-total"></td><td></td><td id="sheetEquipmentCost"></td><td></td><td></td><td id="sheetEquipmentRate"></td><td></td></tr>
+                      </tfoot>
+                    </table>
+
+                    <table class="sheet-table assumptions-table">
+                      <tbody>
+                        <tr><th colspan="4">Assumptions</th></tr>
+                        <tr><td>Est Daily Material Costs</td><td><input class="sheet-input input-red" name="estimated_daily_material_cost" type="number" step="0.01" value="1500" /></td><td></td><td></td></tr>
+                        <tr><td>Per Diem Markup</td><td><input class="sheet-input input-red" name="per_diem_markup" type="number" step="0.01" value="0" /></td><td></td><td></td></tr>
+                        <tr><td>Overtime</td><td><input class="sheet-input input-red text-center" name="overtime_flag" value="Y" /></td><td></td><td></td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div class="sheet-right-column">
+                    <table class="sheet-table materials-table">
+                      <colgroup><col class="right-desc-col"><col class="right-cost-col"><col class="right-markup-col"><col class="right-total-col"><col class="action-col"></colgroup>
+                      <thead>
+                        <tr class="section-row centered"><th colspan="5">MATERIALS AND ADDITIONAL <button class="sheet-add-btn" data-sheet-add="materials" type="button">+ row</button></th></tr>
+                        <tr><th>Description of Items</th><th>Cost</th><th class="red-head">Markup %</th><th>Total</th><th></th></tr>
+                      </thead>
+                      <tbody id="sheetMaterialsBody"></tbody>
+                      <tfoot><tr class="total-row"><th>MATERIALS TOTAL</th><td id="sheetMaterialsCost">$0.00</td><td></td><td id="sheetMaterialsRate">$0.00</td><td></td></tr></tfoot>
+                    </table>
+
+                    <table class="sheet-table subcontractor-table">
+                      <colgroup><col class="right-desc-col"><col class="right-cost-col"><col class="right-markup-col"><col class="right-total-col"><col class="action-col"></colgroup>
+                      <thead>
+                        <tr class="section-row"><th colspan="5">Subcontractors <button class="sheet-add-btn" data-sheet-add="subcontractors" type="button">+ row</button></th></tr>
+                        <tr><th></th><th>Cost</th><th class="red-head">Markup %</th><th>Total</th><th></th></tr>
+                      </thead>
+                      <tbody id="sheetSubcontractorsBody"></tbody>
+                      <tfoot><tr class="total-row"><th>SUBCONTRACTOR TOTAL</th><td id="sheetSubcontractorCost">$0.00</td><td></td><td id="sheetSubcontractorRate">$0.00</td><td></td></tr></tfoot>
+                    </table>
+
+                    <table class="sheet-table misc-table">
+                      <colgroup><col class="right-desc-col"><col class="qty-col"><col class="right-cost-col"><col class="right-total-col"><col class="action-col"></colgroup>
+                      <thead>
+                        <tr class="section-row"><th colspan="5">MISCELLANEOUS <button class="sheet-add-btn" data-sheet-add="misc" type="button">+ row</button></th></tr>
+                      </thead>
+                      <tbody id="sheetMiscBody"></tbody>
+                      <tfoot><tr class="total-row"><th>MISCELLANEOUS TOTAL</th><td></td><td id="sheetMiscCost">$0.00</td><td id="sheetMiscRate">$0.00</td><td></td></tr></tfoot>
+                    </table>
+
+                    <div class="sheet-summary-block">
+                      <div class="summary-label">RATE TOTAL=</div><div class="summary-value orange" id="quotedTotalPreview">$0.00</div><div class="summary-mirror" id="sheetQuotedMirror">$0.00</div>
+                      <div class="summary-label">COST TOTAL</div><div class="summary-value blue" id="costTotalPreview">$0.00</div><div class="summary-mirror" id="sheetCostMirror">$0.00</div>
+                      <div class="summary-profit-label">Bid Profit:</div><div class="summary-profit yellow" id="profitPreview">$0.00</div>
+                      <div class="summary-margin-label">Gross Margin</div><div class="summary-margin" id="marginPreview">0.00%</div>
+                    </div>
+
+                    <div class="sheet-manual-total-overrides" aria-label="Manual final total overrides">
+                      <label class="total-override-cell rate-override-cell">Rate Total Override<input name="quoted_price_override" type="number" step="0.01" placeholder="Leave blank to use calculated rate total" /></label>
+                      <label class="total-override-cell cost-override-cell">Cost Total Override<input name="cost_total_override" type="number" step="0.01" placeholder="Leave blank to use calculated cost total" /></label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="sheet-comments-grid">
+                  <label class="invoice-comments-field">COMMENTS:<textarea name="notes" rows="7" placeholder="Comments that can transfer to the invoice description."></textarea></label>
+                  <label class="internal-comments-field">Internal Comments:<textarea name="internal_comments" rows="7" placeholder="Internal notes only. These do not transfer to the invoice."></textarea><span class="tiny">These comments stay on the cost tracker only.</span></label>
+                  <label class="by-whom-field">By Whom:<input name="by_whom" /></label>
+                </div>
+              </div>
+            </div>
+                      <div class="form-actions sticky-actions builder-save-strip cost-tracker-save-strip">
+              <button class="btn ghost" id="costTrackerBottomClearBtn" type="button">Clear</button>
+              <button class="btn ghost" id="downloadCostTrackerDraftBtn" type="button">Download Excel</button>
+              <button class="btn primary builder-save-btn" type="submit">Save Cost Tracker</button>
+            </div>
+
+</form>
+
+          <section class="panel table-panel cost-list-panel">
+            <div class="panel-header table-panel-header">
+              <h3>Cost Trackers</h3>
+              <div class="table-toolbar-inline">
+                <input id="costTrackersSearch" class="table-search" type="search" placeholder="Search cost trackers..." />
+                <span id="costTrackersCount" class="pill">0</span>
+              </div>
+            </div>
+            <p class="table-help">Assign or change a T&amp;M/AFE directly from the table. Unassigned trackers can also start a new job record from the Create Job button.</p>
+            <div class="table-wrap">
+              <table class="data-table cost-trackers-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Job</th>
+                    <th>Labor</th>
+                    <th>Material</th>
+                    <th>Subcontractor</th>
+                    <th>Total Cost</th>
+                    <th>Quoted</th>
+                    <th>Profit</th>
+                    <th>Margin</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="costTrackersTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="invoicesView" class="view">
+        <div class="invoice-template-workspace">
+          <form id="invoiceForm" class="panel invoice-template-panel">
+            <input type="hidden" name="record_id" />
+            <input type="hidden" name="pdf_url" />
+            <div class="panel-header compact invoice-builder-header">
+              <div>
+                <h3>Invoice Template</h3>
+                <p class="tiny">This invoice is formatted like the spreadsheet Invoice_Template. Select a saved cost tracker to autofill the invoice from that tracker’s Rate Total, or leave it blank to create a standalone invoice. Review it, then save and download the PDF.</p>
+              </div>
+              <div class="invoice-toolbar-actions">
+                <button class="btn ghost" id="previewInvoiceBtn" type="button">View</button>
+                <button class="btn ghost" id="downloadInvoicePdfBtn" type="button">Download PDF</button>
+                <button class="btn ghost" id="clearInvoiceFormBtn" type="button">Clear Invoice</button>
+                <button class="btn primary" type="submit">Save Invoice</button>
+              </div>
+            </div>
+
+            <div class="invoice-source-panel">
+              <label>Source Cost Tracker <span class="field-hint">optional — auto-fills subtotal from Rate Total</span>
+                <select id="invoiceSourceCostTracker" name="cost_tracker_id" class="cost-tracker-select">
+                  <option value="">Select a saved cost tracker...</option>
+                </select>
+              </label>
+              <input type="hidden" name="job_id" />
+              <div class="invoice-source-note">
+                <strong>Job / AFE is optional.</strong>
+                <span>Selecting a cost tracker can connect the invoice to that tracker’s job automatically. You can also save an invoice without any job connected.</span>
+              </div>
+              <label>Status
+                <select name="status">
+                  <option value="unsent">Unsent</option>
+                  <option value="awaiting_approval">Awaiting Approval</option>
+                  <option value="approved">Submitted</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </label>
+              <label>Due Date
+                <input name="due_date" type="date" />
+              </label>
+            </div>
+            <div class="invoice-template-scroll">
+              <article id="invoiceTemplateEditor" class="invoice-template-document invoice-template-editor one-page-invoice a4-invoice-page">
+                <div class="invoice-template-logo"><img src="NEW_logo.png" alt="PIMP" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span>PIMP</span></div>
+                <div class="invoice-template-company">
+                  <textarea name="company_block" rows="5">Pro Insulation MP
+P O Box 502
+Burleson, TX 76097
+Phone: 903-327-2243
+EIN # __________</textarea>
+                </div>
+
+                <div class="invoice-template-title">Invoice</div>
+
+                <div class="invoice-template-date-label">Date</div>
+                <div class="invoice-template-date-value">
+                  <input name="invoice_date" type="date" />
+                </div>
+                <div class="invoice-template-number-label">Invoice #</div>
+                <div class="invoice-template-number-value">
+                  <input name="invoice_number" placeholder="Invoice #" autocomplete="off" required />
+                </div>
+
+                <div class="invoice-template-bill-label">Bill To</div>
+                <div class="invoice-template-bill-value">
+                  <textarea name="bill_to" rows="5" placeholder="Company
+Attn: Contact
+Address line 1
+City, State ZIP"></textarea>
+                </div>
+
+                <div class="invoice-template-po-label">P.O. No.</div>
+                <div class="invoice-template-terms-label">Terms</div>
+                <div class="invoice-template-project-label">Project</div>
+                <div class="invoice-template-po-value"><input name="po_number" /></div>
+                <div class="invoice-template-terms-value"><input name="terms" value="" /></div>
+                <div class="invoice-template-project-value"><input name="project" /></div>
+
+                <div class="invoice-template-lines">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th class="qty-col">Quantity</th>
+                        <th class="desc-col">Description</th>
+                        <th class="rate-col">Rate</th>
+                        <th class="amount-col">Amount</th>
+                        <th class="remove-col"><button class="sheet-add-btn" id="addInvoiceLineBtn" type="button">+ row</button></th>
+                      </tr>
+                    </thead>
+                    <tbody id="invoiceTemplateLineItems"></tbody>
+                  </table>
+                </div>
+
+                <div class="invoice-template-description">
+                  <textarea name="description" rows="7" placeholder="Description and scope from the cost tracker..."></textarea>
+                </div>
+
+                <div class="invoice-template-payee">Make Payment to Pro Insulation MP</div>
+                <div class="invoice-template-wire-title">Wiring Instructions</div>
+                <div class="invoice-template-wire">
+                  <textarea name="wiring_block" rows="4">Bank Name
+ABA # __________
+Pro Insulation MP
+Account # __________</textarea>
+                </div>
+
+                <div class="invoice-template-totals invoice-template-totals-editable">
+                  <div class="invoice-total-row editable-total-row">
+                    <span>Subtotal</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Subtotal"><input id="invoiceSubtotalPreview" class="invoice-total-input" name="subtotal" type="number" step="0.01" data-invoice-total-field="subtotal" /></label>
+                  </div>
+                  <div class="invoice-total-row tax-row editable-total-row">
+                    <span>Sales Tax</span>
+                    <label class="invoice-tax-rate-field" aria-label="Sales tax rate"><input name="tax_rate" type="number" step="0.001" value="0" />%</label>
+                    <label class="invoice-total-field" aria-label="Sales tax amount"><input id="invoiceTaxPreview" class="invoice-total-input" name="tax" type="number" step="0.01" data-invoice-total-field="tax" /></label>
+                  </div>
+                  <div class="invoice-total-row editable-total-row">
+                    <span>Total</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Total"><input id="invoiceTotalPreview" class="invoice-total-input" name="total" type="number" step="0.01" data-invoice-total-field="total" /></label>
+                  </div>
+                  <div class="invoice-total-row editable-total-row">
+                    <span>Payments/Credits</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Payments and credits"><input id="invoicePaymentsPreview" class="invoice-total-input" name="payments" type="number" step="0.01" value="0" data-invoice-total-field="payments" /></label>
+                  </div>
+                  <div class="invoice-total-row balance editable-total-row">
+                    <span>Balance Due</span>
+                    <i></i>
+                    <label class="invoice-total-field" aria-label="Balance due"><input id="invoiceBalancePreview" class="invoice-total-input" name="balance_due" type="number" step="0.01" data-invoice-total-field="balance_due" /></label>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <div class="form-actions sticky-actions builder-save-strip invoice-save-strip">
+              <button class="btn ghost" id="clearInvoiceFormBottomBtn" type="button">Clear Invoice</button>
+              <button class="btn primary builder-save-btn" type="submit">Save Invoice</button>
+            </div>
+
+            <div id="invoiceItems" class="hidden"></div>
+          </form>
+
+          <section class="panel table-panel invoice-list-panel">
+            <div class="panel-header table-panel-header">
+              <h3>Invoices</h3>
+              <div class="table-toolbar-inline">
+                <input id="invoicesSearch" class="table-search" type="search" placeholder="Search invoices..." />
+                <span id="invoicesCount" class="pill">0</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table invoices-table">
+                <thead>
+                  <tr>
+                    <th>Invoice #</th>
+                    <th>Job / Project</th>
+                    <th>Status</th>
+                    <th>Invoice Date</th>
+                    <th>Due</th>
+                    <th>Total</th>
+                    <th>Balance</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="invoicesTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="timesheetsView" class="view">
+        <div class="timesheet-workspace">
+          <form id="timesheetForm" class="panel timesheet-builder-panel">
+            <input type="hidden" name="timesheet_group_id" />
+            <div class="panel-header compact timesheet-page-header">
+              <div>
+                <h3>Insulation Daily Time Sheet</h3>
+                <p class="tiny">Select a job to auto-fill the client contact, project name, job number, location, and today's date. Add the employees working that day and their hours, then save or download the timecard.</p>
+              </div>
+              <div class="timesheet-header-actions">
+                <button class="btn ghost" id="newTimesheetDayBtn" type="button">New Daily Sheet</button>
+                <button class="btn ghost" id="downloadTimesheetPdfBtn" type="button">Download PDF</button>
+                <button class="btn primary" type="submit">Save Timesheet</button>
+              </div>
+            </div>
+
+            <section class="timesheet-job-control-card" aria-label="Timesheet job selector">
+              <label class="timesheet-job-picker">Select Job to Autofill
+                <select name="job_id" class="job-select timesheet-job-select" required></select>
+              </label>
+              <div id="timesheetJobSummary" class="timesheet-job-summary">
+                <strong>No job selected</strong>
+                <span>Choose a job above. The timecard below will fill client contact, project name, job number, location, and date automatically.</span>
+              </div>
+            </section>
+
+            <div class="timesheet-page-fit">
+              <article id="timesheetSheet" class="timesheet-template-document timesheet-template-editor">
+                <div class="timesheet-top-rule"></div>
+                <div class="timesheet-title">Insulation Daily Time Sheet:</div>
+                <div class="timesheet-logo-wrap">
+                  <img src="NEW_logo.png" alt="PIMP" />
+                  <strong>PIMP</strong>
+                </div>
+
+
+                <label class="ts-label ts-customer-label">Client Contact:</label>
+                <input class="ts-cell ts-customer-value" name="customer" readonly />
+                <label class="ts-label ts-afe-label">Project Name:</label>
+                <input class="ts-cell ts-afe-value" name="customer_afe_no" readonly />
+
+                <label class="ts-label ts-pms-label">Job Number:</label>
+                <input class="ts-cell ts-pms-value" name="pms_job_number" readonly />
+                <label class="ts-label ts-date-label">Date :</label>
+                <input class="ts-cell ts-date-value" name="work_date" type="date" required />
+
+                <label class="ts-label ts-location-label">Location:</label>
+                <input class="ts-cell ts-location-value" name="location" readonly />
+
+                <label class="ts-label ts-description-label">Description of Services:</label>
+                <textarea class="ts-cell ts-description-value" name="description_of_services"></textarea>
+
+                <table class="timesheet-employee-grid">
+                  <thead>
+                    <tr class="timesheet-section-row">
+                      <th colspan="8">EMPLOYEES <button class="sheet-add-btn timesheet-add-row-btn" id="addTimesheetEmployeeBtn" type="button">+ row</button></th>
+                    </tr>
+                    <tr>
+                      <th>Emp ID</th>
+                      <th>Emp Name</th>
+                      <th>Classification</th>
+                      <th>Hours</th>
+                      <th>TR</th>
+                      <th>PD</th>
+                      <th class="timesheet-notes-head">Notes</th>
+                      <th class="timesheet-row-action-head"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="timesheetEmployeeRows"></tbody>
+                </table>
+              </article>
+            </div>
+          </form>
+
+          <section class="panel table-panel">
+            <div class="panel-header table-panel-header">
+              <h3>Saved Timesheets</h3>
+              <div class="table-toolbar-inline">
+                <input id="timesheetsSearch" class="table-search" type="search" placeholder="Search timesheets..." />
+                <span id="timesheetsCount" class="pill">0</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table timesheets-table">
+                <thead>
+                  <tr>
+                    <th>Folder / Date</th>
+                    <th>Customer</th>
+                    <th>Job / Dates</th>
+                    <th>Location</th>
+                    <th>Timesheets / Employees</th>
+                    <th>Total Hours</th>
+                    <th>Ticket #</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="timesheetsTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="employeesView" class="view">
+        <div class="split">
+          <form id="employeeForm" class="panel form-panel">
+            <h3 id="employeeFormTitle">Add Employee</h3>
+            <input type="hidden" name="record_id" />
+            <div class="form-grid">
+              <label>Full Name<input name="full_name" required /></label>
+              <label>Email<input name="email" type="email" /></label>
+              <label>Phone<input name="phone" /></label>
+              <label>Role
+                <select name="role">
+                  <option value="Insulator">Insulator</option>
+                  <option value="Foreman">Foreman</option>
+                  <option value="Helper">Helper</option>
+                  <option value="Supervisor">Supervisor</option>
+                  <option value="Office">Office</option>
+                </select>
+              </label>
+              <label>Status
+                <select name="status">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="btn ghost hidden" id="cancelEmployeeEditBtn" type="button">Cancel Edit</button>
+              <button class="btn primary" id="employeeSubmitBtn" type="submit">Add Employee</button>
+            </div>
+          </form>
+
+          <section class="panel table-panel">
+            <div class="panel-header table-panel-header">
+              <h3>Employees</h3>
+              <div class="table-toolbar-inline">
+                <input id="employeesSearch" class="table-search" type="search" placeholder="Search employees..." />
+                <span id="employeesCount" class="pill">0</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table employees-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="employeesTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="assignmentsView" class="view">
+        <div class="split">
+          <form id="assignmentForm" class="panel form-panel assignment-form-panel">
+            <h3 id="assignmentFormTitle">Assign Employees to Job</h3>
+            <input type="hidden" name="record_id" />
+            <div class="form-grid">
+              <label>Job<select name="job_id" class="job-select" required></select></label>
+              <label class="wide compact-employee-picker">Choose Employees
+                <span class="field-hint">Hold Ctrl / Cmd to select multiple employees for this job.</span>
+                <select name="employee_ids" class="employee-select assignment-employee-multi" multiple required></select>
+              </label>
+              <label>Status
+                <select name="status">
+                  <option value="assigned">Assigned</option>
+                  <option value="working">Working</option>
+                  <option value="completed">Completed</option>
+                  <option value="removed">Removed</option>
+                </select>
+              </label>
+              <label>Start Date<input name="start_date" type="date" /></label>
+              <label>End Date<input name="end_date" type="date" /></label>
+              <label class="wide">Notes<textarea name="notes" rows="3"></textarea></label>
+            </div>
+            <div class="form-actions"><button class="btn ghost hidden" id="cancelAssignmentEditBtn" type="button">Cancel Edit</button><button class="btn primary" id="assignmentSubmitBtn" type="submit">Assign Job</button></div>
+          </form>
+
+          <section class="panel table-panel">
+            <div class="panel-header table-panel-header">
+              <h3>Job Assignments</h3>
+              <div class="table-toolbar-inline">
+                <input id="assignmentsSearch" class="table-search" type="search" placeholder="Search assignments..." />
+                <span id="assignmentsCount" class="pill">0</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table assignments-table">
+                <thead>
+                  <tr>
+                    <th>Job</th>
+                    <th>Employee</th>
+                    <th>Role</th>
+                    <th>Dates</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="assignmentsTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
+      <section id="documentsView" class="view hidden" aria-hidden="true">
+        <section class="panel documents-moved-panel">
+          <div class="panel-header">
+            <div>
+              <h3>Job Documents moved to Jobs</h3>
+              <p class="tiny">Open the Jobs page and click a job row to view its cost tracker, invoices, timesheets, uploaded files, and missing-document guide.</p>
+            </div>
+            <button class="btn primary" data-view-jump="jobs" type="button">Go to Jobs</button>
+          </div>
+          <input id="documentsSearch" class="hidden table-search" type="search" aria-hidden="true" />
+          <span id="documentsCount" class="hidden">0</span>
+          <div id="documentsHubSummary" class="hidden"></div>
+          <div id="documentsJobHub" class="hidden"></div>
+          <div id="uploadedJobFilesPanel" class="hidden"></div>
+          <table class="hidden"><tbody id="documentsTable"></tbody></table>
+        </section>
+      </section>
+    </main>
+  </section>
+
+
+
+
+  <dialog id="costTrackerPreviewDialog" class="invoice-preview-dialog">
+    <form method="dialog" class="invoice-preview-card">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Cost Tracker View</p>
+          <h3>Review before downloading</h3>
+        </div>
+        <button class="icon-btn" value="cancel" type="submit">×</button>
+      </div>
+      <div id="costTrackerPreviewContent" class="invoice-preview-content"></div>
+      <div class="settings-actions">
+        <button class="btn ghost" value="cancel" type="submit">Close</button>
+        <button class="btn ghost" id="downloadCostTrackerPreviewBtn" type="button">Download Excel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="invoicePreviewDialog" class="invoice-preview-dialog">
+    <form method="dialog" class="invoice-preview-card">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Invoice View</p>
+          <h3>Review before downloading</h3>
+        </div>
+        <button class="icon-btn" value="cancel" type="submit">×</button>
+      </div>
+      <div id="invoicePreviewContent" class="invoice-preview-content"></div>
+      <div class="settings-actions">
+        <button class="btn ghost" value="cancel" type="submit">Close</button>
+        <button class="btn ghost" id="downloadInvoicePreviewBtn" type="button">Download PDF</button>
+      </div>
+    </form>
+  </dialog>
+
+
+  <script src="app.js?v=20260622-1"></script>
+</body>
+</html>
