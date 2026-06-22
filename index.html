@@ -574,8 +574,8 @@ Account # __________</textarea>
             <input type="hidden" name="timesheet_group_id" />
             <div class="panel-header compact timesheet-page-header">
               <div>
-                <h3>Foreman's Daily Time Sheet</h3>
-                <p class="tiny">Select a job to auto-fill customer, job number, location, and today's date. Add the employees working that day and their hours, then save or download the timecard.</p>
+                <h3>Insulation Daily Time Sheet</h3>
+                <p class="tiny">Select a job to auto-fill the client contact, project name, job number, location, and today's date. Add the employees working that day and their hours, then save or download the timecard.</p>
               </div>
               <div class="timesheet-header-actions">
                 <button class="btn ghost" id="newTimesheetDayBtn" type="button">New Daily Sheet</button>
@@ -590,35 +590,32 @@ Account # __________</textarea>
               </label>
               <div id="timesheetJobSummary" class="timesheet-job-summary">
                 <strong>No job selected</strong>
-                <span>Choose a job above. The timecard below will fill customer, job number, location, and date automatically.</span>
+                <span>Choose a job above. The timecard below will fill client contact, project name, job number, location, and date automatically.</span>
               </div>
             </section>
 
             <div class="timesheet-page-fit">
               <article id="timesheetSheet" class="timesheet-template-document timesheet-template-editor">
                 <div class="timesheet-top-rule"></div>
-                <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+                <div class="timesheet-title">Insulation Daily Time Sheet:</div>
                 <div class="timesheet-logo-wrap">
                   <img src="NEW_logo.png" alt="PIMP" />
                   <strong>PIMP</strong>
                 </div>
 
 
-                <label class="ts-label ts-customer-label">Customer:</label>
+                <label class="ts-label ts-customer-label">Client Contact:</label>
                 <input class="ts-cell ts-customer-value" name="customer" readonly />
-                <label class="ts-label ts-afe-label">Customer AFE / No:</label>
+                <label class="ts-label ts-afe-label">Project Name:</label>
                 <input class="ts-cell ts-afe-value" name="customer_afe_no" readonly />
 
-                <label class="ts-label ts-pms-label">PMS Job Number:</label>
+                <label class="ts-label ts-pms-label">Job Number:</label>
                 <input class="ts-cell ts-pms-value" name="pms_job_number" readonly />
                 <label class="ts-label ts-date-label">Date :</label>
                 <input class="ts-cell ts-date-value" name="work_date" type="date" required />
 
                 <label class="ts-label ts-location-label">Location:</label>
                 <input class="ts-cell ts-location-value" name="location" readonly />
-
-                <label class="ts-label ts-ticket-label">Ticket Number:</label>
-                <input class="ts-cell ts-ticket-value" name="ticket_number" />
 
                 <label class="ts-label ts-description-label">Description of Services:</label>
                 <textarea class="ts-cell ts-description-value" name="description_of_services"></textarea>

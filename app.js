@@ -4682,8 +4682,8 @@ function printDocumentCss() {
     const workDate = getTimesheetField("work_date") || today();
     setTimesheetField("work_date", workDate);
     updateTimesheetJobSummary(job, workDate);
-    setTimesheetField("customer", job.company_name || "");
-    setTimesheetField("customer_afe_no", job.job_number || "");
+    setTimesheetField("customer", job.contact_name || "");
+    setTimesheetField("customer_afe_no", job.job_name || "");
     setTimesheetField("pms_job_number", job.job_number || "");
     setTimesheetField("location", job.location || "");
     if (!getTimesheetField("description_of_services")) {
@@ -4736,8 +4736,8 @@ function printDocumentCss() {
       job,
       work_date: values.work_date || today(),
       customer: values.customer || job?.company_name || "",
-      customer_afe_no: values.customer_afe_no || job?.job_number || "",
-      pms_job_number: values.pms_job_number || job?.job_name || job?.job_number || "",
+      customer_afe_no: values.customer_afe_no || job?.job_name || "",
+      pms_job_number: values.pms_job_number || job?.job_number || "",
       location: values.location || job?.location || "",
       ticket_number: values.ticket_number || "",
       description_of_services: values.description_of_services || "",
@@ -4777,24 +4777,21 @@ function printDocumentCss() {
     return `
       <article class="timesheet-template-document timesheet-print-document">
         <div class="timesheet-top-rule"></div>
-        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-title">Insulation Daily Time Sheet:</div>
         <div class="timesheet-logo-wrap"><img src="${window.PIMP_LOGO_DATA_URL || 'NEW_logo.png'}" alt="PIMP" /><strong>PIMP</strong></div>
 
-        <div class="ts-label ts-customer-label">Customer:</div>
+        <div class="ts-label ts-customer-label">Client Contact:</div>
         <div class="ts-cell ts-customer-value">${escapeHtml(data.customer)}</div>
-        <div class="ts-label ts-afe-label">Customer AFE / No:</div>
+        <div class="ts-label ts-afe-label">Project Name:</div>
         <div class="ts-cell ts-afe-value">${escapeHtml(data.customer_afe_no)}</div>
 
-        <div class="ts-label ts-pms-label">PMS Job Number:</div>
+        <div class="ts-label ts-pms-label">Job Number:</div>
         <div class="ts-cell ts-pms-value">${escapeHtml(data.pms_job_number)}</div>
         <div class="ts-label ts-date-label">Date :</div>
         <div class="ts-cell ts-date-value">${formatDate(data.work_date)}</div>
 
         <div class="ts-label ts-location-label">Location:</div>
         <div class="ts-cell ts-location-value">${escapeHtml(data.location)}</div>
-
-        <div class="ts-label ts-ticket-label">Ticket Number:</div>
-        <div class="ts-cell ts-ticket-value">${escapeHtml(data.ticket_number)}</div>
 
         <div class="ts-label ts-description-label">Description of Services:</div>
         <div class="ts-cell ts-description-value static-multiline">${escapeHtml(data.description_of_services)}</div>
@@ -4819,10 +4816,9 @@ function printDocumentCss() {
   }
 
   function timesheetFileName(data = timesheetDataFromForm()) {
-    const jobPart = data.customer_afe_no || data.job?.job_number || "unassigned";
+    const jobPart = data.pms_job_number || data.job?.job_number || "unassigned";
     const datePart = data.work_date || today();
-    const ticketPart = data.ticket_number ? `_${data.ticket_number}` : "";
-    return cleanFileNameForTimesheet(`timesheet_${jobPart}_${datePart}${ticketPart}.pdf`);
+    return cleanFileNameForTimesheet(`timesheet_${jobPart}_${datePart}.pdf`);
   }
 
   function openTimesheetPreview(html) {
@@ -4952,7 +4948,7 @@ function printDocumentCss() {
         tr: line.tr ? true : false,
         pd: line.pd ? true : false,
         customer: data.customer || null,
-        job_number: data.customer_afe_no || null,
+        job_number: data.pms_job_number || null,
         location: data.location || null,
         ticket_number: data.ticket_number || null,
         description_of_services: data.description_of_services || null,
@@ -5224,7 +5220,7 @@ function printDocumentCss() {
     return `${previousPrintDocumentCssForTimesheet()}
       @page{size:letter portrait;margin:0}
       .timesheet-template-document{width:8.5in;height:11in;margin:0 auto;background:#fff;color:#000;box-sizing:border-box;position:relative;font-family:Arial,Helvetica,sans-serif;border:0;box-shadow:none;padding:.72in .24in .36in}
-      .timesheet-template-document *{box-sizing:border-box}.timesheet-top-rule{position:absolute;left:.24in;right:.24in;top:.48in;border-top:3px solid #000}.timesheet-title{position:absolute;top:.58in;left:.28in;width:3.2in;font-size:13px;font-weight:800}.timesheet-logo-wrap{position:absolute;top:.58in;left:3.4in;width:1.7in;height:.5in;display:grid;place-items:center}.timesheet-logo-wrap img{max-width:1.55in;max-height:.5in;object-fit:contain}.timesheet-logo-wrap strong{display:none;font-size:34px;letter-spacing:-.09em}.timesheet-select-job-static{display:none!important}.timesheet-select-job-static strong{display:none!important}.ts-label,.ts-cell{position:absolute;border:2px solid #000;min-height:.26in;font-size:12px;line-height:1.1}.ts-label{background:#fff600;font-weight:800;display:flex;align-items:center;padding-left:4px}.ts-cell{background:#fff;display:flex;align-items:center;padding:2px 5px}.ts-customer-label{top:1.16in;left:.24in;width:1in;height:.25in}.ts-customer-value{top:1.16in;left:1.24in;width:2.72in;height:.25in}.ts-afe-label{top:1.16in;left:3.96in;width:1.9in;height:.25in}.ts-afe-value{top:1.16in;left:5.86in;width:2.4in;height:.25in}.ts-pms-label{top:1.55in;left:.24in;width:1.25in;height:.3in}.ts-pms-value{top:1.55in;left:1.49in;width:2.47in;height:.3in}.ts-date-label{top:1.55in;left:3.96in;width:1in;height:.3in}.ts-date-value{top:1.55in;left:4.96in;width:3.3in;height:.3in;font-size:20px!important}.ts-location-label{top:2.03in;left:.24in;width:1in;height:.32in}.ts-location-value{top:2.03in;left:1.24in;width:7.02in;height:.32in}.ts-ticket-label{top:2.5in;left:.24in;width:1in;height:.32in}.ts-ticket-value{top:2.5in;left:1.24in;width:7.02in;height:.32in}.ts-description-label{top:3.02in;left:.24in;width:1.75in;height:.34in}.ts-description-value{top:3.36in;left:.24in;width:8.02in;height:1.65in;align-items:flex-start;white-space:pre-wrap;resize:none;display:block;padding:8px;line-height:1.35}.timesheet-employee-grid{position:absolute;top:5.3in;left:.24in;width:8.02in;border-collapse:collapse;table-layout:fixed;min-width:0;font-family:Arial,Helvetica,sans-serif;font-size:11px}.timesheet-employee-grid th,.timesheet-employee-grid td{border:1.4px solid #000;padding:0;height:.215in;background:#fff;color:#000;text-transform:none;letter-spacing:0;text-align:center;vertical-align:middle;overflow:hidden}.timesheet-employee-grid th{background:#fff600;font-weight:800}.timesheet-employee-grid th:nth-child(1),.timesheet-employee-grid td:nth-child(1){width:1.04in}.timesheet-employee-grid th:nth-child(2),.timesheet-employee-grid td:nth-child(2){width:1.94in}.timesheet-employee-grid th:nth-child(3),.timesheet-employee-grid td:nth-child(3){width:1.05in}.timesheet-employee-grid th:nth-child(4),.timesheet-employee-grid td:nth-child(4){width:.62in}.timesheet-employee-grid th:nth-child(5),.timesheet-employee-grid td:nth-child(5){width:.34in}.timesheet-employee-grid th:nth-child(6),.timesheet-employee-grid td:nth-child(6){width:.36in}.timesheet-employee-grid th:nth-child(7),.timesheet-employee-grid td:nth-child(7){width:.4in}.timesheet-employee-grid th:nth-child(8),.timesheet-employee-grid td:nth-child(8){width:1.55in}.timesheet-employee-grid th:nth-child(9),.timesheet-employee-grid td:nth-child(9){width:.82in}.hours-cell,.check-cell{text-align:center;font-weight:700}button{display:none!important}`;
+      .timesheet-template-document *{box-sizing:border-box}.timesheet-top-rule{position:absolute;left:.24in;right:.24in;top:.48in;border-top:3px solid #000}.timesheet-title{position:absolute;top:.58in;left:.28in;width:3.2in;font-size:13px;font-weight:800}.timesheet-logo-wrap{position:absolute;top:.58in;left:3.4in;width:1.7in;height:.5in;display:grid;place-items:center}.timesheet-logo-wrap img{max-width:1.55in;max-height:.5in;object-fit:contain}.timesheet-logo-wrap strong{display:none;font-size:34px;letter-spacing:-.09em}.timesheet-select-job-static{display:none!important}.timesheet-select-job-static strong{display:none!important}.ts-label,.ts-cell{position:absolute;border:2px solid #000;min-height:.26in;font-size:12px;line-height:1.1}.ts-label{background:#fff600;font-weight:800;display:flex;align-items:center;padding-left:4px}.ts-cell{background:#fff;display:flex;align-items:center;padding:2px 5px}.ts-customer-label{top:1.16in;left:.24in;width:1.30in;height:.25in}.ts-customer-value{top:1.16in;left:1.54in;width:2.35in;height:.25in}.ts-afe-label{top:1.16in;left:3.96in;width:1.30in;height:.25in}.ts-afe-value{top:1.16in;left:5.26in;width:3.00in;height:.25in}.ts-pms-label{top:1.55in;left:.24in;width:1.25in;height:.3in}.ts-pms-value{top:1.55in;left:1.49in;width:2.47in;height:.3in}.ts-date-label{top:1.55in;left:3.96in;width:1in;height:.3in}.ts-date-value{top:1.55in;left:4.96in;width:3.3in;height:.3in;font-size:20px!important}.ts-location-label{top:2.03in;left:.24in;width:1in;height:.32in}.ts-location-value{top:2.03in;left:1.24in;width:7.02in;height:.32in}.ts-ticket-label{top:2.5in;left:.24in;width:1in;height:.32in}.ts-ticket-value{top:2.5in;left:1.24in;width:7.02in;height:.32in}.ts-description-label{top:3.02in;left:.24in;width:1.75in;height:.34in}.ts-description-value{top:3.36in;left:.24in;width:8.02in;height:1.65in;align-items:flex-start;white-space:pre-wrap;resize:none;display:block;padding:8px;line-height:1.35}.timesheet-employee-grid{position:absolute;top:5.3in;left:.24in;width:8.02in;border-collapse:collapse;table-layout:fixed;min-width:0;font-family:Arial,Helvetica,sans-serif;font-size:11px}.timesheet-employee-grid th,.timesheet-employee-grid td{border:1.4px solid #000;padding:0;height:.215in;background:#fff;color:#000;text-transform:none;letter-spacing:0;text-align:center;vertical-align:middle;overflow:hidden}.timesheet-employee-grid th{background:#fff600;font-weight:800}.timesheet-employee-grid th:nth-child(1),.timesheet-employee-grid td:nth-child(1){width:1.04in}.timesheet-employee-grid th:nth-child(2),.timesheet-employee-grid td:nth-child(2){width:1.94in}.timesheet-employee-grid th:nth-child(3),.timesheet-employee-grid td:nth-child(3){width:1.05in}.timesheet-employee-grid th:nth-child(4),.timesheet-employee-grid td:nth-child(4){width:.62in}.timesheet-employee-grid th:nth-child(5),.timesheet-employee-grid td:nth-child(5){width:.34in}.timesheet-employee-grid th:nth-child(6),.timesheet-employee-grid td:nth-child(6){width:.36in}.timesheet-employee-grid th:nth-child(7),.timesheet-employee-grid td:nth-child(7){width:.4in}.timesheet-employee-grid th:nth-child(8),.timesheet-employee-grid td:nth-child(8){width:1.55in}.timesheet-employee-grid th:nth-child(9),.timesheet-employee-grid td:nth-child(9){width:.82in}.hours-cell,.check-cell{text-align:center;font-weight:700}button{display:none!important}`;
   };
 })();
 
@@ -6986,8 +6982,8 @@ function printDocumentCss() {
       job,
       work_date: getTsField("work_date") || (typeof today === "function" ? today() : new Date().toISOString().slice(0, 10)),
       customer: getTsField("customer") || job?.company_name || "",
-      customer_afe_no: getTsField("customer_afe_no") || job?.job_number || "",
-      pms_job_number: getTsField("pms_job_number") || job?.job_name || job?.job_number || "",
+      customer_afe_no: getTsField("customer_afe_no") || job?.job_name || "",
+      pms_job_number: getTsField("pms_job_number") || job?.job_number || "",
       location: getTsField("location") || job?.location || "",
       ticket_number: getTsField("ticket_number"),
       description_of_services: getTsField("description_of_services"),
@@ -7040,20 +7036,18 @@ function printDocumentCss() {
     return `
       <article class="timesheet-template-document timesheet-print-document">
         <div class="timesheet-top-rule"></div>
-        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-title">Insulation Daily Time Sheet:</div>
         <div class="timesheet-logo-wrap"><img src="${LOGO_SRC()}" alt="PIMP" /><strong>PIMP</strong></div>
-        <div class="ts-label ts-customer-label">Customer:</div>
+        <div class="ts-label ts-customer-label">Client Contact:</div>
         <div class="ts-cell ts-customer-value">${finalEscape(data.customer)}</div>
-        <div class="ts-label ts-afe-label">Customer AFE / No:</div>
+        <div class="ts-label ts-afe-label">Project Name:</div>
         <div class="ts-cell ts-afe-value">${finalEscape(data.customer_afe_no)}</div>
-        <div class="ts-label ts-pms-label">PMS Job Number:</div>
+        <div class="ts-label ts-pms-label">Job Number:</div>
         <div class="ts-cell ts-pms-value">${finalEscape(data.pms_job_number)}</div>
         <div class="ts-label ts-date-label">Date :</div>
         <div class="ts-cell ts-date-value">${finalDate(data.work_date)}</div>
         <div class="ts-label ts-location-label">Location:</div>
         <div class="ts-cell ts-location-value">${finalEscape(data.location)}</div>
-        <div class="ts-label ts-ticket-label">Ticket Number:</div>
-        <div class="ts-cell ts-ticket-value">${finalEscape(data.ticket_number)}</div>
         <div class="ts-label ts-description-label">Description of Services:</div>
         <div class="ts-cell ts-description-value static-multiline">${finalEscape(data.description_of_services)}</div>
         <table class="timesheet-employee-grid">
@@ -7076,7 +7070,7 @@ function printDocumentCss() {
   }
 
   function tsFileName(data) {
-    const jobPart = data.customer_afe_no || data.job?.job_number || "unassigned";
+    const jobPart = data.pms_job_number || data.job?.job_number || "unassigned";
     const datePart = data.work_date || (typeof today === "function" ? today() : new Date().toISOString().slice(0, 10));
     return finalSafeFileName(`timesheet_${jobPart}_${datePart}.pdf`);
   }
@@ -16275,8 +16269,8 @@ This removes it from the job documents list.`)) return;
       job_id: daily.jobId || "",
       job,
       work_date: daily.date || (typeof today === "function" ? today() : ""),
-      customer: daily.customer || job?.company_name || "",
-      customer_afe_no: daily.jobNumber || job?.job_number || "",
+      customer: daily.customer || job?.contact_name || "",
+      customer_afe_no: job?.job_name || "",
       pms_job_number: job?.job_number || daily.jobNumber || "",
       location: daily.location || job?.location || "",
       ticket_number: daily.ticket || "",
@@ -16340,8 +16334,8 @@ This removes it from the job documents list.`)) return;
     if (typeof showView === "function") showView("timesheets");
     setField("timesheet_group_id", "");
     setField("job_id", jobId || "");
-    setField("customer", job?.company_name || "");
-    setField("customer_afe_no", job?.job_number || "");
+    setField("customer", job?.contact_name || "");
+    setField("customer_afe_no", job?.job_name || "");
     setField("pms_job_number", job?.job_number || "");
     setField("location", job?.location || "");
     setField("work_date", typeof today === "function" ? today() : "");
@@ -16372,20 +16366,18 @@ This removes it from the job documents list.`)) return;
     return `
       <article class="timesheet-template-document timesheet-print-document">
         <div class="timesheet-top-rule"></div>
-        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-title">Insulation Daily Time Sheet:</div>
         <div class="timesheet-logo-wrap"><img src="${window.PIMP_LOGO_DATA_URL || 'NEW_logo.png'}" alt="PIMP" /><strong>PIMP</strong></div>
-        <div class="ts-label ts-customer-label">Customer:</div>
+        <div class="ts-label ts-customer-label">Client Contact:</div>
         <div class="ts-cell ts-customer-value">${esc(data.customer)}</div>
-        <div class="ts-label ts-afe-label">Customer AFE / No:</div>
+        <div class="ts-label ts-afe-label">Project Name:</div>
         <div class="ts-cell ts-afe-value">${esc(data.customer_afe_no)}</div>
-        <div class="ts-label ts-pms-label">PMS Job Number:</div>
+        <div class="ts-label ts-pms-label">Job Number:</div>
         <div class="ts-cell ts-pms-value">${esc(data.pms_job_number)}</div>
         <div class="ts-label ts-date-label">Date :</div>
         <div class="ts-cell ts-date-value">${fmtDate(data.work_date)}</div>
         <div class="ts-label ts-location-label">Location:</div>
         <div class="ts-cell ts-location-value">${esc(data.location)}</div>
-        <div class="ts-label ts-ticket-label">Ticket Number:</div>
-        <div class="ts-cell ts-ticket-value">${esc(data.ticket_number)}</div>
         <div class="ts-label ts-description-label">Description of Services:</div>
         <div class="ts-cell ts-description-value static-multiline">${esc(data.description_of_services)}</div>
         <table class="timesheet-employee-grid">
@@ -21129,8 +21121,8 @@ This removes it from the job documents list.`)) return;
     }
 
     setFormField(form, "job_id", jobId);
-    setFormField(form, "customer", job.company_name || "");
-    setFormField(form, "customer_afe_no", job.job_number || "");
+    setFormField(form, "customer", job.contact_name || "");
+    setFormField(form, "customer_afe_no", job.job_name || "");
     setFormField(form, "pms_job_number", job.job_number || "");
     setFormField(form, "location", job.location || "");
     setFormField(form, "description_of_services", "");
@@ -21457,20 +21449,18 @@ This removes it from the job documents list.`)) return;
     return `
       <article class="timesheet-template-document timesheet-print-document">
         <div class="timesheet-top-rule"></div>
-        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-title">Insulation Daily Time Sheet:</div>
         <div class="timesheet-logo-wrap"><img src="${window.PIMP_LOGO_DATA_URL || 'NEW_logo.png'}" alt="PIMP" /><strong>PIMP</strong></div>
-        <div class="ts-label ts-customer-label">Customer:</div>
+        <div class="ts-label ts-customer-label">Client Contact:</div>
         <div class="ts-cell ts-customer-value">${esc(daily.customer)}</div>
-        <div class="ts-label ts-afe-label">Customer AFE / No:</div>
+        <div class="ts-label ts-afe-label">Project Name:</div>
         <div class="ts-cell ts-afe-value">${esc(daily.jobNumber)}</div>
-        <div class="ts-label ts-pms-label">PMS Job Number:</div>
+        <div class="ts-label ts-pms-label">Job Number:</div>
         <div class="ts-cell ts-pms-value">${esc(daily.pmsJobNumber || daily.jobNumber)}</div>
         <div class="ts-label ts-date-label">Date :</div>
         <div class="ts-cell ts-date-value">${fmtDate(daily.date)}</div>
         <div class="ts-label ts-location-label">Location:</div>
         <div class="ts-cell ts-location-value">${esc(daily.location)}</div>
-        <div class="ts-label ts-ticket-label">Ticket Number:</div>
-        <div class="ts-cell ts-ticket-value">${esc(daily.ticket)}</div>
         <div class="ts-label ts-description-label">Description of Services:</div>
         <div class="ts-cell ts-description-value static-multiline">${esc(daily.description)}</div>
         <table class="timesheet-employee-grid">
@@ -21799,9 +21789,9 @@ This removes it from the job documents list.`)) return;
     const jobId = daily.first?.job_id || daily.job?.id || "";
     setField(form, "timesheet_group_id", daily.id);
     setField(form, "job_id", jobId);
-    setField(form, "customer", daily.customer || daily.job?.company_name || "");
-    setField(form, "customer_afe_no", daily.jobNumber || daily.job?.job_number || "");
-    setField(form, "pms_job_number", daily.pmsJobNumber || daily.job?.job_number || "");
+    setField(form, "customer", daily.customer || daily.job?.contact_name || "");
+    setField(form, "customer_afe_no", daily.job?.job_name || "");
+    setField(form, "pms_job_number", daily.jobNumber || daily.pmsJobNumber || daily.job?.job_number || "");
     setField(form, "location", daily.location || daily.job?.location || "");
     setField(form, "work_date", daily.date || todayValue());
     setField(form, "ticket_number", daily.ticket || "");
@@ -27320,7 +27310,7 @@ This removes it from the job documents list.`)) return;
       job,
       work_date: values.work_date || todayValue(),
       customer: values.customer || job?.company_name || "",
-      customer_afe_no: values.customer_afe_no || job?.job_number || "",
+      customer_afe_no: values.customer_afe_no || job?.job_name || "",
       pms_job_number: values.pms_job_number || job?.job_number || "",
       location: values.location || job?.location || "",
       ticket_number: values.ticket_number || "",
@@ -27333,7 +27323,7 @@ This removes it from the job documents list.`)) return;
         employee_count: lines.length,
         total_hours: totalHours,
         customer: values.customer || job?.company_name || "",
-        job_number: values.customer_afe_no || job?.job_number || "",
+        job_number: values.pms_job_number || job?.job_number || "",
         pms_job_number: values.pms_job_number || job?.job_number || "",
         location: values.location || job?.location || "",
         ticket_number: values.ticket_number || "",
@@ -27343,7 +27333,7 @@ This removes it from the job documents list.`)) return;
   }
 
   function timesheetFileName(data) {
-    const raw = `timesheet_${data.customer_afe_no || data.job?.job_number || "job"}_${data.work_date || todayValue()}${data.ticket_number ? `_${data.ticket_number}` : ""}.pdf`;
+    const raw = `timesheet_${data.pms_job_number || data.job?.job_number || "job"}_${data.work_date || todayValue()}.pdf`;
     return raw.replace(/[\\/:*?"<>|]+/g, "-");
   }
 
@@ -27353,14 +27343,13 @@ This removes it from the job documents list.`)) return;
     return `
       <article class="timesheet-template-document timesheet-print-document">
         <div class="timesheet-top-rule"></div>
-        <div class="timesheet-title">Foreman's Daily Time Sheet:</div>
+        <div class="timesheet-title">Insulation Daily Time Sheet:</div>
         <div class="timesheet-logo-wrap"><img src="NEW_logo.png" alt="PIMP" /><strong>PIMP</strong></div>
-        <div class="ts-label ts-customer-label">Customer:</div><div class="ts-cell ts-customer-value">${html(data.customer)}</div>
-        <div class="ts-label ts-afe-label">Customer AFE / No:</div><div class="ts-cell ts-afe-value">${html(data.customer_afe_no)}</div>
-        <div class="ts-label ts-pms-label">PMS Job Number:</div><div class="ts-cell ts-pms-value">${html(data.pms_job_number)}</div>
+        <div class="ts-label ts-customer-label">Client Contact:</div><div class="ts-cell ts-customer-value">${html(data.customer)}</div>
+        <div class="ts-label ts-afe-label">Project Name:</div><div class="ts-cell ts-afe-value">${html(data.customer_afe_no)}</div>
+        <div class="ts-label ts-pms-label">Job Number:</div><div class="ts-cell ts-pms-value">${html(data.pms_job_number)}</div>
         <div class="ts-label ts-date-label">Date :</div><div class="ts-cell ts-date-value">${html(formatDateSafe(data.work_date))}</div>
         <div class="ts-label ts-location-label">Location:</div><div class="ts-cell ts-location-value">${html(data.location)}</div>
-        <div class="ts-label ts-ticket-label">Ticket Number:</div><div class="ts-cell ts-ticket-value">${html(data.ticket_number)}</div>
         <div class="ts-label ts-description-label">Description of Services:</div><div class="ts-cell ts-description-value static-multiline">${html(data.description_of_services)}</div>
         <table class="timesheet-employee-grid"><thead><tr><th>Emp ID</th><th>Emp Name</th><th>Classification</th><th>Hours</th><th>TR</th><th>PD</th><th>Notes</th><th></th></tr></thead><tbody>
           ${rows.map((line) => `<tr><td>${html(line.employee_identifier || "")}</td><td>${html(line.employee_name || "")}</td><td>${html(line.classification || "")}</td><td class="hours-cell">${line.hours ? html(cleanNumber(line.hours)) : ""}</td><td class="check-cell">${line.tr ? "✓" : ""}</td><td class="check-cell">${line.pd ? "✓" : ""}</td><td>${html(line.notes || "")}</td><td></td></tr>`).join("")}
@@ -27401,7 +27390,7 @@ This removes it from the job documents list.`)) return;
       tr: Boolean(line.tr),
       pd: Boolean(line.pd),
       customer: data.customer || null,
-      job_number: data.customer_afe_no || null,
+      job_number: data.pms_job_number || null,
       pms_job_number: data.pms_job_number || null,
       location: data.location || null,
       ticket_number: data.ticket_number || null,

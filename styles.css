@@ -3396,10 +3396,10 @@ td[data-label="Actions"].table-actions .link-btn,
   padding: 2px 5px;
 }
 
-.ts-customer-label { top: 1.16in; left: 0.24in; width: 1.0in; height: 0.25in; }
-.ts-customer-value { top: 1.16in; left: 1.24in; width: 2.72in; height: 0.25in; }
-.ts-afe-label { top: 1.16in; left: 3.96in; width: 1.9in; height: 0.25in; }
-.ts-afe-value { top: 1.16in; left: 5.86in; width: 2.40in; height: 0.25in; }
+.ts-customer-label { top: 1.16in; left: 0.24in; width: 1.30in; height: 0.25in; }
+.ts-customer-value { top: 1.16in; left: 1.54in; width: 2.35in; height: 0.25in; }
+.ts-afe-label { top: 1.16in; left: 3.96in; width: 1.30in; height: 0.25in; }
+.ts-afe-value { top: 1.16in; left: 5.26in; width: 3.00in; height: 0.25in; }
 
 .ts-pms-label { top: 1.55in; left: 0.24in; width: 1.25in; height: 0.30in; }
 .ts-pms-value { top: 1.55in; left: 1.49in; width: 2.47in; height: 0.30in; }
