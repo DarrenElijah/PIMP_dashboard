@@ -21382,6 +21382,11 @@ This removes it from the job documents list.`)) return;
 
     return Array.from(groups.entries()).map(([id, rows]) => {
       const first = rows[0] || {};
+      // Saved rows can fall back to a reduced column set (see buildInsertRows /
+      // insertTimesheetRowsWithFallback). When that happens, fields like the
+      // description and ticket are stored only inside the summary JSON, not as
+      // top-level columns, so read those as a fallback when editing.
+      const firstSummary = parseJson(first.summary, {}) || {};
       const job = findJobSafe(first.job_id || jobId);
       const lines = lineItemsFromGroup(rows);
       const totalHours = lines.reduce((sum, line) => sum + num(line.hours), 0);
@@ -21392,12 +21397,12 @@ This removes it from the job documents list.`)) return;
         job,
         lines,
         date: first.work_date || first.date || "",
-        customer: first.customer || job?.company_name || "",
-        jobNumber: first.job_number || job?.job_number || "",
-        pmsJobNumber: first.pms_job_number || job?.job_number || "",
-        location: first.location || job?.location || "",
-        ticket: first.ticket_number || "",
-        description: first.description_of_services || "",
+        customer: first.customer || firstSummary.customer || job?.company_name || "",
+        jobNumber: first.job_number || firstSummary.job_number || job?.job_number || "",
+        pmsJobNumber: first.pms_job_number || firstSummary.pms_job_number || job?.job_number || "",
+        location: first.location || firstSummary.location || job?.location || "",
+        ticket: first.ticket_number || firstSummary.ticket_number || "",
+        description: first.description_of_services || firstSummary.description_of_services || firstSummary.descriptionOfServices || "",
         status: first.status || "submitted",
         html: first.html_snapshot || "",
         filename: first.download_filename || "",
@@ -24420,8 +24425,8 @@ This removes it from the job documents list.`)) return;
 
     const meta = qs("#costTrackerSheet .sheet-meta-grid");
     if (meta) {
-      const trackerCell = qs("#sheetTrackerNameDisplay")?.closest(".sheet-meta-cell");
-      if (trackerCell) trackerCell.classList.add("cost-tracker-name-meta");
+      const jobNumberCell = qs("#sheetJobNumberDisplay")?.closest(".sheet-meta-cell");
+      if (jobNumberCell) jobNumberCell.classList.add("job-number-meta");
 
       const tmCell = qs("#sheetJobNumber")?.closest(".sheet-meta-cell");
       if (tmCell) {
@@ -24456,6 +24461,7 @@ This removes it from the job documents list.`)) return;
     const nameValue = safeText(getValue(form, "cost_tracker_name"), "Untitled Cost Tracker");
 
     if (!selectedJob) {
+      textSetter("#sheetJobNumberDisplay", "—");
       textSetter("#sheetJobNumber", selectedJobId ? "T&M" : "Unassigned");
       textSetter("#sheetClientName", "—");
       textSetter("#sheetJobName", nameValue || "Draft Cost Tracker");
@@ -24463,6 +24469,7 @@ This removes it from the job documents list.`)) return;
       return;
     }
 
+    textSetter("#sheetJobNumberDisplay", safeText(selectedJob.job_number, "—"));
     textSetter("#sheetJobNumber", getJobTmAfeDisplay(selectedJob));
     textSetter("#sheetClientName", getClientRequestorDisplay(selectedJob));
     textSetter("#sheetJobName", getProjectNameDisplay(selectedJob));
@@ -26435,10 +26442,13 @@ This removes it from the job documents list.`)) return;
     const rows = closedJobs();
     if (count) count.textContent = rows.length;
 
+    let rateTotalSum = 0;
+
     table.innerHTML = rows.map((job) => {
       const tracker = latestCostTrackerForJob(job.id);
       const invoice = latestInvoiceForJob(job.id);
       const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+      if (tracker) rateTotalSum += toNumber(rateTotalForTracker(tracker)) || 0;
       return `
         <tr class="job-main-row professional-job-row closed-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
           <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
@@ -26461,6 +26471,15 @@ This removes it from the job documents list.`)) return;
         </tr>
       `;
     }).join("") || `<tr><td colspan="8" class="muted">No closed jobs found.</td></tr>`;
+
+    // Show the combined total of every closed job's Rate Total to the right of
+    // the "Rate Total" header text.
+    const headerTable = table.closest("table");
+    const rateTotalHeader = Array.from(headerTable?.querySelectorAll("thead th") || [])
+      .find((th) => th.textContent.trim().toLowerCase().startsWith("rate total"));
+    if (rateTotalHeader) {
+      rateTotalHeader.innerHTML = `Rate Total <span class="closed-jobs-rate-total-sum">${html(moneyLabel(rateTotalSum))}</span>`;
+    }
   }
 
   async function saveInvoiceStatus(invoiceId, nextStatus, selectElement) {
@@ -30291,7 +30310,7 @@ This removes it from the job documents list.`)) return;
             <div class="sheet-title-row">BID/COST TRACKING SHEET</div>
 
             <div class="sheet-meta-grid">
-              <div class="sheet-meta-cell wide cost-tracker-name-meta">COST TRACKER NAME:<strong>${esc(trackerName(tracker, rawSummary))}</strong></div>
+              <div class="sheet-meta-cell job-number-meta">JOB #:<strong>${esc(job.job_number || "—")}</strong></div>
               <label class="sheet-meta-cell project-dates-cell">PROJECT DATES:<input readonly value="${attr(projectDates)}" /></label>
               <div class="sheet-meta-cell tm-afe-wo-po-header-cell">T&amp;M/AFE/WO/PO<strong>${esc(tmAfeWoPoValue(job, summary))}</strong></div>
               <div class="sheet-meta-cell">CLIENT Requestor:<strong>${esc(job.company_name || "—")}</strong></div>
