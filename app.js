@@ -14911,6 +14911,18 @@ This removes it from the job documents list.`)) return;
     const values = typeof formToObject === "function" ? formToObject(form) : Object.fromEntries(new FormData(form).entries());
     values.invoice_number = invoiceNumber;
 
+    const duplicateInvoice = (state?.data?.invoices || []).find((row) => {
+      const sameNumber = String(row.invoice_number || "").trim().toLowerCase() === invoiceNumber.toLowerCase();
+      if (!sameNumber) return false;
+      // Allow the invoice currently being edited to keep its own number.
+      return !(values.record_id && String(row.id || "") === String(values.record_id));
+    });
+    if (duplicateInvoice) {
+      try { showToast(`Invoice number "${invoiceNumber}" already exists. Use a different number.`, true); } catch {}
+      form.querySelector('[name="invoice_number"]')?.focus();
+      return;
+    }
+
     const tracker = values.cost_tracker_id
       ? (state?.data?.costTrackers || []).find((row) => row.id === values.cost_tracker_id)
       : null;
@@ -26269,20 +26281,12 @@ This removes it from the job documents list.`)) return;
   }
 
   function compareOpenJobs(a, b) {
-    const yearDiff = jobYear(b) - jobYear(a);
-    if (yearDiff) return yearDiff;
-
-    const numberDiff = firstJobNumber(a) - firstJobNumber(b);
+    // Decreasing job number order: greater job number on top, consistent with the
+    // other open-jobs renderers/sorters so no render path briefly shows ascending.
+    const numberDiff = firstJobNumber(b) - firstJobNumber(a);
     if (numberDiff) return numberDiff;
 
-    const invoiceA = latestInvoiceForJob(a.id);
-    const invoiceB = latestInvoiceForJob(b.id);
-    const statusDiff = (invoiceOrder[normalizeInvoiceStatus(invoiceA?.status)] ?? 0) - (invoiceOrder[normalizeInvoiceStatus(invoiceB?.status)] ?? 0);
-    if (statusDiff) return statusDiff;
-
-    const timeDiff = timeValue(b) - timeValue(a);
-    if (timeDiff) return timeDiff;
-    return String(a.job_number || "").localeCompare(String(b.job_number || ""), undefined, { numeric: true, sensitivity: "base" });
+    return String(b.job_number || "").localeCompare(String(a.job_number || ""), undefined, { numeric: true, sensitivity: "base" });
   }
 
   function matchesTerm(job, invoice, term) {
@@ -28179,26 +28183,34 @@ This removes it from the job documents list.`)) return;
     return ["no_invoice", "unsent"].includes(bucket) ? "needs_invoice" : "review";
   }
 
+  function jobYearValue(job) {
+    const text = String(job?.job_number || "");
+    const dashed = text.match(/(?:^|[-\s])(\d{2,4})\s*$/);
+    if (dashed) {
+      const raw = Number(dashed[1]);
+      if (Number.isFinite(raw)) return raw < 100 ? 2000 + raw : raw;
+    }
+    return 0;
+  }
+
   function compareOpenJobsBySectionAndInvoice(a, b) {
-    const bucketOrder = {
-      no_invoice: 0,
-      unsent: 1,
-      awaiting_approval: 2,
-      submitted: 3
-    };
-    const aBucket = openStatusBucket(a);
-    const bBucket = openStatusBucket(b);
-    const statusDiff = (bucketOrder[aBucket] ?? 99) - (bucketOrder[bBucket] ?? 99);
-    if (statusDiff) return statusDiff;
-    const invoiceDiff = compareInvoiceNumbers(latestInvoiceForJob(a.id), latestInvoiceForJob(b.id), a, b);
-    if (invoiceDiff) return invoiceDiff;
-    return timeValue(b) - timeValue(a);
+    // Decreasing job number order: greater job number on top. Kept identical to
+    // the stable renderer's compareJobNumber so both renderers agree on order.
+    const numberDiff = firstJobNumber(b) - firstJobNumber(a);
+    if (numberDiff) return numberDiff;
+    return String(b.job_number || "").localeCompare(String(a.job_number || ""), undefined, { numeric: true, sensitivity: "base" });
   }
 
   function openJobsForSection(section) {
     return allJobs()
       .filter((job) => openStatusBucket(job) !== "paid")
       .filter((job) => openSection(job) === section)
+      .sort(compareOpenJobsBySectionAndInvoice);
+  }
+
+  function openJobsSorted() {
+    return allJobs()
+      .filter((job) => openStatusBucket(job) !== "paid")
       .sort(compareOpenJobsBySectionAndInvoice);
   }
 
@@ -28285,6 +28297,9 @@ This removes it from the job documents list.`)) return;
     renderingOpenJobs = true;
     normalizeDashboardHeader();
 
+    // Two sections, each sorted by Job # with the greatest number on top. The
+    // section header rows (.pimp-open-section-row) are required: a watchdog
+    // observer re-renders this table whenever they are missing.
     const needsInvoice = openJobsForSection("needs_invoice");
     const review = openJobsForSection("review");
     const total = needsInvoice.length + review.length;
@@ -28957,7 +28972,8 @@ This removes it from the job documents list.`)) return;
     rows.sort((a, b) => {
       const aNum = text(a.querySelector?.(".job-number-plain-final")?.textContent || a.cells?.[0]?.textContent || "");
       const bNum = text(b.querySelector?.(".job-number-plain-final")?.textContent || b.cells?.[0]?.textContent || "");
-      return aNum.localeCompare(bNum, undefined, { numeric: true, sensitivity: "base" });
+      // Decreasing job number order (greater on top), consistent with the renderers.
+      return bNum.localeCompare(aNum, undefined, { numeric: true, sensitivity: "base" });
     });
     rows.forEach((row) => tbody.insertBefore(row, node));
   }
@@ -29118,9 +29134,11 @@ This removes it from the job documents list.`)) return;
 
   function invoiceNumberFromJobNumber(jobNumber) {
     const raw = clean(jobNumber);
-    const firstNumberGroup = raw.match(/\d+/)?.[0] || "";
+    // Use all of the numbers before the first dash, e.g. "0015-26" -> "Invoice 0015".
+    const beforeDash = raw.split("-")[0];
+    const firstNumberGroup = (beforeDash.match(/\d+/) || raw.match(/\d+/))?.[0] || "";
     if (!firstNumberGroup) return "";
-    return `Invoice ${firstNumberGroup.slice(0, 3)}`;
+    return `Invoice ${firstNumberGroup}`;
   }
 
   function resolveInvoiceJob(form = qs("#invoiceForm")) {
@@ -29326,14 +29344,16 @@ This removes it from the job documents list.`)) return;
   }
 
   function compareJobNumberText(aText, bText) {
+    // Decreasing job number order: greater job number on top. Must match the
+    // open-jobs renderers/observers, or this sorter and they fight in a loop.
     const a = clean(aText);
     const b = clean(bText);
     const aMatch = a.match(/\d+/);
     const bMatch = b.match(/\d+/);
     const aNum = aMatch ? Number(aMatch[0]) : Number.MAX_SAFE_INTEGER;
     const bNum = bMatch ? Number(bMatch[0]) : Number.MAX_SAFE_INTEGER;
-    if (aNum !== bNum) return aNum - bNum;
-    return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    if (aNum !== bNum) return bNum - aNum;
+    return b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" });
   }
 
   let sortingReviewRows = false;
@@ -30607,9 +30627,10 @@ function on(selector, eventName, handler) {
   }
 
   function compareJobNumber(a, b) {
-    const diff = firstJobNumber(a) - firstJobNumber(b);
+    // Decreasing job number order: greater job number on top, lowest at the bottom.
+    const diff = firstJobNumber(b) - firstJobNumber(a);
     if (diff) return diff;
-    return clean(a?.job_number).localeCompare(clean(b?.job_number), undefined, { numeric: true, sensitivity: "base" });
+    return clean(b?.job_number).localeCompare(clean(a?.job_number), undefined, { numeric: true, sensitivity: "base" });
   }
 
   function statusSection(job) {
@@ -30740,6 +30761,8 @@ function on(selector, eventName, handler) {
           return [job.job_number, job.job_name, job.company_name, job.location, invoiceStatusLabel(invoice?.status), invoice?.invoice_number, tracker ? "cost tracker" : "", uniqueDailyTimesheets(job.id) ? "timesheets" : ""].join(" ").toLowerCase().includes(term);
         });
 
+      // Two sections, each sorted by Job # with the greatest number on top.
+      // Paid invoices are filtered out above and shown in Closed Jobs instead.
       const needsInvoice = jobs.filter((job) => statusSection(job) === "needs_invoice").sort(compareJobNumber);
       const review = jobs.filter((job) => statusSection(job) === "review").sort(compareJobNumber);
       const total = needsInvoice.length + review.length;
@@ -30835,18 +30858,26 @@ function on(selector, eventName, handler) {
       return;
     }
     // Legacy code can move the rows after the stable renderer. Re-rendering here
-    // happens in the MutationObserver microtask before the browser paints.
-    const reviewHeader = qsa("tr", tbody).find((row) => /awaiting approval\s*\/\s*submitted/i.test(row.textContent || ""));
-    if (!reviewHeader) return;
-    const rows = [];
-    let node = reviewHeader.nextElementSibling;
-    while (node && !node.classList.contains("open-jobs-section-row") && !node.classList.contains("pimp-open-section-row") && !node.dataset.openJobSection) {
-      if (node.matches?.("tr.dashboard-active-job-row")) rows.push(node);
-      node = node.nextElementSibling;
-    }
-    const current = rows.map((row) => clean(row.dataset.jobNumber || row.cells?.[0]?.textContent || "")).join("|");
-    const sorted = rows.slice().sort((a, b) => clean(a.dataset.jobNumber || a.cells?.[0]?.textContent || "").localeCompare(clean(b.dataset.jobNumber || b.cells?.[0]?.textContent || ""), undefined, { numeric: true, sensitivity: "base" })).map((row) => clean(row.dataset.jobNumber || row.cells?.[0]?.textContent || "")).join("|");
-    if (current !== sorted) renderStableOpenJobs();
+    // happens in the MutationObserver microtask before the browser paints. Each
+    // section must stay in decreasing job number order, so check section by
+    // section (a global sort would fight the two-section layout).
+    const numberOf = (row) => clean(row.dataset.jobNumber || row.cells?.[0]?.textContent || "");
+    const isSectionHeader = (row) => row.classList.contains("open-jobs-section-row") || row.classList.contains("pimp-open-section-row") || Boolean(row.dataset.openJobSection);
+    let sectionNumbers = [];
+    let outOfOrder = false;
+    const checkSection = () => {
+      if (sectionNumbers.length > 1) {
+        const sorted = sectionNumbers.slice().sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: "base" }));
+        if (sectionNumbers.join("|") !== sorted.join("|")) outOfOrder = true;
+      }
+      sectionNumbers = [];
+    };
+    qsa("tr", tbody).forEach((row) => {
+      if (isSectionHeader(row)) { checkSection(); return; }
+      if (row.matches?.("tr.dashboard-active-job-row")) sectionNumbers.push(numberOf(row));
+    });
+    checkSection();
+    if (outOfOrder) renderStableOpenJobs();
   });
 
   function observeOpenJobsTable() {
