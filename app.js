@@ -51,6 +51,77 @@ const state = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
+/* ==========================================================================
+   LAZY EXPORT-LIBRARY LOADER (performance)
+   --------------------------------------------------------------------------
+   The PDF (jsPDF / html2canvas / html2pdf) and Excel (xlsx) libraries used to
+   be loaded synchronously in <head>, where they blocked first paint with
+   ~2.5MB of JavaScript that is only needed when a user exports a document.
+
+   They are now fetched on demand via these helpers, and pre-warmed once during
+   idle time after the app is interactive, so an export still feels instant
+   without slowing the initial page load. Each script is fetched at most once
+   (the promise is cached), and window.html2pdf / window.XLSX / etc. end up in
+   exactly the same state the old <head> tags produced.
+   ========================================================================== */
+const PIMP_EXPORT_CDN = {
+  jspdf: "https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js",
+  html2canvas: "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js",
+  html2pdf: "https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js",
+  // xlsx-js-style is a styled superset of xlsx; loading it satisfies both the
+  // plain and the styled Excel export code paths.
+  xlsx: "https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"
+};
+
+const _pimpScriptPromises = new Map();
+function loadExternalScript(src) {
+  if (_pimpScriptPromises.has(src)) return _pimpScriptPromises.get(src);
+  const promise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => {
+      _pimpScriptPromises.delete(src); // allow a retry on the next attempt
+      reject(new Error(`Failed to load ${src}`));
+    };
+    document.head.appendChild(script);
+  });
+  _pimpScriptPromises.set(src, promise);
+  return promise;
+}
+
+async function ensurePdfLibraries() {
+  if (window.html2pdf && window.html2canvas && (window.jspdf || window.jsPDF)) return;
+  await Promise.all([
+    loadExternalScript(PIMP_EXPORT_CDN.jspdf),
+    loadExternalScript(PIMP_EXPORT_CDN.html2canvas),
+    loadExternalScript(PIMP_EXPORT_CDN.html2pdf)
+  ]);
+}
+
+async function ensureSpreadsheetLibrary() {
+  if (window.XLSX) return window.XLSX;
+  await loadExternalScript(PIMP_EXPORT_CDN.xlsx);
+  return window.XLSX;
+}
+
+window.ensurePdfLibraries = ensurePdfLibraries;
+window.ensureSpreadsheetLibrary = ensureSpreadsheetLibrary;
+
+// Pre-warm the heavy export libraries once the page is idle so the first export
+// is instant, without adding them to the critical render path.
+function prewarmExportLibraries() {
+  const warm = () => {
+    ensurePdfLibraries().catch(() => {});
+    ensureSpreadsheetLibrary().catch(() => {});
+  };
+  if ("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 4000 });
+  else setTimeout(warm, 2000);
+}
+if (document.readyState === "complete") prewarmExportLibraries();
+else window.addEventListener("load", prewarmExportLibraries, { once: true });
+
 /* ========================================================================
    EARLY OPEN-JOBS INVOICE STATUS SAVE GUARD
    ------------------------------------------------------------------------
@@ -3562,13 +3633,22 @@ function addInvoiceLine(defaults = {}) {
   const templateBody = $("#invoiceTemplateLineItems");
   if (!templateBody) return;
 
+  // Rate/Amount show a value only when there actually is one. Zero or empty stays
+  // blank (no "0"), so continuation rows after the first stay empty — matching the
+  // View invoice, where only the first row carries the rate total and amount.
+  const moneyOrBlank = (value) => {
+    if (value === null || value === undefined || value === "") return "";
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric !== 0 ? value : "";
+  };
+
   const row = document.createElement("tr");
   row.className = "invoice-template-line";
   row.innerHTML = `
     <td><input data-field="quantity" type="number" min="0" step="1" value="${escapeAttr(valueOr(defaults.quantity, 1))}" /></td>
     <td><textarea class="line-description" data-field="description" rows="2" placeholder="Description">${escapeHtml(defaults.description || "")}</textarea></td>
-    <td><input data-field="rate" type="number" min="0" step="0.01" value="${escapeAttr(valueOr(defaults.rate, ""))}" /></td>
-    <td><input data-field="amount" type="number" min="0" step="0.01" value="${escapeAttr(valueOr(defaults.amount, ""))}" /></td>
+    <td><input data-field="rate" type="number" min="0" step="0.01" value="${escapeAttr(moneyOrBlank(defaults.rate))}" /></td>
+    <td><input data-field="amount" type="number" min="0" step="0.01" value="${escapeAttr(moneyOrBlank(defaults.amount))}" /></td>
     <td><button class="icon-btn remove-line" type="button" aria-label="Remove invoice line">×</button></td>
   `;
   templateBody.appendChild(row);
@@ -4854,6 +4934,7 @@ function printDocumentCss() {
     const data = timesheetDataFromForm();
     const fileName = filename || timesheetFileName(data);
 
+    try { await ensurePdfLibraries(); } catch {}
     if (!window.html2pdf) {
       showToast("PDF library was unavailable. Refresh and try again.", true);
       return;
@@ -5361,15 +5442,28 @@ function printDocumentCss() {
 
     const visibleItems = rawItems.slice(0, 8);
     const emptyRowsNeeded = Math.max(0, 8 - visibleItems.length);
+    // A row only shows a Rate/Amount when it actually carries money. Description-only
+    // continuation rows stay blank (no $0.00), so the View matches the create editor,
+    // which leaves every row after the first one empty.
+    const hasMoney = (value) => {
+      if (value === "" || value === null || value === undefined) return false;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && numeric !== 0;
+    };
     const lineRows = [
-      ...visibleItems.map((item) => `
+      ...visibleItems.map((item) => {
+        const showRate = hasMoney(item.rate);
+        const showAmount = hasMoney(item.amount);
+        const showMoney = showRate || showAmount;
+        return `
         <tr>
           <td>${cleanNumberDisplay(item.quantity || 1)}</td>
           <td><div class="static-multiline">${escapeHtml(item.description || "")}</div></td>
-          <td class="amount-text">${money(item.rate ?? item.amount)}</td>
-          <td class="amount-text">${money(item.amount)}</td>
+          <td class="amount-text">${showMoney ? money(showRate ? item.rate : item.amount) : ""}</td>
+          <td class="amount-text">${showMoney ? money(showAmount ? item.amount : item.rate) : ""}</td>
         </tr>
-      `),
+      `;
+      }),
       ...Array.from({ length: emptyRowsNeeded }, () => `
         <tr class="invoice-empty-row"><td></td><td></td><td></td><td></td></tr>
       `)
@@ -5674,22 +5768,11 @@ function printDocumentCss() {
     return downloadInvoicePdfFromHtmlRobust(html, fileName);
   };
 
-  // Override older click handlers that downloaded HTML or opened the wrong fallback.
-  document.addEventListener("click", (event) => {
-    const downloadCurrent = event.target.closest?.("#downloadInvoicePdfBtn");
-    const downloadPreview = event.target.closest?.("#downloadInvoicePreviewBtn");
-
-    if (!downloadCurrent && !downloadPreview) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    if (downloadPreview) {
-      downloadInvoicePreviewPdf();
-    } else {
-      downloadCurrentInvoicePdf();
-    }
-  }, true);
+  /* optimized: removed dead duplicate invoice-download click listener #1.
+     All invoice-download clicks are handled by the single window-capture
+     listener further below, which fires first (capture: window before
+     document) and calls stopImmediatePropagation(), so this one never ran.
+     Single live path: exportInvoiceTemplateToA4Pdf. */
 
   // Keep the invoice editor clear and zoomed in. The user can scroll the editor
   // instead of the document being shrunk too small to read.
@@ -5971,26 +6054,8 @@ function printDocumentCss() {
     return downloadInvoicePdfFinal(html, safeFileName(`${invoice?.invoice_number || "invoice"}.pdf`));
   };
 
-  document.addEventListener("click", (event) => {
-    const currentBtn = event.target.closest?.("#downloadInvoicePdfBtn");
-    const previewBtn = event.target.closest?.("#downloadInvoicePreviewBtn");
-    const tableBtn = event.target.closest?.("[data-download-invoice]");
-
-    if (!currentBtn && !previewBtn && !tableBtn) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    if (tableBtn) {
-      const invoice = state.data.invoices.find((row) => row.id === tableBtn.dataset.downloadInvoice);
-      if (invoice) downloadSavedInvoice(invoice);
-      else showToast("Could not find that saved invoice. Refresh data and try again.", true);
-      return;
-    }
-
-    if (previewBtn) downloadInvoicePreviewPdf();
-    else downloadCurrentInvoicePdf();
-  }, true);
+  /* optimized: removed dead duplicate invoice-download click listener #2.
+     Suppressed by the single window-capture handler further below (see #1). */
 })();
 
 
@@ -6407,36 +6472,10 @@ function printDocumentCss() {
   window.downloadInvoicePreviewPdf = downloadDirectInvoiceFromPreview;
   window.downloadSavedInvoice = downloadDirectSavedInvoice;
 
-  // Capture invoice download clicks before any older listeners can open print.
-  document.addEventListener("click", (event) => {
-    const currentBtn = event.target.closest?.("#downloadInvoicePdfBtn");
-    const previewBtn = event.target.closest?.("#downloadInvoicePreviewBtn");
-    const tableBtn = event.target.closest?.("[data-download-invoice]");
-
-    if (!currentBtn && !previewBtn && !tableBtn) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (tableBtn) {
-      const invoice = state.data.invoices.find((row) => row.id === tableBtn.dataset.downloadInvoice);
-      if (!invoice) {
-        showToast("Could not find that saved invoice. Refresh data and try again.", true);
-        return false;
-      }
-      downloadDirectSavedInvoice(invoice);
-      return false;
-    }
-
-    if (previewBtn) {
-      downloadDirectInvoiceFromPreview();
-      return false;
-    }
-
-    downloadDirectInvoiceFromForm();
-    return false;
-  }, true);
+  /* optimized: removed dead duplicate invoice-download click listener #3
+     (the "direct draw" path). Suppressed by the single window-capture handler
+     further below (see #1). The drawDirectInvoicePdf implementation it used is
+     now unreferenced and can be removed in a later cleanup pass. */
 })();
 
 /* ========================================================================== 
@@ -6659,35 +6698,8 @@ function printDocumentCss() {
     return finalExportInvoicePreviewToPdf(finalInvoiceHtmlFromSavedInvoice(invoice), `${invoiceNumber}.pdf`);
   };
 
-  document.addEventListener("click", (event) => {
-    const currentBtn = event.target.closest?.("#downloadInvoicePdfBtn");
-    const previewBtn = event.target.closest?.("#downloadInvoicePreviewBtn");
-    const tableBtn = event.target.closest?.("[data-download-invoice]");
-
-    if (!currentBtn && !previewBtn && !tableBtn) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
-
-    if (tableBtn) {
-      const invoice = state.data.invoices.find((row) => row.id === tableBtn.dataset.downloadInvoice);
-      if (!invoice) {
-        showToast("Could not find that saved invoice. Refresh data and try again.", true);
-        return false;
-      }
-      window.downloadSavedInvoice(invoice);
-      return false;
-    }
-
-    if (previewBtn) {
-      window.downloadInvoicePreviewPdf();
-      return false;
-    }
-
-    window.downloadCurrentInvoicePdf();
-    return false;
-  }, true);
+  /* optimized: removed dead duplicate invoice-download click listener #4.
+     Suppressed by the single window-capture handler further below (see #1). */
 })();
 
 
@@ -6797,6 +6809,7 @@ function printDocumentCss() {
   }
 
   async function exportInvoiceTemplateToA4Pdf(html, filename = "invoice.pdf") {
+    try { await ensurePdfLibraries(); } catch {}
     const html2canvasLib = window.html2canvas;
     const JsPdfCtor = window.jspdf?.jsPDF || window.jsPDF;
     if (!html2canvasLib || !JsPdfCtor) {
@@ -7526,15 +7539,9 @@ function printDocumentCss() {
   try { handleCreateAssignment = window.handleCreateAssignment; } catch {}
 
   async function ensureXlsxLibrary() {
-    if (window.XLSX) return window.XLSX;
-    await new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
-      script.onload = resolve;
-      script.onerror = () => reject(new Error("Excel export library could not load."));
-      document.head.appendChild(script);
-    });
-    return window.XLSX;
+    // Loads the styled xlsx-js-style superset so styled and plain exports share
+    // one library on window.XLSX (see ensureSpreadsheetLibrary at top of file).
+    return ensureSpreadsheetLibrary();
   }
 
   function parseMaybeJson(value, fallback) {
@@ -9658,10 +9665,37 @@ document.addEventListener("click", (event) => {
 
     if (!window.confirm(confirmMessage)) return;
 
+    // Jobs/employees must detach their linked rows first (this also records how each
+    // dependency was handled, which removeDeletedRecordFromLocalState reads below).
+    // Cost trackers and invoices have no dependencies, so they skip straight to the
+    // instant optimistic removal.
     try {
       if (type === "jobs") await detachJobDependencies(id);
       if (type === "employees") await detachEmployeeDependencies(id);
+    } catch (error) {
+      showToast(error?.message || String(error), true);
+      return;
+    }
 
+    // Snapshot every array we are about to touch so a failed server delete can be
+    // rolled back instantly, without a network reload, restoring the row exactly.
+    const affectedKeys = type === "jobs"
+      ? ["jobs", "costTrackers", "invoices", "timesheets", "documents", "assignments"]
+      : type === "employees"
+        ? ["employees", "assignments", "timesheets"]
+        : [config.stateKey];
+    const snapshot = {};
+    affectedKeys.forEach((key) => {
+      if (Array.isArray(state.data?.[key])) snapshot[key] = state.data[key].slice();
+    });
+
+    // Optimistic update: drop the row locally and repaint NOW so the table updates
+    // the instant the user confirms, instead of waiting for the Supabase round-trip.
+    removeDeletedRecordFromLocalState(type, id);
+    hydrateSelects();
+    refreshWebsiteLists();
+
+    try {
       const { error } = await state.supabase
         .from(config.table)
         .delete()
@@ -9669,13 +9703,22 @@ document.addEventListener("click", (event) => {
 
       if (error) throw error;
 
-      removeDeletedRecordFromLocalState(type, id);
+      showToast(`${capitalize(config.label)} deleted.`);
+      // Reconcile with the server in the background (non-blocking) so the UI stays
+      // snappy. The row is already gone locally; this just catches any server-side
+      // cascades or edits without freezing the table behind a full reload.
+      Promise.resolve()
+        .then(() => loadAllData({ silent: true }))
+        .then(() => { try { refreshWebsiteLists(); } catch {} })
+        .catch(() => {});
+    } catch (error) {
+      // Server delete failed — restore the snapshot so the row reappears.
+      affectedKeys.forEach((key) => {
+        if (snapshot[key]) state.data[key] = snapshot[key];
+      });
       hydrateSelects();
       refreshWebsiteLists();
-      await loadAllData();
-      refreshWebsiteLists();
-      showToast(`${capitalize(config.label)} deleted.`);
-    } catch (error) {
+
       const message = error?.message || String(error);
       if (message.toLowerCase().includes("foreign key") || message.toLowerCase().includes("violates foreign key constraint")) {
         showToast("Delete is still blocked by a database relationship. Run supabase_delete_job_foreign_key_fix.sql in Supabase, then try again.", true);
@@ -12055,15 +12098,7 @@ async function openUploadedDocument(docId, download = false) {
   }
 
   async function ensureXlsxStyled() {
-    if (window.XLSX?.utils?.aoa_to_sheet && window.XLSX?.writeFile) return window.XLSX;
-    await new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js";
-      script.onload = resolve;
-      script.onerror = () => reject(new Error("Could not load the Excel download library."));
-      document.head.appendChild(script);
-    });
-    return window.XLSX;
+    return ensureSpreadsheetLibrary();
   }
 
   async function downloadBidSheetWorkbook(data) {
@@ -16444,6 +16479,7 @@ This removes it from the job documents list.`)) return;
   }
 
   async function downloadPdf(html, filename) {
+    try { await ensurePdfLibraries(); } catch {}
     if (!window.html2pdf) {
       if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet");
       if (typeof showToast === "function") showToast("PDF library was unavailable. The print/save PDF window opened instead.", true);
@@ -17922,6 +17958,17 @@ This removes it from the job documents list.`)) return;
     const title = qs("#jobDetailsModalTitle", overlay);
     if (title) title.textContent = `${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}`;
     if (body) body.innerHTML = buildJobDetailsMarkup(job);
+    // buildJobDetailsMarkup emits the base (older) layout for the cost tracker,
+    // invoice, timesheets, and upload cards; several observers then "upgrade" each
+    // one to its final design a moment after open. Doing that here — synchronously,
+    // while the overlay is still hidden and before the browser paints — means the
+    // window shows the final design from the very first frame instead of flashing
+    // the old design and correcting itself. The observers stay in place but find
+    // nothing left to change, so this is purely a head start, not a behavior change.
+    try { window.PIMP_cleanupJobDetailsAndRateOnlyCostTracker?.(); } catch {}
+    try { window.PIMP_cleanJobDetailsInvoiceStatusOnly?.(); } catch {}
+    try { window.PIMP_normalizeJobDetailsInvoiceStatusControl?.(); } catch {}
+    try { window.PIMP_normalizeJobDetailsDocumentUpload?.(); } catch {}
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
     // Swap the base markup's timesheet folder for the final combined folder
@@ -21506,6 +21553,7 @@ This removes it from the job documents list.`)) return;
 
   async function downloadDailyPdf(daily) {
     const html = timesheetHtmlForDaily(daily);
+    try { await ensurePdfLibraries(); } catch {}
     if (!window.html2pdf) {
       try { if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet"); } catch {}
       try { if (typeof showToast === "function") showToast("PDF library was unavailable. The print/save PDF window opened instead.", true); } catch {}
@@ -22467,7 +22515,6 @@ This removes it from the job documents list.`)) return;
           <td data-label="Due">${formatDateFinalPatch(invoice.due_date)}</td>
           <td data-label="Total" class="money-cell">${moneyFinalPatch(invoiceTotalFinalPatch(invoice))}</td>
           <td data-label="Balance" class="money-cell">${moneyFinalPatch(invoiceBalanceFinalPatch(invoice))}</td>
-          <td data-label="PDF">${invoice.pdf_url ? `<a href="${safeTextFinal(invoice.pdf_url)}" target="_blank" rel="noreferrer">Open PDF</a>` : "-"}</td>
           <td data-label="Actions" class="table-actions">
             <button class="link-btn" data-edit-invoice="${safeTextFinal(invoice.id)}" type="button">Edit</button>
             <button class="link-btn" data-preview-invoice="${safeTextFinal(invoice.id)}" type="button">Preview</button>
@@ -22476,7 +22523,7 @@ This removes it from the job documents list.`)) return;
           </td>
         </tr>
       `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(9) : '<tr><td colspan="9" class="muted">No records found.</td></tr>');
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8" class="muted">No records found.</td></tr>');
   };
 
   try {
@@ -26056,6 +26103,11 @@ This removes it from the job documents list.`)) return;
   window.renderDashboardActiveJobs = renderDashboardNoInvoiceStatusColumn;
   try { renderDashboardActiveJobs = renderDashboardNoInvoiceStatusColumn; } catch {}
 
+  // Exposed so the job details window can build the invoice status dropdown
+  // synchronously, before the first paint, instead of letting the observer
+  // swap it in a moment after the old design has already flashed on screen.
+  window.PIMP_normalizeJobDetailsInvoiceStatusControl = normalizeJobDetailsInvoiceStatusControl;
+
   const previousDashboardLists = typeof window.renderDashboardLists === "function" ? window.renderDashboardLists : (typeof renderDashboardLists === "function" ? renderDashboardLists : null);
   if (previousDashboardLists && !previousDashboardLists.__dashboardNoInvoiceColumnWrapped) {
     const wrappedDashboardLists = function renderDashboardListsWithoutInvoiceStatusColumn() {
@@ -26369,7 +26421,10 @@ This removes it from the job documents list.`)) return;
     const headerRow = table?.querySelector("thead tr");
     if (!headerRow) return;
     table.classList.add("closed-jobs-table");
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Invoice Status", "Dates", "Rate Total", "Actions"]
+    // Reuse the Open Jobs condensed table styling so Closed Jobs looks identical,
+    // just without the Actions column.
+    table.classList.add("dashboard-active-jobs-table");
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total"]
       .map((label) => `<th>${html(label)}</th>`)
       .join("");
   }
@@ -26453,28 +26508,29 @@ This removes it from the job documents list.`)) return;
       const invoice = latestInvoiceForJob(job.id);
       const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
       if (tracker) rateTotalSum += toNumber(rateTotalForTracker(tracker)) || 0;
+      // Same condensed 6-column layout as Open Jobs, minus the Actions column.
+      // Row stays clickable (data-job-row-id) so it still opens job details.
       return `
-        <tr class="job-main-row professional-job-row closed-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack">
-              <strong>${html(job.job_name || "-")}</strong>
-              ${documentIndicators(job)}
+        <tr class="job-main-row professional-job-row closed-job-row oj-row" data-job-row-id="${attr(job.id)}" data-job-number="${attr(job.job_number || "")}" title="Open job details for ${attr(title)}">
+          <td data-label="Job" class="oj-job-cell">
+            <div class="oj-job">
+              <span class="oj-job-number">${html(job.job_number || "-")}</span>
+              <div class="oj-job-main">
+                <strong class="oj-job-name">${html(job.job_name || "-")}</strong>
+                ${documentIndicators(job)}
+              </div>
             </div>
           </td>
-          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
-          <td data-label="Invoice Status" class="job-status-cell">${invoiceStatusControl(invoice, title, "closed-jobs")}</td>
-          <td data-label="Dates" class="job-dates-cell">${jobDateMarkup(job)}</td>
-          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
-          <td data-label="Actions" class="actions-cell job-actions-cell">
-            <button class="link-btn job-table-action view" data-open-job-details-modal="${attr(job.id)}" type="button" title="Open job details">Details</button>
-            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
+          <td data-label="Client" class="oj-client-cell">
+            <strong class="oj-company">${html(job.company_name || "-")}</strong>
+            <span class="oj-location">${html(job.location || "—")}</span>
           </td>
+          <td data-label="Schedule" class="oj-schedule-cell">${jobDateMarkup(job)}</td>
+          <td data-label="Invoice Status" class="dashboard-invoice-status-cell oj-status-cell job-status-cell">${invoiceStatusControl(invoice, title, "closed-jobs")}</td>
+          <td data-label="Rate Total" class="dashboard-rate-total-cell oj-rate-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
         </tr>
       `;
-    }).join("") || `<tr><td colspan="8" class="muted">No closed jobs found.</td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">No closed jobs found.</td></tr>`;
 
     // Show the combined total of every closed job's Rate Total to the right of
     // the "Rate Total" header text.
@@ -30715,16 +30771,29 @@ function on(selector, eventName, handler) {
     const tracker = latestCostTrackerForJob(job.id);
     const invoice = latestInvoiceForJob(job.id);
     const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
+    // Condensed 6-column layout: related fields are grouped into one cell each so
+    // every column has room and the whole table fits on screen at fullscreen.
+    // All interactive pieces (status control, doc chips, edit/delete) are reused
+    // unchanged so existing handlers keep working.
     return `
-      <tr class="job-main-row professional-job-row dashboard-active-job-row open-job-row stable-open-job-row" data-dashboard-job-row-id="${attr(job.id)}" data-job-number="${attr(job.job_number || "")}" title="Open job details for ${attr(title)}">
-        <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${esc(job.job_number || "-")}</strong></td>
-        <td data-label="Project Name" class="job-name-cell"><div class="job-name-stack dashboard-project-stack"><strong>${esc(job.job_name || "-")}</strong>${documentChips(job)}</div></td>
-        <td data-label="Company" class="job-company-cell">${esc(job.company_name || "-")}</td>
-        <td data-label="Location" class="job-location-cell">${esc(job.location || "-")}</td>
-        <td data-label="Invoice Status" class="dashboard-invoice-status-cell">${invoiceStatusControl(invoice, title)}</td>
-        <td data-label="Dates" class="job-dates-cell">${jobDateMarkup(job)}</td>
-        <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? esc(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
-        <td data-label="Actions" class="dashboard-actions-cell"><div class="dashboard-actions-inline"><button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button">Edit</button><button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button">Delete</button></div></td>
+      <tr class="job-main-row professional-job-row dashboard-active-job-row open-job-row stable-open-job-row oj-row" data-dashboard-job-row-id="${attr(job.id)}" data-job-number="${attr(job.job_number || "")}" title="Open job details for ${attr(title)}">
+        <td data-label="Job" class="oj-job-cell">
+          <div class="oj-job">
+            <span class="oj-job-number">${esc(job.job_number || "-")}</span>
+            <div class="oj-job-main">
+              <strong class="oj-job-name">${esc(job.job_name || "-")}</strong>
+              ${documentChips(job)}
+            </div>
+          </div>
+        </td>
+        <td data-label="Client" class="oj-client-cell">
+          <strong class="oj-company">${esc(job.company_name || "-")}</strong>
+          <span class="oj-location">${esc(job.location || "—")}</span>
+        </td>
+        <td data-label="Schedule" class="oj-schedule-cell">${jobDateMarkup(job)}</td>
+        <td data-label="Invoice Status" class="dashboard-invoice-status-cell oj-status-cell">${invoiceStatusControl(invoice, title)}</td>
+        <td data-label="Rate Total" class="dashboard-rate-total-cell oj-rate-cell"><strong>${tracker ? esc(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
+        <td data-label="Actions" class="dashboard-actions-cell oj-actions-cell"><div class="dashboard-actions-inline"><button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button">Edit</button><button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button">Delete</button></div></td>
       </tr>
     `;
   }
@@ -30734,7 +30803,7 @@ function on(selector, eventName, handler) {
   }
 
   function sectionHeader(title, count, total) {
-    return `<tr class="open-jobs-section-row pimp-open-section-row stable-open-jobs-section-row" data-open-job-section="${attr(title)}"><td colspan="6"><div class="open-jobs-section-title"><span>${esc(title)}</span></div></td><td class="dashboard-rate-total-cell open-jobs-section-total-cell"><strong class="open-jobs-section-total" title="Total rate for this section">${esc(moneyLabel(total || 0))}</strong></td><td class="open-jobs-section-count-cell"><strong>${count} job${count === 1 ? "" : "s"}</strong></td></tr>`;
+    return `<tr class="open-jobs-section-row pimp-open-section-row stable-open-jobs-section-row" data-open-job-section="${attr(title)}"><td colspan="4"><div class="open-jobs-section-title"><span class="open-jobs-section-name">${esc(title)}</span></div></td><td class="dashboard-rate-total-cell open-jobs-section-total-cell"><strong class="open-jobs-section-total" title="Total rate for this section">${esc(moneyLabel(total || 0))}</strong></td><td class="open-jobs-section-count-cell"><span class="open-jobs-section-count">${count} job${count === 1 ? "" : "s"}</span></td></tr>`;
   }
 
   let renderingStableOpenJobs = false;
@@ -30742,7 +30811,7 @@ function on(selector, eventName, handler) {
   function normalizeOpenJobsHeader() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Invoice Status", "Dates", "Rate Total", "Actions"].map((label) => `<th>${esc(label)}</th>`).join("");
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"].map((label) => `<th>${esc(label)}</th>`).join("");
   }
 
   function renderStableOpenJobs() {
@@ -30778,7 +30847,7 @@ function on(selector, eventName, handler) {
         pieces.push(sectionHeader("Awaiting Approval / Submitted", review.length, sectionRateTotal(review)));
         pieces.push(review.map(renderJobRow).join(""));
       }
-      tbody.innerHTML = pieces.join("") || `<tr><td colspan="8" class="muted">No open jobs found.</td></tr>`;
+      tbody.innerHTML = pieces.join("") || `<tr><td colspan="6" class="muted">No open jobs found.</td></tr>`;
       tbody.dataset.pimpOpenJobsSubmittedGrouped = "true";
       tbody.dataset.stableOpenJobsRenderer = "job-number-v1";
       try { if (typeof window.PIMP_cleanupSubmittedLabelsAndClasses === "function") window.PIMP_cleanupSubmittedLabelsAndClasses(tbody); } catch {}
@@ -30998,4 +31067,56 @@ function on(selector, eventName, handler) {
 
   window.PIMP_renderStableOpenJobsNoFlicker = renderStableOpenJobs;
   window.PIMP_enforceCostTrackerProjectDatesNoFlicker = enforceProjectDates;
+})();
+
+
+/* ========================================================================
+   INVOICE EDITOR — AUTO-SIZING LINE DESCRIPTION BOXES
+   ------------------------------------------------------------------------
+   Each line-item Description textarea grows to show all of its text on multiple
+   lines instead of one clipped line. This is the reliable fallback for engines
+   without CSS `field-sizing: content`. The line-items box scrolls within its A4
+   footprint (see styles.css), so the rest of the invoice layout stays in place.
+   ======================================================================== */
+(function installInvoiceLineDescriptionAutoSize() {
+  if (window.__pimpInvoiceLineDescAutoSize) return;
+  window.__pimpInvoiceLineDescAutoSize = true;
+
+  const SELECTOR = "#invoiceTemplateEditor .invoice-template-line .line-description";
+
+  function autoSize(textarea) {
+    if (!textarea) return;
+    // Reset first (with !important so it beats the fixed-height author rule) so the
+    // measured scrollHeight reflects the full content, then grow to fit it.
+    textarea.style.setProperty("height", "auto", "important");
+    const next = textarea.scrollHeight;
+    if (next > 0) textarea.style.setProperty("height", next + "px", "important");
+  }
+
+  function autoSizeAll() {
+    document.querySelectorAll(SELECTOR).forEach(autoSize);
+  }
+
+  document.addEventListener("input", (event) => {
+    const textarea = event.target?.closest?.(SELECTOR);
+    if (textarea) autoSize(textarea);
+  }, true);
+
+  function start() {
+    const tbody = document.getElementById("invoiceTemplateLineItems");
+    if (tbody) {
+      const observer = new MutationObserver(() => {
+        window.clearTimeout(observer.__pimpAutoSizeTimer);
+        observer.__pimpAutoSizeTimer = window.setTimeout(autoSizeAll, 0);
+      });
+      try { observer.observe(tbody, { childList: true, subtree: true }); } catch {}
+    }
+    autoSizeAll();
+    [60, 250].forEach((delay) => window.setTimeout(autoSizeAll, delay));
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
+  else start();
+
+  window.PIMP_autoSizeInvoiceLineDescriptions = autoSizeAll;
 })();
