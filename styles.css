@@ -1,17 +1,45 @@
+/* Single authoritative design-token set. Previously three :root blocks
+   declared overlapping values; the values below are the final computed
+   (cascade-winning) values from that stack, merged so nothing regresses. */
 :root {
-  --bg: #f4f7fb;
-  --panel: #ffffff;
-  --ink: #111827;
+  --bg: #eef3f8;
+  --bg-soft: #f8fafc;
+  --panel: rgba(255, 255, 255, 0.94);
+  --panel-solid: #ffffff;
+  --panel-soft: #f8fafc;
+  --ink: #0f172a;
   --muted: #64748b;
-  --line: #e2e8f0;
-  --brand: #1d4ed8;
-  --brand-dark: #1e3a8a;
+  --line: #dbe5ef;
+  --line-strong: #cbd5e1;
+  --brand: #2563eb;
+  --brand-dark: #1e40af;
+  --brand-soft: #eff6ff;
+  --accent: #0ea5e9;
+  --success: #16a34a;
+  --success-bg: #dcfce7;
+  --warning: #f59e0b;
+  --warning-bg: #fef3c7;
   --danger: #dc2626;
   --danger-bg: #fee2e2;
-  --success: #16a34a;
-  --warning: #f59e0b;
-  --shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
-  --radius: 22px;
+  --shadow: 0 18px 48px rgba(15, 23, 42, 0.10);
+  --shadow-soft: 0 14px 34px rgba(15, 23, 42, 0.08);
+  --shadow-strong: 0 28px 70px rgba(15, 23, 42, 0.18);
+  --radius: 20px;
+  --radius-sm: 14px;
+  --sidebar-w: 268px;
+}
+
+/* Visually hidden but available to screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 * {
@@ -632,9 +660,6 @@ tr:hover td {
   gap: 10px;
 }
 
-/************************************************************
- * RESPONSIVE LAYOUT FIXES
- ************************************************************/
 
 @media (max-width: 1250px) {
   .split {
@@ -736,9 +761,7 @@ tr:hover td {
     max-width: none;
   }
 }
-/************************************************************
- * COST TRACKER + INVOICE BUILDER UPGRADE
- ************************************************************/
+
 
 .wide-split {
   grid-template-columns: minmax(360px, 760px) minmax(0, 1fr);
@@ -1001,9 +1024,7 @@ tr:hover td {
   }
 }
 
-/************************************************************
- * TEMPLATE / DOWNLOAD WORKFLOW UPGRADE
- ************************************************************/
+
 .align-start {
   align-items: start;
 }
@@ -1050,9 +1071,6 @@ tr:hover td {
 }
 
 
-/************************************************************
- * GOOGLE SHEETS STYLE COST TRACKER
- ************************************************************/
 .sheet-workspace {
   display: grid;
   gap: 18px;
@@ -1455,9 +1473,6 @@ tr:hover td {
   }
 }
 
-/************************************************************
- * TABLE POLISH + QUICK COST TRACKER ASSIGNMENT CONTROLS
- ************************************************************/
 
 .table-help {
   margin: -6px 0 14px;
@@ -1663,10 +1678,6 @@ tr.is-unassigned td:first-child {
 }
 
 
-/************************************************************
- * DELETE ACTION + TABLE POLISH OVERRIDES
- ************************************************************/
-
 .table-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1730,18 +1741,11 @@ td:last-child {
 }
 
 
-/************************************************************
- * FULL-WIDTH TABLE + HORIZONTAL ACTION BUTTON LAYOUT
- * --------------------------------------------------------------------------
- * Keeps action text horizontal, prevents the last column from being squeezed,
- * and lets each table use the full available screen width.
- ************************************************************/
-
 .main {
   max-width: none;
 }
 
-/* Give every form/table page a full-width table underneath the form. */
+
 .view > .split {
   grid-template-columns: 1fr !important;
   gap: 20px;
@@ -1842,7 +1846,7 @@ td:last-child {
   font-variant-numeric: tabular-nums;
 }
 
-/* Undo older rules that squeezed the last column and made text stack vertically. */
+
 th:last-child,
 td:last-child {
   width: auto !important;
@@ -1861,7 +1865,7 @@ td:last-child {
   width: 380px !important;
 }
 
-/* Keep table cells as table cells, but make the buttons inside flow horizontally. */
+
 .data-table td.table-actions,
 .table-wrap > table td.table-actions,
 td[data-label="Actions"].table-actions {
@@ -1923,7 +1927,7 @@ td[data-label="Actions"].table-actions .link-btn,
   white-space: nowrap !important;
 }
 
-/* Give text-heavy columns better room. */
+
 .data-table.jobs-table th:nth-child(2),
 .data-table.jobs-table td:nth-child(2),
 .data-table.jobs-table th:nth-child(3),
@@ -1994,10 +1998,6 @@ td[data-label="Actions"].table-actions .link-btn,
   }
 }
 
-
-/************************************************************
- * INVOICE TEMPLATE PAGE - MATCHES SPREADSHEET INVOICE_TEMPLATE
- ************************************************************/
 
 .invoice-template-workspace {
   display: grid;
@@ -2416,11 +2416,7 @@ td[data-label="Actions"].table-actions .link-btn,
   }
 }
 
-/************************************************************
- * ONE-PAGE INVOICE TEMPLATE OVERRIDE
- * Matches the uploaded invoice PDF layout and forces the PDF
- * output to one landscape letter page.
- ************************************************************/
+
 .invoice-template-scroll {
   padding: 20px;
   overflow: auto;
@@ -2442,11 +2438,7 @@ td[data-label="Actions"].table-actions .link-btn,
   box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
   border: 1px solid #d8dde6;
   box-sizing: border-box;
-}
-
-.invoice-template-document * {
-  box-sizing: border-box;
-}
+}/* optimized: removed duplicate of a later identical rule (.invoice-template-document *) */
 
 .invoice-template-document input,
 .invoice-template-document textarea {
@@ -2979,11 +2971,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-/************************************************************
- * FULL-PAGE INVOICE FIT OVERRIDE
- * Keeps the invoice as one fixed 11in x 8.5in page, scales it
- * to the available browser space, and removes invoice-area scrollbars.
- ************************************************************/
 .invoice-template-panel {
   overflow: visible;
 }
@@ -3109,9 +3096,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-/************************************************************
- * COST TRACKER LOADED NOTICE + DATABASE TOTAL FIX UI
- ************************************************************/
 .cost-tracker-load-notice {
   margin: 12px 0 16px;
   padding: 12px 14px;
@@ -3196,11 +3180,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-
-/************************************************************
- * FOREMAN DAILY TIMESHEET TEMPLATE
- ************************************************************/
-
 .timesheet-workspace {
   display: grid;
   gap: 18px;
@@ -3238,6 +3217,15 @@ td[data-label="Actions"].table-actions .link-btn,
 
 .timesheet-job-picker {
   min-width: 0;
+}
+
+/* The timesheet popup is always opened from Job Details for a specific job, so the
+   sheet is already autofilled and the "Select Job to Autofill" card + its header
+   instruction are redundant there. Hide them inside the popup only (the job_id
+   select stays in the DOM, pre-set, so the form still submits with the job). */
+#jobTimesheetModalOverlay .timesheet-job-control-card,
+#jobTimesheetModalOverlay .timesheet-page-header .tiny {
+  display: none !important;
 }
 
 .timesheet-job-picker select,
@@ -3444,20 +3432,7 @@ td[data-label="Actions"].table-actions .link-btn,
 .timesheet-employee-grid th {
   background: #fff600;
   font-weight: 800;
-}
-
-.timesheet-employee-grid th:nth-child(1),
-.timesheet-employee-grid td:nth-child(1) { width: 1.04in; }
-.timesheet-employee-grid th:nth-child(2),
-.timesheet-employee-grid td:nth-child(2) { width: 1.94in; }
-.timesheet-employee-grid th:nth-child(3),
-.timesheet-employee-grid td:nth-child(3) { width: 1.05in; }
-.timesheet-employee-grid th:nth-child(4),
-.timesheet-employee-grid td:nth-child(4) { width: 0.62in; }
-.timesheet-employee-grid th:nth-child(5),
-.timesheet-employee-grid td:nth-child(5) { width: 0.34in; }
-.timesheet-employee-grid th:nth-child(6),
-.timesheet-employee-grid td:nth-child(6) { width: 0.36in; }
+}/* optimized: removed duplicate of a later identical rule (.timesheet-employee-grid th:nth-child(1), .timesheet-employe) *//* optimized: removed duplicate of a later identical rule (.timesheet-employee-grid th:nth-child(2), .timesheet-employe) *//* optimized: removed duplicate of a later identical rule (.timesheet-employee-grid th:nth-child(3), .timesheet-employe) *//* optimized: removed duplicate of a later identical rule (.timesheet-employee-grid th:nth-child(4), .timesheet-employe) *//* optimized: removed duplicate of a later identical rule (.timesheet-employee-grid th:nth-child(5), .timesheet-employe) *//* optimized: removed duplicate of a later identical rule (.timesheet-employee-grid th:nth-child(6), .timesheet-employe) */
 .timesheet-employee-grid th:nth-child(7),
 .timesheet-employee-grid td:nth-child(7) { width: 0.40in; }
 .timesheet-employee-grid th:nth-child(8),
@@ -3589,7 +3564,7 @@ td[data-label="Actions"].table-actions .link-btn,
   }
 }
 
-/* Personnel regular hours are calculated by the sheet: Total Days × 8 × Qty. */
+
 .auto-calculated-hours {
   background: #eff6ff !important;
   border-color: #93c5fd !important;
@@ -3602,13 +3577,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-
-/************************************************************
- * FINAL INVOICE A4 RATE-TOTAL OVERRIDE
- * - One fixed A4 portrait invoice page.
- * - No internal invoice scrollbars.
- * - Text/line items fit inside readable areas.
- ************************************************************/
 .field-hint {
   color: var(--muted);
   font-size: 0.74rem;
@@ -4083,11 +4051,7 @@ td[data-label="Actions"].table-actions .link-btn,
   border: 0 !important;
 }
 
-@media print {
-  @page {
-    size: A4 portrait;
-    margin: 0;
-  }
+@media print {/* optimized: removed duplicate of a later identical rule (@page) */
 
   .invoice-template-document,
   .invoice-template-document.one-page-invoice,
@@ -4101,11 +4065,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-/************************************************************
- * FINAL PREVIEW SCROLL + INVOICE EDITOR READABILITY FIX
- ************************************************************/
-
-/* Cost tracker preview must scroll so the full tracker can be reviewed. */
 #costTrackerPreviewDialog.invoice-preview-dialog {
   width: min(1200px, calc(100vw - 24px)) !important;
   max-height: calc(100vh - 24px) !important;
@@ -4137,7 +4096,7 @@ td[data-label="Actions"].table-actions .link-btn,
   margin: 0 auto;
 }
 
-/* Invoice preview should also be scrollable when zoomed or on smaller screens. */
+
 #invoicePreviewDialog.invoice-preview-dialog {
   width: min(1180px, calc(100vw - 24px)) !important;
   max-height: calc(100vh - 24px) !important;
@@ -4170,7 +4129,7 @@ td[data-label="Actions"].table-actions .link-btn,
   zoom: 1 !important;
 }
 
-/* Invoice editor is zoomed in and scrollable instead of shrinking the page. */
+
 .invoice-template-scroll {
   overflow: auto !important;
   height: min(78vh, 980px) !important;
@@ -4189,7 +4148,7 @@ td[data-label="Actions"].table-actions .link-btn,
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22) !important;
 }
 
-/* Export uses exact A4 size with no editor zoom or transform. */
+
 .invoice-pdf-export-root,
 .invoice-pdf-workbench,
 .pdf-workbench.invoice-pdf-workbench {
@@ -4213,7 +4172,7 @@ td[data-label="Actions"].table-actions .link-btn,
   overflow: hidden !important;
 }
 
-/* Make sure generated PDFs stay on one A4 portrait page. */
+
 @media print {
   @page {
     size: A4 portrait;
@@ -4243,9 +4202,7 @@ td[data-label="Actions"].table-actions .link-btn,
   }
 }
 
-/************************************************************
- * FINAL INVOICE PDF DOWNLOAD REPAIR
- ************************************************************/
+
 .invoice-pdf-canvas-root,
 .invoice-pdf-workbench {
   font-family: Arial, Helvetica, sans-serif;
@@ -4266,9 +4223,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-/************************************************************
- * COST TRACKER NAME SETUP CARD
- ************************************************************/
 .cost-tracker-setup-card {
   display: grid;
   grid-template-columns: minmax(260px, 0.9fr) minmax(360px, 1.35fr) minmax(230px, 0.8fr);
@@ -4395,9 +4349,7 @@ td[data-label="Actions"].table-actions .link-btn,
   }
 }
 
-/************************************************************
- * FINAL INVOICE PDF PREVIEW-CAPTURE EXPORT FIX
- ************************************************************/
+
 .invoice-pdf-preview-capture-root {
   background: #ffffff !important;
   border: 0 !important;
@@ -4417,9 +4369,7 @@ td[data-label="Actions"].table-actions .link-btn,
   overflow: hidden;
 }
 
-/************************************************************
- * FINAL TEMPLATE-MATCHED INVOICE PDF EXPORT
- ************************************************************/
+
 .invoice-pdf-template-match-workbench {
   background: #ffffff !important;
   border: 0 !important;
@@ -4454,12 +4404,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-
-/************************************************************
- * INVOICE PDF ONE-PAGE FIT/CENTER EXPORT FIX
- * Keeps the invoice export at the page origin so html2canvas
- * does not crop the left side, and forces one A4 portrait page.
- ************************************************************/
 .invoice-pdf-template-match-workbench,
 .invoice-pdf-workbench,
 .invoice-pdf-export-root,
@@ -4498,9 +4442,6 @@ td[data-label="Actions"].table-actions .link-btn,
 }
 
 
-/************************************************************
- * FINAL TIMESHEET RR REMOVAL + PDF EXPORT FIX
- ************************************************************/
 .timesheet-employee-grid th:nth-child(1),
 .timesheet-employee-grid td:nth-child(1) { width: 1.04in; }
 .timesheet-employee-grid th:nth-child(2),
@@ -4557,9 +4498,7 @@ td[data-label="Actions"].table-actions .link-btn,
   object-fit: contain !important;
 }
 
-/************************************************************
- * FINAL STATUS / ASSIGNMENT / DOWNLOAD CLEANUP
- ************************************************************/
+
 #printCostTrackerBtn,
 #printInvoiceBtn,
 #printTimesheetPreviewBtn,
@@ -4634,9 +4573,6 @@ button[id*="print" i] {
 }
 
 
-/************************************************************
- * FINAL JOB/COST/INVOICE/TIMESHEET PATCH STYLES
- ************************************************************/
 .timesheet-section-row th {
   background: #fff600 !important;
   color: #000 !important;
@@ -4680,9 +4616,6 @@ button[id*="print" i] {
 }
 
 
-/* ========================================================================
-   DOCUMENTS HUB + REMOVED ASSIGNMENTS TAB
-   ======================================================================== */
 button.nav-btn[data-view="assignments"],
 #assignmentsView {
   display: none !important;
@@ -4891,9 +4824,6 @@ button.nav-btn[data-view="assignments"],
 }
 
 
-/* ========================================================================
-   DOCUMENT HUB VISUAL SEARCH + COST TRACKER PREVIEW POLISH
-   ======================================================================== */
 .documents-toolbar {
   display: grid;
   gap: 12px;
@@ -5148,10 +5078,6 @@ button.nav-btn[data-view="assignments"],
 }
 
 
-
-/************************************************************
- * FINAL COST TRACKER SPREADSHEET PREVIEW MATCH
- ************************************************************/
 #costTrackerPreviewDialog .invoice-preview-content {
   background: #eef2f7;
   padding: 14px;
@@ -5210,36 +5136,7 @@ button.nav-btn[data-view="assignments"],
 }
 
 
-/************************************************************
- * MODERN VISUAL DESIGN REFRESH
- * ----------------------------------------------------------
- * Visual-only layer. Keeps existing JavaScript, data flow,
- * cost tracker sheet layout, invoice template, and timesheet
- * template intact while improving the app shell, dashboard,
- * tables, forms, buttons, spacing, and responsiveness.
- ************************************************************/
-:root {
-  --bg: #eef3f8;
-  --bg-soft: #f8fafc;
-  --panel: rgba(255, 255, 255, 0.94);
-  --panel-solid: #ffffff;
-  --ink: #0f172a;
-  --muted: #64748b;
-  --line: #dbe5ef;
-  --brand: #2563eb;
-  --brand-dark: #1e40af;
-  --brand-soft: #dbeafe;
-  --accent: #0ea5e9;
-  --success: #16a34a;
-  --warning: #f59e0b;
-  --danger: #dc2626;
-  --danger-bg: #fee2e2;
-  --shadow: 0 18px 48px rgba(15, 23, 42, 0.10);
-  --shadow-soft: 0 10px 26px rgba(15, 23, 42, 0.07);
-  --radius: 20px;
-  --radius-sm: 14px;
-  --sidebar-w: 268px;
-}
+/* (Design tokens consolidated into the single :root at the top of this file.) */
 
 html {
   background: var(--bg);
@@ -5580,7 +5477,7 @@ label {
   color: #991b1b;
 }
 
-/* Dashboard page only */
+
 #dashboardView {
   display: none;
 }
@@ -5664,7 +5561,7 @@ label {
   line-height: 1.35;
 }
 
-/* Documents and list pages */
+
 .documents-hub-panel,
 .cost-list-panel,
 .invoice-list-panel,
@@ -5688,7 +5585,7 @@ label {
   min-height: 44px;
 }
 
-/* Preserve the spreadsheet and invoice templates while improving their containers. */
+
 .sheet-panel,
 .invoice-template-panel,
 .timesheet-builder-panel {
@@ -5703,7 +5600,7 @@ label {
   border: 1px solid #e2e8f0;
 }
 
-/* Preview-only: never highlight cost tracker hours red in the preview. */
+
 #costTrackerPreviewContent .input-red,
 #costTrackerPreviewContent .red-head,
 #costTrackerPreviewContent .cost-sheet-preview .input-red,
@@ -5831,9 +5728,7 @@ label {
   }
 }
 
-/************************************************************
- * CONSISTENT ACTION BAR + TABLE-LEVEL SEARCH UPDATE
- ************************************************************/
+
 .topbar {
   position: sticky;
   top: 0;
@@ -5950,9 +5845,7 @@ label {
   }
 }
 
-/* ========================================================================
-   BEGINNER NAVIGATION + JOB FILE UPLOAD UI
-   ======================================================================== */
+
 .beginner-start-panel,
 .form-upload-guide,
 .job-file-upload-panel,
@@ -6208,10 +6101,6 @@ label {
 }
 
 
-
-/************************************************************
- * JOB PAGE DOCUMENT DETAILS UPDATE
- ************************************************************/
 .documents-moved-panel {
   display: grid;
   gap: 12px;
@@ -6477,8 +6366,6 @@ label {
 }
 
 
-
-/* Final invoice optional-job cleanup */
 .invoice-source-panel .invoice-source-note {
   display: grid;
   gap: 4px;
@@ -6506,9 +6393,6 @@ label {
 }
 
 
-/* ========================================================================
-   FINAL JOB TABLE + BID SHEET PREVIEW VISUAL PATCH
-   ======================================================================== */
 .job-upload-guide {
   display: none !important;
 }
@@ -6676,9 +6560,7 @@ label {
   }
 }
 
-/* ========================================================================
-   FINAL EXISTING DOCUMENT UPLOAD + ORIGINAL COST TRACKER PREVIEW FIX
-   ======================================================================== */
+
 #costTrackerPreviewContent .original-cost-template-preview .input-red,
 #costTrackerPreviewContent .original-cost-template-preview .red-head {
   background: #ff0d0d !important;
@@ -6720,7 +6602,6 @@ label {
 }
 
 
-/* Existing document upload fix / clearer job upload UI */
 .job-detail-upload-card {
   border: 1px solid rgba(29, 78, 216, 0.18);
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
@@ -6769,7 +6650,6 @@ label {
 }
 
 
-/* Final upload/invoice-flow repair polish */
 .job-detail-upload-form[data-final-upload-repair-ui="true"] {
   grid-template-columns: minmax(190px, 260px) minmax(260px, 1fr) auto;
   align-items: end;
@@ -6804,10 +6684,6 @@ label {
   }
 }
 
-
-/************************************************************
- * COLLAPSIBLE SIDEBAR FINAL PATCH
- ************************************************************/
 
 .sidebar-toggle-btn {
   white-space: nowrap;
@@ -6855,12 +6731,7 @@ label {
   }
 }
 
-/* ========================================================================
-   MANUAL TOTAL OVERRIDE FIELDS
-   ------------------------------------------------------------------------
-   Lets users adjust final cost tracker and invoice totals without changing
-   every line item.
-   ======================================================================== */
+
 .sheet-manual-total-overrides {
   margin: 16px 0 0 64px;
   max-width: 438px;
@@ -6965,12 +6836,6 @@ label {
 }
 
 
-/* ========================================================================
-   DIRECTLY EDITABLE INVOICE TOTALS
-   ------------------------------------------------------------------------
-   Invoice override boxes were removed. Totals are edited directly in the
-   invoice template so autofilled invoices can be adjusted in place.
-   ======================================================================== */
 .invoice-manual-adjustments {
   display: none !important;
 }
@@ -7049,11 +6914,6 @@ label {
 }
 
 
-/* ========================================================================
-   FINAL INVOICE EDITING POLISH
-   ------------------------------------------------------------------------
-   Make every editable invoice-template control fill its printed box/cell.
-   ======================================================================== */
 #generateInvoiceNumberBtn {
   display: none !important;
 }
@@ -7128,11 +6988,7 @@ label {
   min-height: 100% !important;
 }
 
-/************************************************************
- * INVOICE MAIN SECTION ROW CLIPPING FIX
- * Gives the invoice line-item area enough room for the generated rows
- * and prevents the bottom borders/text from being hidden.
- ************************************************************/
+
 .invoice-template-document.invoice-template-editor .invoice-template-lines,
 .invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines {
   top: 4.12in !important;
@@ -7235,9 +7091,6 @@ label {
 }
 
 
-/************************************************************
- * EASY SAVE / CLEAR ACTIONS
- ************************************************************/
 .builder-save-strip {
   position: sticky;
   bottom: 14px;
@@ -7287,11 +7140,6 @@ label {
 }
 
 
-/************************************************************
- * FINAL INVOICE P.O. / TERMS / PROJECT VISIBILITY FIX
- * Keeps the main line table from covering the P.O. No., Terms,
- * and Project boxes in the editable invoice template.
- ************************************************************/
 #invoiceTemplateEditor .invoice-template-po-label,
 #invoiceTemplateEditor .invoice-template-terms-label,
 #invoiceTemplateEditor .invoice-template-project-label {
@@ -7345,11 +7193,7 @@ label {
   z-index: 5 !important;
 }
 
-/************************************************************
- * FINAL INVOICE BOTTOM SECTION OVERLAP FIX
- * Keeps invoice rows inside the main table area so the payment,
- * wiring, and totals blocks are never covered by added rows.
- ************************************************************/
+
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines {
   top: 4.62in !important;
   height: 2.08in !important;
@@ -7400,6 +7244,20 @@ label {
   line-height: 1.08 !important;
 }
 
+/* Let the line-item description grow to fit multi-line text instead of clipping
+   after the first line. The taller selector (+.a4-invoice-page) outranks the
+   fixed-height rule above; JS sets the exact height (also !important) so typed
+   lines stay visible. */
+#invoiceTemplateEditor.invoice-template-document.invoice-template-editor.a4-invoice-page .invoice-template-line .line-description {
+  height: auto !important;
+  min-height: 0.22in !important;
+  max-height: none !important;
+  overflow: hidden !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  resize: none !important;
+}
+
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-payee,
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire-title,
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire,
@@ -7431,7 +7289,7 @@ label {
   top: 6.86in !important;
 }
 
-/* Saved previews/PDF workbench: do not let extra rows draw over the bottom blocks. */
+
 .invoice-template-document.one-page-invoice:not(.a4-invoice-page) .invoice-template-lines,
 .invoice-preview-content .invoice-template-document .invoice-template-lines,
 .pdf-workbench .invoice-template-document .invoice-template-lines,
@@ -7468,11 +7326,7 @@ label {
   background: #ffffff !important;
 }
 
-/* ========================================================================
-   JOB CREATE / EDIT POPUP MODAL
-   ------------------------------------------------------------------------
-   Keeps the Jobs form hidden until the user chooses Create Job or Edit.
-   ======================================================================== */
+
 .jobs-page-layout {
   display: grid;
   gap: 18px;
@@ -7618,7 +7472,7 @@ body.job-modal-open {
   }
 }
 
-/* Business days / cost tracker table polish */
+
 .cost-trackers-table th:nth-child(3),
 .cost-trackers-table td:nth-child(3) {
   min-width: 150px;
@@ -7635,8 +7489,6 @@ body.job-modal-open {
 }
 
 
-
-/* Timesheet job folder table */
 .timesheet-folder-row td {
   background: #f8fafc;
   border-top: 2px solid var(--line);
@@ -7672,9 +7524,7 @@ body.job-modal-open {
   flex-wrap: wrap;
 }
 
-/* ========================================================================
-   Cost Tracker + Invoice popup workflow
-   ======================================================================== */
+
 body.template-modal-open {
   overflow: hidden;
 }
@@ -7834,9 +7684,7 @@ body.template-modal-open {
   }
 }
 
-/* ========================================================================
-   Final Cost Tracker / Invoice page control fit patch
-   ======================================================================== */
+
 .template-page-actions,
 .template-page-actions.template-page-actions-fit {
   display: flex !important;
@@ -7898,9 +7746,7 @@ body.template-modal-open {
   }
 }
 
-/* ========================================================================
-   Job details popup + simplified cost tracker setup
-   ======================================================================== */
+
 body.job-details-modal-open {
   overflow: hidden;
 }
@@ -7960,6 +7806,21 @@ body.job-details-modal-open {
   background: #f8fafc;
 }
 
+/* Timesheets window (opened from the Job Details Timesheets card). Reuses the
+   job-details modal shell but is narrower and just lists timesheet rows. */
+.job-timesheets-window-card {
+  width: min(720px, 100%);
+}
+
+.job-timesheet-window-list {
+  display: grid;
+  gap: 10px;
+}
+
+.job-detail-attached-files-section {
+  margin-top: 14px;
+}
+
 .job-details-popup-panel {
   border-radius: 22px;
   border: 1px solid #bfdbfe;
@@ -8013,9 +7874,6 @@ body.job-details-modal-open {
 }
 
 
-/* ========================================================================
-   Final stacking fix for template modals over job details
-   ======================================================================== */
 .template-modal-overlay,
 .template-modal-overlay.template-modal-detached-over-job-details {
   z-index: 180 !important;
@@ -8029,10 +7887,7 @@ body.job-details-modal-open.template-modal-open {
   overflow: hidden;
 }
 
-/* ========================================================================
-   Final notification stacking fix
-   Keeps save/create/edit messages above every open modal/window.
-   ======================================================================== */
+
 .toast,
 #toast {
   position: fixed !important;
@@ -8053,9 +7908,6 @@ body.job-details-modal-open.template-modal-open #toast {
 }
 
 
-/* ========================================================================
-   FINAL JOB DETAILS LOCKED COST TRACKER + EDITABLE VIEW INVOICE STYLES
-   ======================================================================== */
 #costTrackerTemplateModalOverlay.job-details-cost-locked #costTrackerForm .sheet-job-picker,
 #costTrackerTemplateModalOverlay.job-details-cost-locked #costTrackerForm #clearCostTrackerJobBtn {
   display: none !important;
@@ -8190,12 +8042,7 @@ body.job-details-modal-open.template-modal-open #toast {
   }
 }
 
-/* ========================================================================
-   PROFESSIONAL JOBS TABLE FINAL POLISH
-   ------------------------------------------------------------------------
-   Improves Jobs table readability and navigation only. Functionality is kept
-   in app.js; these styles do not change behavior.
-   ======================================================================== */
+
 .jobs-table-panel {
   overflow: hidden;
 }
@@ -8395,9 +8242,6 @@ body.job-details-modal-open.template-modal-open #toast {
 }
 
 
-/* ========================================================================
-   ABSOLUTE FINAL JOB # ONE-LINE BADGE + ACTION CLICK TARGET POLISH
-   ======================================================================== */
 .jobs-table th:first-child,
 .jobs-table td.job-number-cell {
   width: 130px;
@@ -8441,9 +8285,7 @@ body.job-details-modal-open.template-modal-open #toast {
   pointer-events: auto;
 }
 
-/* ========================================================================
-   TRUE FINAL JOB # PLAIN TEXT OVERRIDE
-   ======================================================================== */
+
 .jobs-table td.job-number-cell,
 .jobs-table th:first-child {
   width: 120px;
@@ -8480,10 +8322,6 @@ body.job-details-modal-open.template-modal-open #toast {
 }
 
 
-
-/* ========================================================================
-   TOP NAVIGATION + JOB DETAILS TIMESHEET FOLDER PATCH
-   ======================================================================== */
 .app-shell {
   display: block;
   min-height: 100vh;
@@ -8698,9 +8536,6 @@ body.job-details-modal-open.template-modal-open #toast {
 }
 
 
-/* ========================================================================
-   FINAL MODAL / TOP NAV STACKING + TIMESHEET FOLDER OPEN-CLOSE FIX
-   ======================================================================== */
 .job-modal-overlay,
 .job-details-modal-overlay,
 .template-modal-overlay,
@@ -8749,9 +8584,6 @@ body.template-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   Job Details Timesheet Popup
-   ======================================================================== */
 body.job-timesheet-modal-open {
   overflow: hidden;
 }
@@ -8845,8 +8677,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-
-/* Job Details timesheet folder action buttons */
 .job-timesheet-folder-actions {
   display: flex;
   align-items: center;
@@ -8860,9 +8690,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   FINAL PATCH: REMOVE SELECTED PAGE SIDE LINE + JOB DETAILS FOLDER TOGGLE
-   ======================================================================== */
 .nav-btn.active::before {
   content: none !important;
   display: none !important;
@@ -8878,9 +8705,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   SMALL JOB DETAILS TIMESHEET FOLDER BUTTON
-   ======================================================================== */
 .job-detail-section-header-actions {
   display: inline-flex;
   align-items: center;
@@ -8909,9 +8733,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   RELIABLE JOB DETAILS TIMESHEET FOLDER TOGGLE V2
-   ======================================================================== */
 .job-detail-section-header-actions .job-details-folder-toggle-btn[data-job-details-folder-toggle-v2] {
   min-height: 30px;
   padding: 6px 10px;
@@ -8932,8 +8753,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-
-/* Inline invoice status dropdown inside the invoices table */
 .invoice-status-table-select {
   width: auto;
   min-width: 150px;
@@ -8974,8 +8793,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-
-/* Final Cost Tracker table resize: show only Rate Total as the money column */
 .cost-trackers-rate-only-table,
 .cost-trackers-table.cost-trackers-rate-only-table {
   width: 100%;
@@ -9020,9 +8837,7 @@ body.job-timesheet-modal-open .topbar {
   color: transparent;
 }
 
-/* ========================================================================
-   FINAL JOB DETAILS DOCUMENT UPLOAD DEFAULT STYLE
-   ======================================================================== */
+
 .job-detail-upload-card.job-detail-upload-card-compact,
 #jobDetailsModalBody .job-detail-upload-card {
   display: grid;
@@ -9067,6 +8882,39 @@ body.job-timesheet-modal-open .topbar {
   background: #eff6ff;
 }
 
+/* No attached files yet: give the Timesheets Folder the full row instead of
+   leaving a large empty "Attached Files" box beside it. */
+#jobDetailsModalBody .job-details-split-grid-single {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+/* The Timesheets Folder is the toggle now (click the folder to open/close), so
+   the section header never needs a separate open/close button area. */
+#jobDetailsModalBody .job-detail-section-header-actions {
+  display: none !important;
+}
+
+/* Keep the "Add an existing document" upload card compact so it doesn't dominate
+   the window — especially when there are no files attached yet. */
+#jobDetailsModalBody .job-detail-upload-card {
+  padding: 12px 14px !important;
+  gap: 12px !important;
+  align-items: center !important;
+}
+
+#jobDetailsModalBody .job-detail-upload-heading {
+  min-height: 0 !important;
+}
+
+/* Make it obvious the whole folder header is clickable. */
+#jobDetailsModalBody .job-timesheet-folder-summary {
+  transition: background 0.12s ease;
+}
+
+#jobDetailsModalBody .job-timesheet-folder-summary:active {
+  background: #e2effe;
+}
+
 @media (max-width: 900px) {
   .job-detail-upload-card.job-detail-upload-card-compact,
   #jobDetailsModalBody .job-detail-upload-card,
@@ -9081,9 +8929,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   FINAL COST TRACKER EDIT WINDOW CLEANUP
-   ======================================================================== */
 #costTrackerLoadNotice.cost-tracker-load-notice,
 #costTrackerForm .cost-tracker-locked-job-note {
   display: none !important;
@@ -9106,9 +8951,7 @@ body.job-timesheet-modal-open .topbar {
   margin-top: 0 !important;
 }
 
-/* ========================================================================
-   FINAL COST TRACKER NUMBER CELL SPINNER CLEANUP
-   ======================================================================== */
+
 #costTrackerForm input[type="number"],
 #costTrackerTemplateModalOverlay input[type="number"],
 .template-modal-body #costTrackerForm input[type="number"],
@@ -9134,13 +8977,11 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-
-/* Equipment footer should only show equipment cost totals; non-cost total cells stay blank. */
 .equipment-table tfoot .no-equipment-total {
   color: transparent;
 }
 
-/* FINAL T&M / AFE JOB FIELD PATCH */
+
 .tm-afe-field {
   grid-column: auto;
 }
@@ -9170,10 +9011,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-
-/* ========================================================================
-   FINAL COST TRACKER HEADER + INTERNAL COMMENTS PATCH
-   ======================================================================== */
 .cost-tracker-name-field {
   grid-column: 1 / -1;
 }
@@ -9233,9 +9070,7 @@ body.job-timesheet-modal-open .topbar {
   }
 }
 
-/* ========================================================================
-   FINAL MAIN DASHBOARD ACTIVE JOBS TABLE PATCH V2
-   ======================================================================== */
+
 .dashboard-main-jobs-panel {
   margin-top: 22px;
   padding: 0;
@@ -9353,10 +9188,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-
-/* ========================================================================
-   FINAL DASHBOARD ACTIVE JOBS TABLE CLEANUP - NO ACTIONS / NO STATS
-   ======================================================================== */
 #dashboardView .dashboard-hidden-stats,
 #dashboardView > .stats-grid.dashboard-hidden-stats {
   display: none !important;
@@ -9379,22 +9210,12 @@ body.job-timesheet-modal-open .topbar {
 .dashboard-active-jobs-table th:nth-child(1),
 .dashboard-active-jobs-table td:nth-child(1) {
   width: 10% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(2),
-.dashboard-active-jobs-table td:nth-child(2) {
-  width: 25% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(2), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(3),
 .dashboard-active-jobs-table td:nth-child(3) {
   width: 17% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(4),
-.dashboard-active-jobs-table td:nth-child(4) {
-  width: 16% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(4), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(5),
 .dashboard-active-jobs-table td:nth-child(5) {
@@ -9404,23 +9225,14 @@ body.job-timesheet-modal-open .topbar {
 .dashboard-active-jobs-table th:nth-child(6),
 .dashboard-active-jobs-table td:nth-child(6) {
   width: 14% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(7),
-.dashboard-active-jobs-table td:nth-child(7) {
-  width: 9% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(7), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(8),
 .dashboard-active-jobs-table td:nth-child(8),
 .dashboard-job-actions-cell,
 .dashboard-active-jobs-table .dashboard-job-actions-cell {
   display: none !important;
-}
-
-.dashboard-rate-total-cell strong {
-  white-space: nowrap;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-rate-total-cell strong) */
 
 @media (max-width: 1050px) {
   .dashboard-active-jobs-table {
@@ -9428,39 +9240,17 @@ body.job-timesheet-modal-open .topbar {
   }
 }
 
-/* ========================================================================
-   FINAL DASHBOARD ACTIVE JOBS TABLE - ACTIONS + INLINE STATUS STYLING
-   ======================================================================== */
+
 .dashboard-active-jobs-table {
   width: 100% !important;
   min-width: 1280px !important;
   table-layout: fixed !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(1),
-.dashboard-active-jobs-table td:nth-child(1) {
-  width: 8% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(1), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(2),
 .dashboard-active-jobs-table td:nth-child(2) {
   width: 18% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(3),
-.dashboard-active-jobs-table td:nth-child(3) {
-  width: 13% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(4),
-.dashboard-active-jobs-table td:nth-child(4) {
-  width: 12% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(5),
-.dashboard-active-jobs-table td:nth-child(5) {
-  width: 12% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(3), .dashboard-act) *//* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(4), .dashboard-act) *//* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(5), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(6),
 .dashboard-active-jobs-table td:nth-child(6) {
@@ -9546,10 +9336,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-
-/* ========================================================================
-   FINAL DASHBOARD ACTIVE JOBS TABLE - DOC CHIPS + COLUMN ORDER STYLING V2
-   ======================================================================== */
 .dashboard-active-jobs-table {
   width: 100% !important;
   min-width: 1360px !important;
@@ -9570,17 +9356,7 @@ body.job-timesheet-modal-open .topbar {
   overflow-wrap: normal !important;
   word-break: normal !important;
   text-transform: none !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(1),
-.dashboard-active-jobs-table td:nth-child(1) {
-  width: 7% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(2),
-.dashboard-active-jobs-table td:nth-child(2) {
-  width: 22% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(1), .dashboard-act) *//* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(2), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(3),
 .dashboard-active-jobs-table td:nth-child(3) {
@@ -9595,17 +9371,7 @@ body.job-timesheet-modal-open .topbar {
 .dashboard-active-jobs-table th:nth-child(5),
 .dashboard-active-jobs-table td:nth-child(5) {
   width: 11% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(6),
-.dashboard-active-jobs-table td:nth-child(6) {
-  width: 11% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(7),
-.dashboard-active-jobs-table td:nth-child(7) {
-  width: 9% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(6), .dashboard-act) *//* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(7), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(8),
 .dashboard-active-jobs-table td:nth-child(8) {
@@ -9674,9 +9440,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   FINAL DASHBOARD DOCUMENT INDICATOR LABELS / SIZING PATCH
-   ======================================================================== */
 .dashboard-project-stack .dashboard-job-chips,
 .dashboard-job-chips {
   display: flex !important;
@@ -9723,9 +9486,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   FINAL DASHBOARD TABLE WITHOUT INVOICE STATUS COLUMN + JOB DETAILS STATUS
-   ======================================================================== */
 .dashboard-active-jobs-table {
   width: 100% !important;
   min-width: 1240px !important;
@@ -9740,17 +9500,7 @@ body.job-timesheet-modal-open .topbar {
 .dashboard-active-jobs-table th:nth-child(2),
 .dashboard-active-jobs-table td:nth-child(2) {
   width: 25% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(3),
-.dashboard-active-jobs-table td:nth-child(3) {
-  width: 13% !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(4),
-.dashboard-active-jobs-table td:nth-child(4) {
-  width: 12% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(3), .dashboard-act) *//* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(4), .dashboard-act) */
 
 .dashboard-active-jobs-table th:nth-child(5),
 .dashboard-active-jobs-table td:nth-child(5) {
@@ -9771,12 +9521,7 @@ body.job-timesheet-modal-open .topbar {
 .dashboard-active-jobs-table td:nth-child(8) {
   width: 9% !important;
   display: table-cell !important;
-}
-
-.dashboard-active-jobs-table th:nth-child(9),
-.dashboard-active-jobs-table td:nth-child(9) {
-  display: none !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(9), .dashboard-act) */
 
 .dashboard-active-jobs-table th {
   white-space: normal !important;
@@ -9820,9 +9565,7 @@ body.job-timesheet-modal-open .topbar {
   cursor: progress;
 }
 
-/* ========================================================================
-   OPEN JOBS / CLOSED JOBS INVOICE STATUS TABLE POLISH
-   ======================================================================== */
+
 .dashboard-active-jobs-table,
 .closed-jobs-table {
   width: 100% !important;
@@ -9934,9 +9677,6 @@ body.job-timesheet-modal-open .topbar {
 }
 
 
-/* ========================================================================
-   FINAL COST TRACKER WINDOW CLEANUP + FIT-TO-SCREEN PATCH
-   ======================================================================== */
 #costTrackerForm .cost-tracker-setup-card,
 #costTrackerForm #costTrackerSetupCard,
 #costTrackerTemplateModalOverlay #costTrackerForm .cost-tracker-setup-card,
@@ -10069,8 +9809,7 @@ body.job-timesheet-modal-open .topbar {
 #costTrackerForm .money-col { width: 7.5% !important; }
 #costTrackerForm .total-col { width: 9.2% !important; }
 #costTrackerForm .action-col { width: 3% !important; }
-#costTrackerForm .right-desc-col { width: 45% !important; }
-#costTrackerForm .right-cost-col { width: 17% !important; }
+#costTrackerForm .right-desc-col { width: 45% !important; }/* optimized: removed duplicate of a later identical rule (#costTrackerForm .right-cost-col) */
 #costTrackerForm .right-markup-col { width: 16% !important; }
 #costTrackerForm .right-total-col { width: 19% !important; }
 
@@ -10151,55 +9890,27 @@ body.job-timesheet-modal-open .topbar {
   overflow-x: hidden !important;
 }
 
-@media (max-width: 980px) {
-  #costTrackerForm .sheet-grid-layout,
-  #costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
-    grid-template-columns: 1fr !important;
-  }
+@media (max-width: 980px) {/* optimized: removed duplicate of a later identical rule (#costTrackerForm .sheet-grid-layout, #costTrackerTemplateMod) */
   #costTrackerForm .sheet-comments-grid {
     grid-template-columns: 1fr !important;
   }
 }
 
-/* ========================================================================
-   FINAL READABLE FULLSCREEN COST TRACKER + CLOSED JOBS CLEANUP
-   ======================================================================== */
 
-/* Closed Jobs should only show the closed jobs table/search area. */
 #jobsView .jobs-page-action-bar {
   display: none !important;
 }
 
 #jobsView .jobs-page-layout {
   gap: 0 !important;
-}
+}/* optimized: removed duplicate of a later identical rule (#costTrackerForm .cost-tracker-window-toolbar, #costTrackerT) */
 
-/* Keep the removed T&M/AFE toolbar from appearing if older cached markup is present. */
-#costTrackerForm .cost-tracker-window-toolbar,
-#costTrackerTemplateModalOverlay #costTrackerForm .cost-tracker-window-toolbar,
-#costTrackerForm .sheet-job-picker,
-#costTrackerTemplateModalOverlay #costTrackerForm .sheet-job-picker {
-  display: none !important;
-}
 
-/* Make the cost tracker edit popup use the full browser window. */
 #costTrackerTemplateModalOverlay.template-modal-overlay {
   padding: 0 !important;
   align-items: stretch !important;
   justify-content: stretch !important;
-}
-
-#costTrackerTemplateModalOverlay .template-modal-card.cost-modal-card,
-#costTrackerTemplateModalOverlay .template-modal-card {
-  width: 100vw !important;
-  max-width: 100vw !important;
-  height: 100vh !important;
-  max-height: 100vh !important;
-  border-radius: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
-}
+}/* optimized: removed duplicate of a later identical rule (#costTrackerTemplateModalOverlay .template-modal-card.cost-m) */
 
 #costTrackerTemplateModalOverlay .template-modal-header {
   flex: 0 0 auto !important;
@@ -10211,31 +9922,9 @@ body.job-timesheet-modal-open .topbar {
 #costTrackerTemplateModalOverlay .template-modal-header h3 {
   font-size: 1.05rem !important;
   font-weight: 900 !important;
-}
+}/* optimized: removed duplicate of a later identical rule (#costTrackerTemplateModalOverlay .template-modal-body) *//* optimized: removed duplicate of a later identical rule (#costTrackerTemplateModalOverlay #costTrackerForm, #costTrac) */
 
-#costTrackerTemplateModalOverlay .template-modal-body {
-  flex: 1 1 auto !important;
-  min-height: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-  display: flex !important;
-  background: #eef2f7 !important;
-}
 
-#costTrackerTemplateModalOverlay #costTrackerForm,
-#costTrackerForm.template-popup-form {
-  width: 100% !important;
-  height: 100% !important;
-  min-height: 0 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  overflow: hidden !important;
-}
-
-/* Main page and popup both use all available width without clipping the sheet. */
 #costTrackerForm.sheet-panel {
   width: 100% !important;
 }
@@ -10358,34 +10047,14 @@ body.job-timesheet-modal-open .topbar {
   font-weight: 900 !important;
   line-height: 1.05 !important;
   overflow: visible !important;
-}
-
-#costTrackerForm .sheet-table input[type="number"],
-#costTrackerForm .sheet-table .money-input,
-#costTrackerForm .sheet-table .money-output,
-#costTrackerForm .sheet-table .rate-output,
-#costTrackerForm .sheet-table td[id$="Cost"],
-#costTrackerForm .sheet-table td[id$="Rate"],
-#costTrackerForm .sheet-table tfoot td {
-  text-align: right !important;
-  white-space: nowrap !important;
-}
-
-#costTrackerForm .sheet-table input,
-#costTrackerForm .sheet-table select {
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
+}/* optimized: removed duplicate of a later identical rule (#costTrackerForm .sheet-table input[type="number"], #costTra) *//* optimized: removed duplicate of a later identical rule (#costTrackerForm .sheet-table input, #costTrackerForm .sheet) */
 
 #costTrackerForm .desc-col { width: 18.8% !important; }
 #costTrackerForm .qty-col { width: 5.2% !important; }
 #costTrackerForm .hours-col { width: 6.8% !important; }
 #costTrackerForm .money-col { width: 7.4% !important; }
-#costTrackerForm .total-col { width: 8.8% !important; }
-#costTrackerForm .action-col { width: 2.4% !important; }
-#costTrackerForm .right-desc-col { width: 42% !important; }
-#costTrackerForm .right-cost-col { width: 17% !important; }
-#costTrackerForm .right-markup-col { width: 15% !important; }
+#costTrackerForm .total-col { width: 8.8% !important; }/* optimized: removed duplicate of a later identical rule (#costTrackerForm .action-col) */
+#costTrackerForm .right-desc-col { width: 42% !important; }/* optimized: removed duplicate of a later identical rule (#costTrackerForm .right-cost-col) *//* optimized: removed duplicate of a later identical rule (#costTrackerForm .right-markup-col) */
 #costTrackerForm .right-total-col { width: 23% !important; }
 
 #costTrackerForm .sheet-add-btn,
@@ -10464,23 +10133,10 @@ body.job-timesheet-modal-open .topbar {
   #costTrackerForm .sheet-grid-layout,
   #costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
     grid-template-columns: 1fr !important;
-  }
-
-  #costTrackerForm .sheet-meta-grid,
-  #costTrackerForm .sheet-comments-grid {
-    grid-template-columns: 1fr !important;
-  }
+  }/* optimized: removed duplicate of a later identical rule (#costTrackerForm .sheet-meta-grid, #costTrackerForm .sheet-c) */
 }
 
-/* ========================================================================
-   FINAL COST TRACKER FIT-TO-WINDOW VISUAL POLISH
-   ------------------------------------------------------------------------
-   This replaces the previous oversized text treatment with a cleaner,
-   spreadsheet-style fit. It prevents the right side from clipping by letting
-   CSS grid gaps participate in the layout instead of adding width beyond 100%.
-   ======================================================================== */
 
-/* The edit popup should be the full browser window, with no wasted margins. */
 #costTrackerTemplateModalOverlay.template-modal-overlay {
   padding: 0 !important;
   align-items: stretch !important;
@@ -10536,7 +10192,7 @@ body.job-timesheet-modal-open .topbar {
   overflow: hidden !important;
 }
 
-/* Keep the old T&M/AFE toolbar hidden even if an older cached HTML copy appears. */
+
 #costTrackerForm .cost-tracker-window-toolbar,
 #costTrackerTemplateModalOverlay #costTrackerForm .cost-tracker-window-toolbar,
 #costTrackerForm .sheet-job-picker,
@@ -10544,7 +10200,7 @@ body.job-timesheet-modal-open .topbar {
   display: none !important;
 }
 
-/* Full-width sheet area. The sheet scrolls vertically, but it no longer clips horizontally. */
+
 #costTrackerForm.sheet-panel {
   width: 100% !important;
   max-width: 100% !important;
@@ -10613,7 +10269,7 @@ body.job-timesheet-modal-open .topbar {
   text-overflow: ellipsis !important;
 }
 
-/* Use fractional columns instead of percent + fixed gap, which caused the right side to overrun. */
+
 #costTrackerForm .sheet-grid-layout,
 #costTrackerTemplateModalOverlay #costTrackerForm .sheet-grid-layout {
   width: 100% !important;
@@ -10635,7 +10291,7 @@ body.job-timesheet-modal-open .topbar {
   overflow: hidden !important;
 }
 
-/* Cleaner spreadsheet sizing: readable, but not cartoonishly large. */
+
 #costTrackerForm .sheet-table,
 #costTrackerTemplateModalOverlay #costTrackerForm .sheet-table {
   width: 100% !important;
@@ -10709,7 +10365,7 @@ body.job-timesheet-modal-open .topbar {
   box-shadow: none !important;
 }
 
-/* Balanced column proportions to keep all 11-column left tables and 5-column right tables inside the sheet. */
+
 #costTrackerForm .desc-col { width: 20% !important; }
 #costTrackerForm .qty-col { width: 5% !important; }
 #costTrackerForm .hours-col { width: 6.2% !important; }
@@ -10779,7 +10435,7 @@ body.job-timesheet-modal-open .topbar {
   border-top: 1px solid #cbd5e1 !important;
 }
 
-/* Cost tracker preview/view window gets the same full-window fit treatment. */
+
 #costTrackerPreviewDialog.invoice-preview-dialog {
   width: 100vw !important;
   max-width: 100vw !important;
@@ -10906,17 +10562,13 @@ body.job-timesheet-modal-open .topbar {
   }
 }
 
-/* Open/Closed Jobs action cleanup */
+
 .closed-jobs-no-actions-final th:last-child,
 .closed-jobs-no-actions-final td:last-child {
   border-right: 0;
 }
 
 
-
-/* ========================================================================
-   FINAL SUBMITTED INVOICE STATUS + OPEN JOB STATUS SECTIONS
-   ======================================================================== */
 .status.submitted,
 .status.approved,
 select.status.submitted,
@@ -10987,7 +10639,6 @@ select.status.approved,
 }
 
 
-/* Final approved-to-submitted invoice status display safety */
 .status.submitted,
 .status.approved,
 select.status.submitted,
@@ -11005,12 +10656,7 @@ select.status.approved,
   border-color: #f59e0b !important;
 }
 
-/* ========================================================================
-   FINAL INVOICE MODAL WIDTH + PROJECT DATES COLUMN PATCH
-   ------------------------------------------------------------------------
-   Keeps the invoice editor design/function intact, but removes nested invoice
-   scrollbars in the create/edit popup and fits the invoice page to the window.
-   ======================================================================== */
+
 #invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode,
 #invoiceTemplateModalOverlay.invoice-modal-overlay,
 #invoiceTemplateModalOverlay.template-modal-overlay {
@@ -11119,12 +10765,6 @@ select.status.approved,
 }
 
 
-/* ========================================================================
-   FINAL CREATE-INVOICE WINDOW OVERLAP / TERMS PATCH
-   ------------------------------------------------------------------------
-   Keeps the invoice sheet above the sticky action bar and ensures the Clear
-   Invoice / Save Invoice buttons remain clickable and visible in the popup.
-   ======================================================================== */
 #invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-modal-card,
 #invoiceTemplateModalOverlay.invoice-single-scroll-fit-mode .invoice-modal-card,
 #invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card {
@@ -11210,12 +10850,7 @@ select.status.approved,
   color: #94a3b8;
 }
 
-/* ========================================================================
-   ABSOLUTE FINAL INVOICE MODAL NO-OVERLAP PATCH
-   ------------------------------------------------------------------------
-   Prevents the invoice page from covering the bottom action buttons and keeps
-   the payment block separated from the totals block in create/edit windows.
-   ======================================================================== */
+
 #invoiceTemplateModalOverlay.invoice-no-overlap-final .invoice-modal-card,
 #invoiceTemplateModalOverlay.invoice-bottom-actions-reserved .invoice-modal-card,
 #invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card {
@@ -11285,6 +10920,84 @@ select.status.approved,
   z-index: 501 !important;
 }
 
+/* Prevent the legacy "inline invoice form" design from flashing on refresh.
+   The form is moved into the popup modal by JS at startup; until then it is a
+   direct child of .invoice-template-workspace and would paint with the old
+   full-page layout. Hide it in that pre-modal position only — once relocated
+   inside the modal it is nested deeper, so this rule no longer matches. */
+#invoicesView .invoice-template-workspace > #invoiceForm {
+  display: none !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* Stationary invoice action footer (View / Download / Clear / Save). */
+/* Mirrors the cost-tracker window: the invoice page scrolls inside    */
+/* .invoice-template-scroll while the action buttons stay pinned to    */
+/* the bottom of the window. Authored !important rules win over the    */
+/* normal inline styles set by the older "scroll everything" JS, and   */
+/* the extra overlay class bumps specificity above earlier rule sets.  */
+/* ------------------------------------------------------------------ */
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card .template-modal-body {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+  padding-bottom: 14px !important;
+  scroll-padding-bottom: 0 !important;
+}
+
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card #invoiceForm.invoice-template-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card .invoice-template-scroll {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: auto !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 14px !important;
+}
+
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card .invoice-template-scroll::after {
+  content: none !important;
+  display: none !important;
+  height: 0 !important;
+}
+
+#invoiceTemplateModalOverlay.template-modal-overlay .invoice-modal-card .invoice-save-strip {
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 500 !important;
+  flex: 0 0 auto !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin: 0 !important;
+  padding: 12px 16px !important;
+  border: 0 !important;
+  border-top: 1px solid #cbd5e1 !important;
+  border-radius: 0 !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.10) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
 #invoiceTemplateEditor .invoice-template-payee,
 .invoice-template-document.a4-invoice-page .invoice-template-payee,
 .invoice-template-document.one-page-invoice .invoice-template-payee,
@@ -11334,13 +11047,11 @@ select.status.approved,
 }
 
 
-
-/* Final: keep Open Jobs from flashing an older table while the final renderer runs. */
 #dashboardActiveJobsTable[data-pimp-stable-rendering="true"] {
   opacity: 0;
 }
 
-/* Final: remove number spinner arrows from timesheet hours inputs only. */
+
 #timesheetEmployeeRows input[data-ts-field="hours"]::-webkit-outer-spin-button,
 #timesheetEmployeeRows input[data-ts-field="hours"]::-webkit-inner-spin-button,
 .timesheet-employee-row input[data-ts-field="hours"]::-webkit-outer-spin-button,
@@ -11355,7 +11066,7 @@ select.status.approved,
   -moz-appearance: textfield;
 }
 
-/* Final: allow the longer T&M/AFE/WO/PO label to fit in job and cost tracker headers. */
+
 .tm-afe-field,
 .sheet-job-picker,
 .sheet-meta-cell {
@@ -11371,7 +11082,6 @@ select.status.approved,
 }
 
 
-/* Final: edit cost tracker header date/label fit fixes. */
 #costTrackerForm .sheet-meta-grid {
   grid-template-columns:
     minmax(0, 1.28fr)
@@ -11416,13 +11126,6 @@ select.status.approved,
 }
 
 
-/* ========================================================================
-   FINAL COST TRACKER HEADER LEFT-SHIFT + VIEW/EDIT MATCH
-   ------------------------------------------------------------------------
-   Project Dates and T&M/AFE/WO/PO are kept near the left side of the header
-   and given enough room to be readable. The view/preview header uses the
-   same layout as the edit cost tracker header.
-   ======================================================================== */
 #costTrackerForm .sheet-meta-grid,
 #costTrackerPreviewContent .cost-sheet-preview .sheet-meta-grid,
 #costTrackerPreviewContent .original-cost-template-preview .sheet-meta-grid {
@@ -11506,9 +11209,7 @@ select.status.approved,
   }
 }
 
-/* ========================================================================
-   FINAL COST TRACKER VIEW = EDIT WINDOW MATCH PATCH
-   ======================================================================== */
+
 #costTrackerPreviewContent .exact-edit-cost-tracker-view {
   width: 100% !important;
   min-width: 0 !important;
@@ -11615,14 +11316,6 @@ select.status.approved,
 }
 
 
-/* ========================================================================
-   FINAL CREATE/EDIT INVOICE = VIEW INVOICE LAYOUT
-   ------------------------------------------------------------------------
-   The live create/edit invoice uses form fields, while the View invoice uses
-   a rendered static invoice. Older editor-only inch-based overrides moved the
-   payment block into the totals block. These final rules force the editor,
-   preview, and PDF/export invoice to share the same A4 portrait coordinates.
-   ======================================================================== */
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor,
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor.one-page-invoice,
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor.a4-invoice-page,
@@ -11841,7 +11534,7 @@ select.status.approved,
   background: #fff !important;
 }
 
-/* Keep a visible gutter between bank details and totals in the editor. */
+
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-payee,
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire-title,
 #invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-wire {
@@ -11852,74 +11545,57 @@ select.status.approved,
   right: auto !important;
 }
 
-/* ========================================================================
-   OPEN JOBS TABLE - FULL-WIDTH FIT (no horizontal scroll)
-   Overrides all earlier min-width patches. Table fills the available main
-   area at any viewport size; columns are proportional percentages that
-   sum to 100 so no column text is cut off.
-   ======================================================================== */
+
 .dashboard-active-jobs-table {
   width: 100% !important;
   min-width: 0 !important;
   table-layout: fixed !important;
 }
 
-/* Col 1 – Job #           (short badge)           */
+
 .dashboard-active-jobs-table th:nth-child(1),
 .dashboard-active-jobs-table td:nth-child(1) {
   width: 8% !important;
 }
 
-/* Col 2 – Project Name    (longest text + chips)  */
+
 .dashboard-active-jobs-table th:nth-child(2),
 .dashboard-active-jobs-table td:nth-child(2) {
   width: 22% !important;
 }
 
-/* Col 3 – Company                                  */
+
 .dashboard-active-jobs-table th:nth-child(3),
 .dashboard-active-jobs-table td:nth-child(3) {
   width: 13% !important;
 }
 
-/* Col 4 – Location                                 */
+
 .dashboard-active-jobs-table th:nth-child(4),
 .dashboard-active-jobs-table td:nth-child(4) {
   width: 12% !important;
-}
+}/* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(5), .dashboard-act) *//* optimized: removed duplicate of a later identical rule (.dashboard-active-jobs-table th:nth-child(6), .dashboard-act) */
 
-/* Col 5 – Invoice Status  (pill dropdown)          */
-.dashboard-active-jobs-table th:nth-child(5),
-.dashboard-active-jobs-table td:nth-child(5) {
-  width: 13% !important;
-}
 
-/* Col 6 – Dates           (two dates stacked)      */
-.dashboard-active-jobs-table th:nth-child(6),
-.dashboard-active-jobs-table td:nth-child(6) {
-  width: 11% !important;
-}
-
-/* Col 7 – Rate Total      (dollar amount)          */
 .dashboard-active-jobs-table th:nth-child(7),
 .dashboard-active-jobs-table td:nth-child(7) {
   width: 9% !important;
 }
 
-/* Col 8 – Actions                                  */
+
 .dashboard-active-jobs-table th:nth-child(8),
 .dashboard-active-jobs-table td:nth-child(8) {
   width: 12% !important;
   display: table-cell !important;
 }
 
-/* Col 9 – hidden (not used in current layout)      */
+
 .dashboard-active-jobs-table th:nth-child(9),
 .dashboard-active-jobs-table td:nth-child(9) {
   display: none !important;
 }
 
-/* Allow cell text to wrap rather than overflow     */
+
 .dashboard-active-jobs-table td,
 .dashboard-active-jobs-table th {
   overflow-wrap: break-word !important;
@@ -11927,19 +11603,19 @@ select.status.approved,
   white-space: normal !important;
 }
 
-/* Rate total and action buttons stay on one line   */
+
 .dashboard-active-jobs-table .dashboard-rate-total-cell strong,
 .dashboard-active-jobs-table .dashboard-no-invoice,
 .dashboard-active-jobs-table .job-table-action {
   white-space: nowrap !important;
 }
 
-/* The wrapper must not add extra min-width         */
+
 .dashboard-main-table-wrap {
   min-width: 0 !important;
 }
 
-/* Combined Rate Total of all closed jobs, shown in the header */
+
 .closed-jobs-rate-total-sum {
   display: inline-block;
   margin-left: 0.5rem;
@@ -11951,19 +11627,7 @@ select.status.approved,
   white-space: nowrap;
 }
 
-/* ========================================================================
-   GLOBAL RESPONSIVE HARDENING
-   ------------------------------------------------------------------------
-   When the window is resized down from full screen, panels, tables, form
-   grids and toolbars shrink / stack / scroll-in-place instead of
-   overlapping or spilling past the viewport.
-   Scoped to the on-screen app only — intentionally does NOT touch the
-   PDF/print/preview/export renderers (.pdf-workbench, .invoice-pdf-*,
-   .invoice-preview-content, @media print) or the JS-scaled paper editors,
-   so the fixed invoice/timesheet layouts and PDF parity are unchanged.
-   ======================================================================== */
 
-/* 1) The shell + main column can never be wider than the viewport. */
 html,
 body {
   max-width: 100%;
@@ -11980,9 +11644,7 @@ body {
   overflow-x: hidden;
 }
 
-/* 2) Allow grid/flex containers and their children to actually shrink.
-      A missing min-width:0 is the usual cause of children forcing the
-      parent wider than the screen (which reads as "overlap"). */
+
 .main .panel,
 .split,
 .jobs-page-layout,
@@ -12001,19 +11663,19 @@ body {
   min-width: 0;
 }
 
-/* 3) Panels stay within their column. */
+
 .main .panel {
   max-width: 100%;
 }
 
-/* 4) Tables scroll inside their own panel rather than stretching the page. */
+
 .table-wrap {
   max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-/* 6) Action rows and toolbars wrap instead of pushing off-screen. */
+
 .topbar-actions,
 .global-actions,
 .invoice-toolbar-actions,
@@ -12024,7 +11686,7 @@ body {
   flex-wrap: wrap;
 }
 
-/* 7) Two-column form/builder layouts collapse before cells get crushed. */
+
 @media (max-width: 1024px) {
   .split,
   .timesheet-job-control-card {
@@ -12042,8 +11704,7 @@ body {
   }
 }
 
-/* 8) The create-job pop-up card never exceeds the viewport on small screens
-      (caps only when it would overflow; no change on wide screens). */
+
 .job-modal-card {
   max-width: calc(100vw - 24px);
 }
@@ -12052,25 +11713,18 @@ body {
   padding: 12px;
 }
 
-/* ========================================================================
-   COST TRACKER HEADER = FULL-WIDTH, NO NAME→DATES GAP
-   ------------------------------------------------------------------------
-   The COST TRACKER NAME cell used to span 3 grid columns, so a short name
-   left a large empty gap before PROJECT DATES. Lay the seven meta cells out
-   across the full width in a single row instead, and let the name cell take
-   only one column so PROJECT DATES sits right beside it.
-   ======================================================================== */
+
 #costTrackerForm .sheet-meta-grid,
 #costTrackerPreviewContent .cost-sheet-preview .sheet-meta-grid,
 #costTrackerPreviewContent .original-cost-template-preview .sheet-meta-grid {
   grid-template-columns:
-    minmax(90px, 0.7fr)    /* JOB # */
-    minmax(120px, 1.15fr)  /* PROJECT DATES */
-    minmax(90px, 0.85fr)   /* T&M/AFE/WO/PO */
-    minmax(110px, 1fr)     /* CLIENT Requestor */
-    minmax(150px, 1.5fr)   /* PROJECT NAME */
-    minmax(70px, 0.5fr)    /* Total Days */
-    minmax(110px, 1fr)     /* Location */
+    minmax(90px, 0.7fr)
+    minmax(120px, 1.15fr)
+    minmax(90px, 0.85fr)
+    minmax(110px, 1fr)
+    minmax(150px, 1.5fr)
+    minmax(70px, 0.5fr)
+    minmax(110px, 1fr)
     !important;
   width: 100% !important;
   max-width: 100% !important;
@@ -12096,68 +11750,49 @@ body {
   }
 }
 
-/* The cost tracker name is kept in the DOM (for save/name logic) but must
-   never render in the header — an earlier rule sets it display:block, which
-   overrides the [hidden] attribute, so force it hidden here. */
+
 #sheetTrackerNameDisplay[hidden] {
   display: none !important;
 }
 
-/* ========================================================================
-   OPEN JOBS TABLE = SAME SIZE / FORMAT AS CLOSED JOBS TABLE
-   ------------------------------------------------------------------------
-   Both tables already share the .jobs-table / .data-table look (header,
-   striping, badges). The Open Jobs table only looked different because of
-   its own fixed-percentage, full-width layout. Neutralize those open-only
-   overrides so it uses the same auto layout and column sizing as the Closed
-   Jobs table, while keeping every Open Jobs column (including Actions) and
-   all of its inline controls.
-   ======================================================================== */
+
 .dashboard-main-table-wrap {
-  overflow-x: hidden !important;   /* no left/right scrolling */
+  overflow-x: hidden !important;
   min-width: 0 !important;
   max-width: 100% !important;
 }
 
 .dashboard-active-jobs-table {
   width: 100% !important;
-  min-width: 0 !important;        /* nothing forces the table wider than panel */
+  min-width: 0 !important;
   max-width: 100% !important;
-  table-layout: fixed !important; /* % widths below => all 8 columns always fit, no cutoff */
-  font-size: 0.76rem !important;  /* readable; a touch smaller leaves room so rows rarely wrap */
+  table-layout: fixed !important;
+  font-size: 0.76rem !important;
   color: #1f2937 !important;
 }
 
-/* Explicitly neutralize the base `.data-table.jobs-table { min-width: 1240px }`
-   for the Open Jobs table — that 1240px floor was what pushed the table past
-   the panel and caused the left/right scroll. Higher specificity than the base
-   rule so the table can never be forced wider than its container. */
+
 .dashboard-main-jobs-panel .data-table.dashboard-active-jobs-table {
   min-width: 0 !important;
   width: 100% !important;
   max-width: 100% !important;
 }
 
-/* Six-column condensed layout. Percentage widths sum to 100% and table-layout
-   is fixed, so every column ALWAYS fits on one screen (no cutoff, no h-scroll).
-   Related fields are grouped into one cell each (see renderJobRow). */
-.dashboard-active-jobs-table th:nth-child(1),
-.dashboard-active-jobs-table td:nth-child(1) { width: 26% !important; }  /* Job (#, name, docs) */
-.dashboard-active-jobs-table th:nth-child(2),
-.dashboard-active-jobs-table td:nth-child(2) { width: 19% !important; }  /* Client (company + location) */
-.dashboard-active-jobs-table th:nth-child(3),
-.dashboard-active-jobs-table td:nth-child(3) { width: 15% !important; }  /* Schedule (dates + days) */
-.dashboard-active-jobs-table th:nth-child(4),
-.dashboard-active-jobs-table td:nth-child(4) { width: 16% !important; }  /* Invoice Status */
-.dashboard-active-jobs-table th:nth-child(5),
-.dashboard-active-jobs-table td:nth-child(5) { width: 13% !important; }  /* Rate Total */
-.dashboard-active-jobs-table th:nth-child(6),
-.dashboard-active-jobs-table td:nth-child(6) { width: 11% !important; }  /* Actions */
 
-/* Override the base `.data-table.jobs-table th:last-child { width: 380px }`
-   (specificity 0,3,1) that was pinning the Actions column to 380px and
-   starving Rate Total. Matching specificity + later source order wins, and
-   min-width:0 cancels its 360px floor. */
+.dashboard-active-jobs-table th:nth-child(1),
+.dashboard-active-jobs-table td:nth-child(1) { width: 26% !important; }
+.dashboard-active-jobs-table th:nth-child(2),
+.dashboard-active-jobs-table td:nth-child(2) { width: 19% !important; }
+.dashboard-active-jobs-table th:nth-child(3),
+.dashboard-active-jobs-table td:nth-child(3) { width: 15% !important; }
+.dashboard-active-jobs-table th:nth-child(4),
+.dashboard-active-jobs-table td:nth-child(4) { width: 16% !important; }
+.dashboard-active-jobs-table th:nth-child(5),
+.dashboard-active-jobs-table td:nth-child(5) { width: 13% !important; }
+.dashboard-active-jobs-table th:nth-child(6),
+.dashboard-active-jobs-table td:nth-child(6) { width: 11% !important; }
+
+
 .dashboard-active-jobs-table.jobs-table th:last-child,
 .dashboard-active-jobs-table.jobs-table td:last-child,
 .dashboard-active-jobs-table.jobs-table th:nth-child(6),
@@ -12166,24 +11801,21 @@ body {
   min-width: 0 !important;
 }
 
-/* Columns size to their content. Default: keep cells on one line so each column
-   is exactly as wide as it needs to be; the two free-text columns above opt back
-   into wrapping. Generous, even padding + a hairline divider give it a clean,
-   professional data-table rhythm. */
+
 .dashboard-active-jobs-table th,
 .dashboard-active-jobs-table td {
   min-width: 0;
   box-sizing: border-box !important;
-  white-space: normal !important;         /* wrap to a 2nd line instead of cutting off */
-  overflow-wrap: break-word !important;   /* even a long unbroken value stays in-column */
+  white-space: normal !important;
+  overflow-wrap: break-word !important;
   word-break: normal !important;
-  overflow: hidden !important;            /* content can never spill past its column */
+  overflow: hidden !important;
   vertical-align: middle !important;
-  padding: 9px 10px !important;           /* compact rows */
+  padding: 9px 10px !important;
   border-bottom: 1px solid #eef2f6 !important;
 }
 
-/* Money column reads right-aligned with tabular figures, like a real ledger. */
+
 .dashboard-active-jobs-table th:nth-child(7),
 .dashboard-active-jobs-table td:nth-child(7),
 .dashboard-active-jobs-table .dashboard-rate-total-cell {
@@ -12192,10 +11824,9 @@ body {
   font-variant-numeric: tabular-nums !important;
 }
 
-/* Keep the three document indicators on a single line; the Project Name
-   column above is widened (min-width) so they always fit without wrapping. */
+
 .dashboard-active-jobs-table .dashboard-job-chips {
-  flex-wrap: wrap !important;       /* chips drop to the next line instead of clipping */
+  flex-wrap: wrap !important;
   justify-content: flex-start !important;
   width: 100% !important;
   gap: 5px !important;
@@ -12204,7 +11835,7 @@ body {
 
 .dashboard-active-jobs-table .dashboard-job-chips .job-doc-chip,
 .dashboard-active-jobs-table .dashboard-job-chips .dashboard-doc-indicator {
-  flex: 0 0 auto !important;       /* don't shrink -> text stays intact */
+  flex: 0 0 auto !important;
   white-space: nowrap !important;
   overflow: visible !important;
   text-overflow: clip !important;
@@ -12215,7 +11846,7 @@ body {
   gap: 6px !important;
 }
 
-/* Project name sits a touch stronger than the chips below it. */
+
 .dashboard-active-jobs-table .job-name-stack > strong {
   font-size: 0.82rem !important;
   font-weight: 800 !important;
@@ -12240,7 +11871,7 @@ body {
   color: #0f172a !important;
 }
 
-/* Clean, quiet, uppercase column headers. */
+
 .dashboard-active-jobs-table thead th {
   font-size: 0.68rem !important;
   font-weight: 700 !important;
@@ -12252,7 +11883,7 @@ body {
   border-bottom: 1px solid #e2e8f0 !important;
 }
 
-/* Inline controls sized to match the readable body text (Open Jobs only). */
+
 .dashboard-active-jobs-table .dashboard-inline-status-select {
   font-size: 0.72rem !important;
   font-weight: 700 !important;
@@ -12273,16 +11904,7 @@ body {
   font-weight: 800 !important;
 }
 
-/* ==========================================================================
-   OPEN JOBS TABLE — READABLE DESIGN PASS (CSS only)
-   --------------------------------------------------------------------------
-   Clean, scannable layout that keeps all 8 columns on one screen in
-   fullscreen (content-based widths above). Readability comes from clear
-   section bands, row hover, dividers and typographic hierarchy — not from
-   making the rows bigger.
-   ========================================================================== */
 
-/* Header: quiet but well separated from the first row. */
 .dashboard-active-jobs-table thead th {
   background: #f8fafc !important;
   border-bottom: 2px solid #e2e8f0 !important;
@@ -12290,9 +11912,7 @@ body {
   padding-bottom: 11px !important;
 }
 
-/* Section bands ("No Invoice / Unsent", "Awaiting Approval / Submitted"):
-   a soft brand-tinted divider with a left accent so the two groups read at a
-   glance. */
+
 .dashboard-active-jobs-table .open-jobs-section-row > td {
   background: #eef2ff !important;
   border-top: 1px solid #dbe3f6 !important;
@@ -12301,7 +11921,7 @@ body {
   vertical-align: middle !important;
 }
 .dashboard-active-jobs-table .open-jobs-section-row > td:first-child {
-  box-shadow: inset 3px 0 0 0 #1d4ed8 !important;   /* brand accent stripe */
+  box-shadow: inset 3px 0 0 0 #1d4ed8 !important;
 }
 .dashboard-active-jobs-table .open-jobs-section-title span {
   font-size: 0.74rem !important;
@@ -12322,8 +11942,7 @@ body {
   white-space: nowrap !important;
 }
 
-/* Data rows: clear divider + gentle hover highlight (no zebra, so the section
-   bands stay the dominant grouping cue). */
+
 .dashboard-active-jobs-table .dashboard-active-job-row > td {
   border-bottom: 1px solid #eef2f6 !important;
   vertical-align: middle !important;
@@ -12332,7 +11951,7 @@ body {
   background: #f8fafc !important;
 }
 
-/* Typographic hierarchy: primary fields dark, secondary fields lighter. */
+
 .dashboard-active-jobs-table .job-number-plain-final {
   font-weight: 800 !important;
   color: #0f172a !important;
@@ -12349,7 +11968,7 @@ body {
   font-weight: 500 !important;
 }
 
-/* Dates: the range in strong ink, the workday count as a quiet pill beneath. */
+
 .dashboard-active-jobs-table .job-dates-cell .job-date-range {
   display: block !important;
   font-weight: 700 !important;
@@ -12368,7 +11987,7 @@ body {
   white-space: nowrap !important;
 }
 
-/* Rate total: ledger style — right aligned, bold, tabular figures. */
+
 .dashboard-active-jobs-table .dashboard-rate-total-cell {
   text-align: right !important;
 }
@@ -12379,29 +11998,19 @@ body {
   white-space: nowrap !important;
 }
 
-/* Document chips under the project name: compact and legible. */
+
 .dashboard-active-jobs-table .dashboard-job-chips {
   margin-top: 4px !important;
   gap: 6px !important;
 }
 
-/* Actions: Edit/Delete stack to a second line if the column is narrow rather
-   than getting clipped. */
+
 .dashboard-active-jobs-table .dashboard-actions-cell .dashboard-actions-inline {
   flex-wrap: wrap !important;
   gap: 6px !important;
 }
 
-/* ==========================================================================
-   OPEN JOBS — NEW CONDENSED 6-COLUMN FORMAT
-   --------------------------------------------------------------------------
-   Same content as before, regrouped into six rich columns so the whole table
-   reads cleanly and fits a full-screen browser window:
-     Job (#, name, docs) | Client (company + location) | Schedule (dates + days)
-     | Invoice Status | Rate Total | Actions
-   ========================================================================== */
 
-/* Stacked cells read best top-aligned; single-value cells stay centered. */
 .dashboard-active-jobs-table .oj-row > td {
   vertical-align: top !important;
   padding: 12px 14px !important;
@@ -12412,7 +12021,7 @@ body {
   vertical-align: middle !important;
 }
 
-/* --- JOB: number badge + project name + document chips -------------------- */
+
 .dashboard-active-jobs-table .oj-job {
   display: flex !important;
   align-items: flex-start !important;
@@ -12444,7 +12053,7 @@ body {
   line-height: 1.25 !important;
 }
 
-/* --- CLIENT: company over location ---------------------------------------- */
+
 .dashboard-active-jobs-table .oj-company {
   display: block !important;
   font-size: 0.8rem !important;
@@ -12460,7 +12069,7 @@ body {
   color: #64748b !important;
 }
 
-/* --- SCHEDULE: date range + workday pill ---------------------------------- */
+
 .dashboard-active-jobs-table .oj-schedule-cell .job-date-range {
   display: block !important;
   font-size: 0.76rem !important;
@@ -12480,7 +12089,7 @@ body {
   white-space: nowrap !important;
 }
 
-/* --- RATE TOTAL: prominent, right-aligned ledger figure ------------------- */
+
 .dashboard-active-jobs-table th:nth-child(5) { text-align: right !important; }
 .dashboard-active-jobs-table .oj-rate-cell strong {
   font-size: 0.92rem !important;
@@ -12489,13 +12098,13 @@ body {
   white-space: nowrap !important;
 }
 
-/* --- ACTIONS --------------------------------------------------------------- */
+
 .dashboard-active-jobs-table .oj-actions-cell .dashboard-actions-inline {
   flex-wrap: wrap !important;
   gap: 6px !important;
 }
 
-/* --- SECTION BAND: title + count inline, total aligned under Rate ---------- */
+
 .dashboard-active-jobs-table .open-jobs-section-row > td {
   vertical-align: middle !important;
 }
@@ -12527,7 +12136,7 @@ body {
   color: #1e3a8a !important;
   white-space: nowrap !important;
 }
-/* Job count sits in its own cell to the right of the section total. */
+
 .dashboard-active-jobs-table .open-jobs-section-count-cell {
   vertical-align: middle !important;
   text-align: left !important;
@@ -12535,179 +12144,652 @@ body {
   padding-left: 10px !important;
 }
 
-/* ========================================================================
-   CLOSED JOBS — SLIM INVOICE STATUS, WIDER RATE TOTAL
-   ------------------------------------------------------------------------
-   The Closed Jobs table reuses the Open Jobs (.dashboard-active-jobs-table)
-   styling but has no Actions column, so Rate Total is the last column. That
-   made the open-table's `th:last-child { width: 11% }` rule clamp Rate Total
-   too narrow, clipping the combined Rate Total shown in its header. Here we
-   make Invoice Status a little thinner and give Rate Total more room so the
-   combined total is fully visible and never runs off the screen edge.
-   Selector carries both table classes (+ element) so it outranks the
-   open-table width rules without affecting the Open Jobs table.
-   ======================================================================== */
+
 table.closed-jobs-table.dashboard-active-jobs-table th:nth-child(4),
 table.closed-jobs-table.dashboard-active-jobs-table td:nth-child(4) {
-  width: 11% !important;   /* Invoice Status — slimmer */
+  width: 11% !important;
 }
 table.closed-jobs-table.dashboard-active-jobs-table th:nth-child(5),
 table.closed-jobs-table.dashboard-active-jobs-table td:nth-child(5),
 table.closed-jobs-table.dashboard-active-jobs-table th:last-child,
 table.closed-jobs-table.dashboard-active-jobs-table td:last-child {
-  width: 18% !important;   /* Rate Total — wide enough for the combined total */
+  width: 18% !important;
   min-width: 0 !important;
 }
-/* Give the right-aligned combined total a little breathing room from the edge. */
+
 table.closed-jobs-table.dashboard-active-jobs-table th:nth-child(5) {
   padding-right: 14px !important;
 }
-
 /* ========================================================================
-   CREATE INVOICE = VIEW INVOICE (same layout)
+   FINAL PROFESSIONAL POLISH + SAFE PERFORMANCE LAYER
    ------------------------------------------------------------------------
-   1) The bottom "Description and scope" textarea fills its whole section.
-   2) The create editor's line-item table has a per-row "×" delete column the
-      View doesn't, which stole width from the Description column (so create and
-      view didn't match). We collapse that column to zero width and overlay the
-      "×" (and the header "+ row" button) against the right edge of the line-items
-      box, so the four data columns line up exactly with the View. Scoped to the
-      on-screen editor only — the View preview and the PDF export are untouched.
+   These rules only refine presentation: spacing, focus states, modal sizing,
+   table readability, and interaction feedback. Existing IDs/classes remain.
    ======================================================================== */
+/* (Design tokens consolidated into the single :root at the top of this file.) */
 
-/* 1) Bottom description textarea fills its entire section box. */
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-description {
-  padding: 0 !important;
-  overflow: hidden !important;
-}
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-description textarea {
-  width: 100% !important;
-  height: 100% !important;
-  min-height: 100% !important;
-  box-sizing: border-box !important;
-  margin: 0 !important;
-  padding: 2mm !important;
-  border: 0 !important;
-  background: transparent !important;
-  resize: none !important;
-  display: block !important;
-  font-size: 9.5px !important;
-  line-height: 1.2 !important;
+body {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* 2) Line-item columns match the View exactly (Description gets the full width). */
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines .qty-col {
-  width: 22mm !important;
-}
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines .rate-col,
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines .amount-col {
-  width: 30mm !important;
-}
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines .desc-col {
-  width: auto !important;
-}
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines .remove-col {
-  width: 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  overflow: visible !important;
+.btn,
+.nav-btn,
+.icon-btn,
+.link-btn,
+input,
+select,
+textarea {
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
 }
 
-/* Overlay the per-row "×" against the right edge of its row. Anchor it to the row
-   (position:relative) so it stays vertically centered beside that row. The Amount
-   input reserves right padding so the "×" never hides the number. */
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-line {
-  position: relative !important;
-}
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-line .remove-line {
-  position: absolute !important;
-  right: 0.5mm !important;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-  width: 4.6mm !important;
-  height: 4.6mm !important;
-  min-height: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  font-size: 11px !important;
-  line-height: 1 !important;
-  display: grid !important;
-  place-items: center !important;
-  z-index: 40 !important;
-}
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-line td:nth-child(4) input {
-  padding-right: 6mm !important;
+.btn:hover,
+.nav-btn:hover,
+.icon-btn:hover {
+  transform: translateY(-1px);
 }
 
-/* Float the header "+ row" button to the top-right corner of the line-items box. */
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines #addInvoiceLineBtn,
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines .sheet-add-btn {
-  position: absolute !important;
-  right: 0.5mm !important;
-  top: 0.5mm !important;
-  margin: 0 !important;
-  padding: 0 4px !important;
-  font-size: 9px !important;
-  line-height: 1.5 !important;
-  z-index: 40 !important;
+.btn:active,
+.nav-btn:active,
+.icon-btn:active {
+  transform: translateY(0);
 }
 
-/* ========================================================================
-   VIEW INVOICE — LINE-ITEMS TABLE NEVER CLIPS AT THE BOTTOM
-   ------------------------------------------------------------------------
-   The create editor uses fixed-height <textarea> line rows, but the View
-   preview renders each description as a .static-multiline <div> that grows
-   when the text wraps. Several wrapped rows pushed the table past its 78mm
-   box, and overflow:hidden then clipped the bottom row/border. We pin each
-   preview line row to one fixed-height line (the full scope text still shows
-   in the Description block below), so the table always fits and the bottom is
-   never cut off — matching the editor and the one-page PDF.
-   ======================================================================== */
-.invoice-preview-content .invoice-template-document .invoice-template-lines tbody tr,
-.invoice-preview-content .invoice-template-document .invoice-empty-row td {
-  height: 8.875mm !important;
-  max-height: 8.875mm !important;
-}
-.invoice-preview-content .invoice-template-document .invoice-template-lines tbody td {
-  overflow: hidden !important;
-  vertical-align: middle !important;
-}
-.invoice-preview-content .invoice-template-document .invoice-template-lines tbody .static-multiline {
-  max-height: 8mm !important;
-  overflow: hidden !important;
+.btn:disabled,
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
 }
 
-/* ========================================================================
-   CREATE/EDIT INVOICE — MULTI-LINE, AUTO-FITTING DESCRIPTION CELLS
-   ------------------------------------------------------------------------
-   The per-line Description box was locked to a single clipped line. Now it
-   wraps and grows to show all of its text on multiple lines, the row grows
-   with it, and the line-items box scrolls inside its fixed A4 footprint so the
-   rest of the invoice layout stays put. (field-sizing auto-grows the textarea
-   where supported; a small JS fallback handles older engines.)
-   ======================================================================== */
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines {
-  overflow-y: auto !important;
+.btn:focus-visible,
+.nav-btn:focus-visible,
+.icon-btn:focus-visible,
+.link-btn:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.22);
+  outline-offset: 2px;
 }
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines table {
-  height: auto !important;
-  min-height: 100% !important;
+
+.panel,
+.stat-card,
+.auth-card,
+.job-modal-card,
+.invoice-preview-card {
+  box-shadow: var(--shadow-soft);
 }
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines tbody tr {
-  height: auto !important;
-  max-height: none !important;
+
+.panel-header,
+.table-panel-header,
+.topbar {
+  align-items: center;
 }
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-lines tbody td {
-  overflow: visible !important;
-  vertical-align: top !important;
-  height: auto !important;
+
+.table-wrap {
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
-#invoiceTemplateEditor.invoice-template-document.invoice-template-editor .invoice-template-line .line-description {
-  min-height: 8.875mm !important;
-  max-height: none !important;
-  overflow: hidden !important;
-  white-space: pre-wrap !important;
-  line-height: 1.25 !important;
-  resize: none !important;
-  field-sizing: content !important;
+
+.data-table,
+table.data-table {
+  background: #ffffff;
+}
+
+.data-table thead th,
+table.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, #f8fafc, #eef2f7);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+
+.data-table tbody tr,
+table.data-table tbody tr {
+  transition: background-color 0.12s ease;
+}
+
+.data-table tbody tr:hover td,
+table.data-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.table-search,
+.search,
+input[type="search"] {
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.pill,
+.status {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.toast {
+  z-index: 9999;
+  box-shadow: var(--shadow-strong);
+}
+
+.job-modal-overlay,
+.invoice-preview-dialog::backdrop,
+.settings-dialog::backdrop {
+  backdrop-filter: blur(4px);
+}
+
+.job-modal-card,
+.invoice-preview-card,
+.settings-card {
+  border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.job-modal-card,
+.invoice-preview-card {
+  max-height: min(92vh, 1100px);
+  overflow: auto;
+}
+
+.invoice-preview-content,
+.sheet-scroll,
+.timesheet-sheet-scroll {
+  scrollbar-gutter: stable;
+}
+
+.sheet-panel,
+.jobs-table-panel,
+.dashboard-main-jobs-panel {
+  contain: layout style;
+}
+
+.form-actions,
+.settings-actions,
+.topbar-actions,
+.table-toolbar-inline,
+.job-document-action-row {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 820px) {
+  .topbar-actions .btn,
+  .global-actions .btn,
+  .form-actions .btn,
+  .settings-actions .btn {
+    width: 100%;
+  }
+
+  .panel-header,
+  .table-panel-header,
+  .dashboard-main-jobs-header {
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* Finances page                                                    */
+/* ---------------------------------------------------------------- */
+/* ==========================================================================
+   FINANCES PAGE — light-theme redesign with inline-SVG charts.
+   Previous rules here used dark-theme colors (pale text like #93c5fd /
+   #fde68a on translucent fills) that were unreadable on this app's white
+   panels, and the active toggle put white text on a 20% blue tint. All
+   colors below derive from the design tokens and meet WCAG AA on light
+   backgrounds. Category colors (chart segments, dots, badges) share one
+   palette.
+   ========================================================================== */
+.finances-summary-panel {
+  margin-bottom: 18px;
+  padding: 22px;
+}
+
+.finances-summary-header {
+  align-items: flex-start;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.finances-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.finance-range-select {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--panel-solid);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+}
+
+.finance-range-select:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* type="month" picker for jumping to a specific month */
+.finance-month-input {
+  min-width: 150px;
+  cursor: pointer;
+}
+
+.finance-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+}
+
+.finance-toggle .btn {
+  padding: 7px 14px;
+  border-radius: 10px;
+  color: var(--muted);
+}
+
+.finance-toggle .btn.active {
+  background: var(--brand);
+  color: #ffffff;
+  border-color: var(--brand);
+}
+
+/* --- Executive summary cards --- */
+.finances-stats-grid {
+  margin-top: 14px;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.finances-stats-grid .stat-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 20px 16px;
+  border-top: 4px solid var(--line-strong);
+}
+
+.finances-stats-grid .stat-card span {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.74rem;
+}
+
+.finances-stats-grid .stat-card strong {
+  margin-top: 8px;
+  font-size: 2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-card small.tiny {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.finance-income-card { border-top-color: var(--brand); }
+.finance-income-card strong { color: var(--brand-dark); }
+
+.finance-expenses-card { border-top-color: var(--warning); }
+.finance-expenses-card strong { color: #b45309; }
+
+.finance-profit-card { border-top-color: var(--success); }
+.finance-profit-card strong { color: #15803d; }
+
+.finance-profit-card.is-loss {
+  border-top-color: var(--danger);
+  background: linear-gradient(180deg, var(--danger-bg), var(--panel-solid) 55%);
+}
+.finance-profit-card.is-loss strong { color: var(--danger); }
+
+/* --- Charts row (inline SVG, no chart library) --- */
+.finance-charts {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.finance-chart-card {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.finance-trend-chart {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 0;
+}
+
+.finance-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.finance-chart-head h4 {
+  margin: 0;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.finance-chart-head span {
+  color: var(--muted);
+}
+
+.finance-trend-chart svg,
+.finance-donut-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.ftc-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.ftc-ylabel,
+.ftc-xlabel {
+  font-size: 11px;
+  font-family: inherit;
+  fill: var(--muted);
+}
+
+.ftc-income { fill: var(--brand); }
+.ftc-expense { fill: var(--warning); }
+
+/* Invisible per-month hit area: click a month to inspect it. */
+.ftc-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.ftc-hit:hover {
+  fill: rgba(100, 116, 139, 0.08);
+}
+
+.ftc-hit:focus-visible {
+  outline: none;
+  stroke: var(--brand);
+  stroke-width: 2;
+}
+
+.finance-chart-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.finance-chart-legend i {
+  font-style: normal;
+}
+
+.finance-chart-hint {
+  margin-left: auto;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* Stacked donut-over-legend layout so the card's full height is used
+   (the card stretches to match the taller cash flow chart beside it). */
+.finance-donut-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  min-height: 0;
+}
+
+.finance-donut-chart {
+  flex: 0 1 auto;
+  width: min(230px, 100%);
+  margin: 0 auto;
+  min-width: 0;
+}
+
+.finance-donut-svg circle {
+  fill: none;
+  stroke-width: 26;
+}
+
+.fdc-material { stroke: var(--brand); }
+.fdc-payroll { stroke: #009e73; }
+.fdc-monthly { stroke: #d97706; }
+.fdc-other { stroke: var(--muted); }
+
+.fdc-total {
+  font-size: 24px;
+  font-weight: 800;
+  font-family: inherit;
+  fill: var(--ink);
+}
+
+.fdc-sub {
+  font-size: 10px;
+  font-family: inherit;
+  fill: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.finance-donut-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.finance-donut-legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.finance-donut-legend li:last-child {
+  border-bottom: none;
+}
+
+.finance-donut-legend li > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.finance-donut-legend strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-donut-legend em {
+  font-style: normal;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: right;
+}
+
+.finance-bar {
+  display: flex;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+
+.finance-bar-seg {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+}
+
+.finance-bar-seg + .finance-bar-seg {
+  border-left: 2px solid var(--panel-solid);
+}
+
+.finance-bar-empty {
+  color: var(--muted);
+  margin: 0;
+}
+
+/* One shared category palette for chart segments, legend dots, and badges.
+   Dark-on-light pairs chosen for WCAG AA contrast. Payroll uses the
+   Okabe-Ito bluish green (#009e73) instead of purple so it stays
+   distinguishable from the material blue under red-green color blindness. */
+.seg-income { background: var(--brand); }
+.seg-expense { background: var(--warning); }
+.seg-paid { background: var(--success); }
+.seg-outstanding { background: var(--warning); }
+.seg-material { background: var(--brand); }
+.seg-payroll { background: #009e73; }
+.seg-monthly { background: #d97706; }
+.seg-other { background: var(--muted); }
+
+.finance-legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-right: 8px;
+  vertical-align: baseline;
+}
+
+/* --- Breakdown lists --- */
+.finances-breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.finance-breakdown-group h4 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.finance-breakdown-bar {
+  margin-bottom: 8px;
+  min-height: 12px;
+}
+
+.finance-breakdown-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.finance-breakdown-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.finance-breakdown-list li:last-child {
+  border-bottom: none;
+}
+
+.finance-breakdown-list strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Category badges (expenses table) --- */
+.expense-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: var(--panel-soft);
+  color: #334155;
+  border: 1px solid var(--line);
+}
+
+.expense-badge.expense-material { background: var(--brand-soft); color: var(--brand-dark); border-color: #bfdbfe; }
+.expense-badge.expense-payroll { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.expense-badge.expense-monthly { background: var(--warning-bg); color: #92400e; border-color: #fde68a; }
+.expense-badge.expense-other { background: #f1f5f9; color: #334155; border-color: var(--line-strong); }
+
+.expenses-table .empty-cell {
+  text-align: center;
+  padding: 22px 12px;
+  color: var(--muted);
+}
+
+.expenses-table .table-actions .link-btn + .link-btn {
+  margin-left: 10px;
+}
+
+/* --- Responsive --- */
+@media (max-width: 900px) {
+  .finances-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .finance-charts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .finances-controls {
+    width: 100%;
+  }
+
+  .finance-donut-chart {
+    width: min(180px, 100%);
+  }
+
+  .finance-chart-hint {
+    display: none;
+  }
 }

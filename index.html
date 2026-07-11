@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
 
-  <link rel="stylesheet" href="styles.css?v=20260625-openjobs-count-right" />
+  <link rel="stylesheet" href="styles.css?v=20260703-pro-fast" />
 
   <!--
     Performance: Supabase is the only library needed for the app to start, so it
@@ -24,10 +24,10 @@
     render-blocking JavaScript. They are now loaded on demand and pre-warmed during
     idle time from app.js — see ensurePdfLibraries() / ensureSpreadsheetLibrary().
   -->
-  <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script defer crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <section id="authScreen" class="auth-screen">
     <div class="auth-card">
@@ -59,7 +59,7 @@
     <aside class="sidebar">
         <div class="sidebar-brand">
             <div class="brand-logo small">
-                <img src="NEW_logo.png" alt="Pro Insulation MP Logo" />
+                <img src="NEW_logo.png" alt="Pro Insulation MP Logo" width="55" height="55" decoding="async" fetchpriority="high" />
             </div>
 
             <div>
@@ -75,6 +75,7 @@
         <button class="nav-btn" data-view="invoices">Invoices</button>
         <button class="nav-btn" data-view="timesheets">Timesheets</button>
         <button class="nav-btn" data-view="employees">Employees</button>
+        <button class="nav-btn" data-view="finances">Finances</button>
       </nav>
 
       <div class="sidebar-actions sidebar-footer-note">
@@ -405,18 +406,6 @@
           <form id="invoiceForm" class="panel invoice-template-panel">
             <input type="hidden" name="record_id" />
             <input type="hidden" name="pdf_url" />
-            <div class="panel-header compact invoice-builder-header">
-              <div>
-                <h3>Invoice Template</h3>
-                <p class="tiny">This invoice is formatted like the spreadsheet Invoice_Template. Select a saved cost tracker to autofill the invoice from that tracker’s Rate Total, or leave it blank to create a standalone invoice. Review it, then save and download the PDF.</p>
-              </div>
-              <div class="invoice-toolbar-actions">
-                <button class="btn ghost" id="previewInvoiceBtn" type="button">View</button>
-                <button class="btn ghost" id="downloadInvoicePdfBtn" type="button">Download PDF</button>
-                <button class="btn ghost" id="clearInvoiceFormBtn" type="button">Clear Invoice</button>
-                <button class="btn primary" type="submit">Save Invoice</button>
-              </div>
-            </div>
 
             <div class="invoice-source-panel">
               <label>Source Cost Tracker <span class="field-hint">optional — auto-fills subtotal from Rate Total</span>
@@ -443,7 +432,7 @@
             </div>
             <div class="invoice-template-scroll">
               <article id="invoiceTemplateEditor" class="invoice-template-document invoice-template-editor one-page-invoice a4-invoice-page">
-                <div class="invoice-template-logo"><img src="NEW_logo.png" alt="PIMP" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span>PIMP</span></div>
+                <div class="invoice-template-logo"><img src="NEW_logo.png" alt="PIMP" width="96" height="96" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.display='block';" /><span>PIMP</span></div>
                 <div class="invoice-template-company">
                   <textarea name="company_block" rows="5">Pro Insulation MP
 P O Box 502
@@ -537,6 +526,8 @@ Account # __________</textarea>
             </div>
 
             <div class="form-actions sticky-actions builder-save-strip invoice-save-strip">
+              <button class="btn ghost" id="previewInvoiceBtn" type="button">View</button>
+              <button class="btn ghost" id="downloadInvoicePdfBtn" type="button">Download PDF</button>
               <button class="btn ghost" id="clearInvoiceFormBottomBtn" type="button">Clear Invoice</button>
               <button class="btn primary builder-save-btn" type="submit">Save Invoice</button>
             </div>
@@ -591,7 +582,7 @@ Account # __________</textarea>
 
             <section class="timesheet-job-control-card" aria-label="Timesheet job selector">
               <label class="timesheet-job-picker">Select Job to Autofill
-                <select name="job_id" class="job-select timesheet-job-select" required></select>
+                <select name="job_id" class="job-select timesheet-job-select"></select>
               </label>
               <div id="timesheetJobSummary" class="timesheet-job-summary">
                 <strong>No job selected</strong>
@@ -604,7 +595,7 @@ Account # __________</textarea>
                 <div class="timesheet-top-rule"></div>
                 <div class="timesheet-title">Insulation Daily Time Sheet:</div>
                 <div class="timesheet-logo-wrap">
-                  <img src="NEW_logo.png" alt="PIMP" />
+                  <img src="NEW_logo.png" alt="PIMP" width="110" height="64" decoding="async" />
                   <strong>PIMP</strong>
                 </div>
 
@@ -803,10 +794,147 @@ Account # __________</textarea>
           <table class="hidden"><tbody id="documentsTable"></tbody></table>
         </section>
       </section>
+
+      <section id="financesView" class="view">
+        <section class="panel finances-summary-panel">
+          <div class="panel-header finances-summary-header">
+            <div>
+              <h3>True Profit</h3>
+              <p class="tiny">Income from invoices minus company expenses. Toggle how income is counted.</p>
+            </div>
+            <div class="finances-controls">
+              <label class="finance-range-field">
+                <span class="sr-only">Date range</span>
+                <select id="financeRangeSelect" class="finance-range-select" aria-label="Date range">
+                  <option value="all">All time</option>
+                  <option value="quarter">This quarter</option>
+                  <option value="year">This year</option>
+                  <option value="custom">Specific month…</option>
+                </select>
+              </label>
+              <label class="finance-range-field hidden" id="financeMonthField">
+                <span class="sr-only">Pick a month</span>
+                <input type="month" id="financeMonthSelect" class="finance-range-select finance-month-input" aria-label="View a specific month" title="View income and expenses for a specific month" />
+              </label>
+              <div class="finance-toggle" role="group" aria-label="Income basis">
+                <button class="btn ghost active" type="button" data-finance-mode="billed" aria-pressed="true">All billed</button>
+                <button class="btn ghost" type="button" data-finance-mode="paid" aria-pressed="false">Paid only</button>
+              </div>
+              <button class="btn ghost" id="exportFinancesBtn" data-export="finances-excel" type="button">Download Excel</button>
+            </div>
+          </div>
+          <div class="stats-grid finances-stats-grid">
+            <article class="stat-card finance-income-card">
+              <span>Income</span>
+              <strong id="financeIncome">$0.00</strong>
+              <small id="financeIncomeCaption" class="tiny">All billed invoices</small>
+            </article>
+            <article class="stat-card finance-expenses-card">
+              <span>Expenses</span>
+              <strong id="financeExpenses">$0.00</strong>
+              <small id="financeExpensesCaption" class="tiny">All receipts &amp; costs</small>
+            </article>
+            <article class="stat-card finance-profit-card" id="financeProfitCard">
+              <span>True Profit</span>
+              <strong id="financeProfit">$0.00</strong>
+              <small id="financeProfitCaption" class="tiny">Income − Expenses</small>
+            </article>
+          </div>
+          <div class="finance-charts">
+            <section class="finance-chart-card">
+              <div class="finance-chart-head">
+                <h4 class="tiny">Cash Flow</h4>
+                <span id="financeTrendCaption" class="tiny">All time</span>
+              </div>
+              <div id="financeTrendChart" class="finance-trend-chart"></div>
+              <div class="finance-chart-legend">
+                <span><i class="finance-legend-dot seg-income" aria-hidden="true"></i>Income</span>
+                <span><i class="finance-legend-dot seg-expense" aria-hidden="true"></i>Expenses</span>
+                <span class="finance-chart-hint" id="financeTrendHint">Click a month to view its details</span>
+              </div>
+            </section>
+            <section class="finance-chart-card">
+              <div class="finance-chart-head">
+                <h4 class="tiny">Expense Composition</h4>
+                <span id="financeDonutCaption" class="tiny">All time</span>
+              </div>
+              <div class="finance-donut-wrap">
+                <div id="financeDonutChart" class="finance-donut-chart"></div>
+                <ul class="finance-donut-legend">
+                  <li><span><i class="finance-legend-dot seg-material" aria-hidden="true"></i>Material</span><strong id="financeExpMaterial">$0.00</strong><em id="financeExpMaterialPct">0%</em></li>
+                  <li><span><i class="finance-legend-dot seg-payroll" aria-hidden="true"></i>Payroll</span><strong id="financeExpPayroll">$0.00</strong><em id="financeExpPayrollPct">0%</em></li>
+                  <li><span><i class="finance-legend-dot seg-monthly" aria-hidden="true"></i>Monthly / Recurring</span><strong id="financeExpMonthly">$0.00</strong><em id="financeExpMonthlyPct">0%</em></li>
+                  <li><span><i class="finance-legend-dot seg-other" aria-hidden="true"></i>Other</span><strong id="financeExpOther">$0.00</strong><em id="financeExpOtherPct">0%</em></li>
+                </ul>
+              </div>
+            </section>
+          </div>
+          <div class="finances-breakdown">
+            <div class="finance-breakdown-group">
+              <h4 class="tiny">Income breakdown</h4>
+              <div id="financeIncomeBar" class="finance-breakdown-bar" aria-hidden="true"></div>
+              <ul class="finance-breakdown-list">
+                <li><span><span class="finance-legend-dot seg-paid" aria-hidden="true"></span>Paid (received)</span><strong id="financePaid">$0.00</strong></li>
+                <li><span><span class="finance-legend-dot seg-outstanding" aria-hidden="true"></span>Outstanding (open)</span><strong id="financeOutstanding">$0.00</strong></li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <div class="split">
+          <form id="expenseForm" class="panel form-panel">
+            <input type="hidden" name="record_id" />
+            <h3 id="expenseFormTitle">Add Expense</h3>
+            <div class="form-grid">
+              <label>Category
+                <select name="category" required>
+                  <option value="material">Material</option>
+                  <option value="payroll">Payroll</option>
+                  <option value="monthly">Monthly / Recurring</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label>Amount ($)<input name="amount" type="number" step="0.01" min="0" required /></label>
+              <label>Date<input name="expense_date" type="date" /></label>
+              <label>Vendor<input name="vendor" placeholder="Optional" /></label>
+              <label class="wide">Note<textarea name="note" rows="2" placeholder="Optional"></textarea></label>
+              <label class="wide">Receipt scan (PDF/Image)<input name="receipt" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic" />
+                <span id="expenseReceiptHint" class="tiny hidden">This expense already has a receipt. Choosing a new file replaces it; leave empty to keep the current one.</span>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="btn ghost hidden" id="cancelExpenseEditBtn" type="button">Cancel Edit</button>
+              <button class="btn primary" id="expenseSubmitBtn" type="submit">Add Expense</button>
+            </div>
+          </form>
+
+          <section class="panel table-panel">
+            <div class="panel-header table-panel-header">
+              <h3>Expenses</h3>
+              <div class="table-toolbar-inline">
+                <span id="expensesCount" class="pill">0</span>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table expenses-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Amount</th>
+                    <th>Vendor / Note</th>
+                    <th>Receipt</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="expensesTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </section>
     </main>
   </section>
-
-
 
 
   <dialog id="costTrackerPreviewDialog" class="invoice-preview-dialog">
@@ -816,7 +944,7 @@ Account # __________</textarea>
           <p class="eyebrow">Cost Tracker View</p>
           <h3>Review before downloading</h3>
         </div>
-        <button class="icon-btn" value="cancel" type="submit">×</button>
+        <button class="icon-btn" value="cancel" type="submit" aria-label="Close preview">×</button>
       </div>
       <div id="costTrackerPreviewContent" class="invoice-preview-content"></div>
       <div class="settings-actions">
@@ -833,7 +961,7 @@ Account # __________</textarea>
           <p class="eyebrow">Invoice View</p>
           <h3>Review before downloading</h3>
         </div>
-        <button class="icon-btn" value="cancel" type="submit">×</button>
+        <button class="icon-btn" value="cancel" type="submit" aria-label="Close preview">×</button>
       </div>
       <div id="invoicePreviewContent" class="invoice-preview-content"></div>
       <div class="settings-actions">
@@ -844,6 +972,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script defer src="app.js?v=20260625-openjobs-count-right"></script>
+  <script defer src="app.js?v=20260703-pro-fast"></script>
 </body>
 </html>

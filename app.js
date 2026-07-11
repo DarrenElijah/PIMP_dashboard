@@ -44,8 +44,12 @@ const state = {
     employees: [],
     assignments: [],
     timesheets: [],
-    documents: []
-  }
+    documents: [],
+    expenses: []
+  },
+  financesMode: "billed",
+  financesRange: "all",
+  financesMonth: ""
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -109,18 +113,52 @@ async function ensureSpreadsheetLibrary() {
 window.ensurePdfLibraries = ensurePdfLibraries;
 window.ensureSpreadsheetLibrary = ensureSpreadsheetLibrary;
 
-// Pre-warm the heavy export libraries once the page is idle so the first export
-// is instant, without adding them to the critical render path.
+// Keep export libraries out of the initial page load. They are still loaded by
+// the download/export functions when needed, and this helper now only warms them
+// after the user shows intent (hover/focus/click on export controls). This keeps
+// the dashboard responsive on first visit and after reconnecting.
 function prewarmExportLibraries() {
-  const warm = () => {
-    ensurePdfLibraries().catch(() => {});
-    ensureSpreadsheetLibrary().catch(() => {});
+  const selectors = [
+    '#downloadInvoicePreviewBtn',
+    '#downloadCostTrackerPreviewBtn',
+    '[id*="download" i]',
+    '[data-download]',
+    '[data-export]',
+    '.download-btn',
+    '.export-btn'
+  ].join(',');
+
+  let warmedPdf = false;
+  let warmedSpreadsheet = false;
+
+  const warmForControl = (target) => {
+    const control = target?.closest?.(selectors);
+    if (!control) return;
+
+    const text = `${control.id || ''} ${control.dataset?.download || ''} ${control.dataset?.export || ''} ${control.textContent || ''}`.toLowerCase();
+    const wantsSpreadsheet = /excel|xlsx|spreadsheet|cost/.test(text);
+    const wantsPdf = /pdf|invoice|timesheet|download/.test(text);
+
+    if (wantsSpreadsheet && !warmedSpreadsheet) {
+      warmedSpreadsheet = true;
+      ensureSpreadsheetLibrary().catch(() => { warmedSpreadsheet = false; });
+    }
+
+    if (wantsPdf && !warmedPdf) {
+      warmedPdf = true;
+      ensurePdfLibraries().catch(() => { warmedPdf = false; });
+    }
   };
-  if ("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 4000 });
-  else setTimeout(warm, 2000);
+
+  ['pointerenter', 'focusin', 'touchstart'].forEach((eventName) => {
+    document.addEventListener(eventName, (event) => warmForControl(event.target), {
+      passive: true,
+      capture: true
+    });
+  });
 }
-if (document.readyState === "complete") prewarmExportLibraries();
-else window.addEventListener("load", prewarmExportLibraries, { once: true });
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', prewarmExportLibraries, { once: true });
+else prewarmExportLibraries();
 
 /* ========================================================================
    EARLY OPEN-JOBS INVOICE STATUS SAVE GUARD
@@ -298,22 +336,13 @@ document.addEventListener("DOMContentLoaded", init);
 
 /* optimized: removed older duplicate function init */
 
-function bindIfExists(selector, eventName, handler) {
-  const element = $(selector);
-  if (element) element.addEventListener(eventName, handler);
-}
+/* optimized: removed dead never-called function bindIfExists */
 
 /* optimized: removed older duplicate function bindEvents */
 
-function getConfig() {
-  // Kept only for compatibility with older saved browsers.
-  // The active Supabase connection now comes from locked constants below.
-  return {};
-}
+/* optimized: removed dead never-called function getConfig */
 
-function saveConfig(_config) {
-  // Settings are locked in code; users cannot change Supabase connection values.
-}
+/* optimized: removed dead never-called function saveConfig */
 
 function loadConfigIntoSettings() {
   // Settings UI was removed intentionally.
@@ -483,6 +512,451 @@ function renderStats() {
   $("#statOpenInvoices").textContent = money(openInvoices);
 }
 
+/* ------------------------------------------------------------------ */
+/* Finances page: true profit = invoice income − user-entered expenses */
+/* ------------------------------------------------------------------ */
+
+const EXPENSE_CATEGORIES = [
+  { value: "material", label: "Material" },
+  { value: "payroll", label: "Payroll" },
+  { value: "monthly", label: "Monthly" },
+  { value: "other", label: "Other" }
+];
+
+function expenseCategoryLabel(value) {
+  const found = EXPENSE_CATEGORIES.find((item) => item.value === String(value || "").toLowerCase());
+  return found ? found.label : "Other";
+}
+
+function invoiceStatusRaw(invoice) {
+  return String(invoice?.status || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function invoiceIsCancelled(invoice) {
+  return ["cancelled", "canceled", "void", "voided"].includes(invoiceStatusRaw(invoice));
+}
+
+function invoiceIsPaid(invoice) {
+  return invoiceStatusRaw(invoice) === "paid";
+}
+
+// Date-range filter for the Finances page. Returns { start, end } (inclusive
+// ISO day strings) for "quarter" | "year" | "custom" (a specific "YYYY-MM"
+// via `monthKey`, defaulting to the current month), or null for "all".
+function financeRangeBounds(range, monthKey = "") {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth();
+  const pad = (n) => String(n).padStart(2, "0");
+  const firstDay = (yy, mm) => `${yy}-${pad(mm + 1)}-01`;
+  const lastDay = (yy, mm) => `${yy}-${pad(mm + 1)}-${pad(new Date(yy, mm + 1, 0).getDate())}`;
+  if (range === "custom") {
+    const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || ""));
+    const yy = match ? Number(match[1]) : y;
+    const mm = match ? Number(match[2]) - 1 : m;
+    return { start: firstDay(yy, mm), end: lastDay(yy, mm) };
+  }
+  if (range === "quarter") {
+    const quarterStart = Math.floor(m / 3) * 3;
+    return { start: firstDay(y, quarterStart), end: lastDay(y, quarterStart + 2) };
+  }
+  if (range === "year") return { start: `${y}-01-01`, end: `${y}-12-31` };
+  return null;
+}
+
+function financeRangeLabel(range, monthKey = "") {
+  if (range === "custom") {
+    const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || ""));
+    if (match) {
+      return new Date(Number(match[1]), Number(match[2]) - 1, 1)
+        .toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    }
+    return "This month";
+  }
+  return { quarter: "This quarter", year: "This year" }[range] || "All time";
+}
+
+function financeDateInBounds(value, bounds) {
+  if (!bounds) return true;
+  const day = String(value || "").slice(0, 10);
+  if (!day) return false;
+  return day >= bounds.start && day <= bounds.end;
+}
+
+// income counted toward profit. "paid" = cash received; "billed" = every
+// non-cancelled invoice (open + paid). Matches the Finances profit toggle.
+// `bounds` (optional) restricts income to invoices dated inside the range.
+function financeIncome(mode, bounds = null) {
+  const invoices = (state.data.invoices || []).filter((row) =>
+    financeDateInBounds(row.invoice_date || row.created_at, bounds)
+  );
+  if (mode === "paid") {
+    return invoices.filter(invoiceIsPaid).reduce((sum, row) => sum + invoiceTotal(row), 0);
+  }
+  return invoices.filter((row) => !invoiceIsCancelled(row)).reduce((sum, row) => sum + invoiceTotal(row), 0);
+}
+
+function financePaidIncome(bounds = null) {
+  return financeIncome("paid", bounds);
+}
+
+// billed but not yet paid (still owed to the business)
+function financeOutstandingIncome(bounds = null) {
+  return financeIncome("billed", bounds) - financeIncome("paid", bounds);
+}
+
+function financeFilteredExpenses(bounds = null) {
+  return (state.data.expenses || []).filter((row) =>
+    financeDateInBounds(row.expense_date || row.created_at, bounds)
+  );
+}
+
+function financeExpensesTotal(bounds = null) {
+  return financeFilteredExpenses(bounds).reduce((sum, row) => sum + number(row.amount), 0);
+}
+
+function financeExpensesByCategory(bounds = null) {
+  const totals = { material: 0, payroll: 0, monthly: 0, other: 0 };
+  financeFilteredExpenses(bounds).forEach((row) => {
+    const key = String(row.category || "other").toLowerCase();
+    if (totals[key] === undefined) totals.other += number(row.amount);
+    else totals[key] += number(row.amount);
+  });
+  return totals;
+}
+
+function financeTrueProfit(mode, bounds = null) {
+  return financeIncome(mode, bounds) - financeExpensesTotal(bounds);
+}
+
+function financeExpenseHasReceipt(row) {
+  return Boolean(row && (row.storage_path || row.receipt_url || row.file_data_base64));
+}
+
+function financeEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+/* --- Finances charts (inline SVG, no chart library) --- */
+
+// Compact currency for chart axes: $850, $12.5k, $125k, $1.3M
+function financeCompactMoney(value) {
+  const n = number(value);
+  const abs = Math.abs(n);
+  let text;
+  if (abs >= 1e6) text = `$${(n / 1e6).toFixed(abs >= 1e8 ? 0 : 1)}M`;
+  else if (abs >= 1e3) text = `$${(n / 1e3).toFixed(abs >= 1e5 ? 0 : 1)}k`;
+  else return money(n).replace(/\.00$/, "");
+  return text.replace(/\.0([kM])$/, "$1");
+}
+
+// Round a value up to a "nice" axis ceiling (1 / 2 / 2.5 / 5 × 10^n).
+function financeNiceCeiling(value) {
+  if (!(value > 0)) return 0;
+  const exp = Math.pow(10, Math.floor(Math.log10(value)));
+  const f = value / exp;
+  const nice = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+  return nice * exp;
+}
+
+function financeMonthKey(value) {
+  const key = String(value || "").slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(key) ? key : "";
+}
+
+// Monthly income vs expenses for the `monthCount` months ending at
+// `endMonthKey` ("YYYY-MM", defaults to the current month). Income honors
+// the billed/paid toggle; cancelled invoices are excluded.
+function financeMonthlySeries(monthCount, mode, endMonthKey = "") {
+  const now = new Date();
+  const endMatch = /^(\d{4})-(\d{2})$/.exec(String(endMonthKey || ""));
+  const end = endMatch ? new Date(Number(endMatch[1]), Number(endMatch[2]) - 1, 1) : now;
+  const months = [];
+  for (let i = monthCount - 1; i >= 0; i--) {
+    const d = new Date(end.getFullYear(), end.getMonth() - i, 1);
+    const shortMonth = d.toLocaleDateString("en-US", { month: "short" });
+    months.push({
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      label: d.getFullYear() === now.getFullYear() ? shortMonth : `${shortMonth} '${String(d.getFullYear()).slice(-2)}`,
+      full: d.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+      income: 0,
+      expenses: 0
+    });
+  }
+  const index = new Map(months.map((m) => [m.key, m]));
+  (state.data.invoices || []).forEach((row) => {
+    if (invoiceIsCancelled(row)) return;
+    if (mode === "paid" && !invoiceIsPaid(row)) return;
+    const bucket = index.get(financeMonthKey(row.invoice_date || row.created_at));
+    if (bucket) bucket.income += invoiceTotal(row);
+  });
+  (state.data.expenses || []).forEach((row) => {
+    const bucket = index.get(financeMonthKey(row.expense_date || row.created_at));
+    if (bucket) bucket.expenses += number(row.amount);
+  });
+  return months;
+}
+
+// Fixed Y-axis ceiling for the monthly cash flow views so the scale reads
+// the same in "All billed" and "Paid only" modes. The axis only grows past
+// this when a bar would otherwise be clipped.
+const FINANCE_TREND_AXIS_MAX = 80000;
+
+// The "All time" totals view instead starts at a 200k axis (same in both
+// income modes) and grows in 50k steps once income or expenses exceed it:
+// 200k -> 250k -> 300k -> ...
+const FINANCE_ALLTIME_AXIS_BASE = 200000;
+const FINANCE_ALLTIME_AXIS_STEP = 50000;
+
+// Grouped-bar cash flow chart. Returns "" when there is nothing to plot.
+function financeTrendChartSVG(series, { allTimeAxis = false } = {}) {
+  const w = 640;
+  const h = 250;
+  const padL = 56;
+  const padR = 10;
+  const padT = 16;
+  const padB = 30;
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const rawMax = series.reduce((max, m) => Math.max(max, m.income, m.expenses), 0);
+  if (!(rawMax > 0)) return "";
+  const maxVal = allTimeAxis
+    ? Math.max(FINANCE_ALLTIME_AXIS_BASE, Math.ceil(rawMax / FINANCE_ALLTIME_AXIS_STEP) * FINANCE_ALLTIME_AXIS_STEP)
+    : rawMax > FINANCE_TREND_AXIS_MAX ? financeNiceCeiling(rawMax) : FINANCE_TREND_AXIS_MAX;
+
+  const y = (v) => padT + innerH - (v / maxVal) * innerH;
+  const groupW = innerW / series.length;
+  // Wider bars when only a month or a quarter is plotted so the chart
+  // doesn't look empty at low bucket counts.
+  const barW = Math.min(series.length <= 3 ? 60 : 24, groupW * 0.3);
+  const parts = [];
+
+  // All-time axis: one gridline per 50k step (capped to keep labels legible);
+  // monthly views keep 4 even divisions of the fixed axis.
+  const allTimeSteps = Math.round(maxVal / FINANCE_ALLTIME_AXIS_STEP);
+  const ticks = allTimeAxis && allTimeSteps <= 8 ? allTimeSteps : 4;
+  for (let i = 0; i <= ticks; i++) {
+    const v = (maxVal / ticks) * i;
+    const yy = y(v).toFixed(1);
+    parts.push(`<line x1="${padL}" y1="${yy}" x2="${w - padR}" y2="${yy}" class="ftc-grid"/>`);
+    parts.push(`<text x="${padL - 8}" y="${(y(v) + 4).toFixed(1)}" text-anchor="end" class="ftc-ylabel">${financeEscape(financeCompactMoney(v))}</text>`);
+  }
+
+  series.forEach((m, i) => {
+    const gx = padL + groupW * i;
+    const cx = gx + groupW / 2;
+    const baseline = padT + innerH;
+    if (m.income > 0) {
+      const iy = y(Math.min(m.income, maxVal));
+      parts.push(`<rect x="${(cx - barW - 2).toFixed(1)}" y="${iy.toFixed(1)}" width="${barW.toFixed(1)}" height="${(baseline - iy).toFixed(1)}" rx="2" class="ftc-income"><title>${financeEscape(m.full)} income: ${financeEscape(money(m.income))}</title></rect>`);
+    }
+    if (m.expenses > 0) {
+      const ey = y(Math.min(m.expenses, maxVal));
+      parts.push(`<rect x="${(cx + 2).toFixed(1)}" y="${ey.toFixed(1)}" width="${barW.toFixed(1)}" height="${(baseline - ey).toFixed(1)}" rx="2" class="ftc-expense"><title>${financeEscape(m.full)} expenses: ${financeEscape(money(m.expenses))}</title></rect>`);
+    }
+    parts.push(`<text x="${cx.toFixed(1)}" y="${h - 10}" text-anchor="middle" class="ftc-xlabel">${financeEscape(series.length === 1 ? m.full : m.label)}</text>`);
+    // Clickable hit area only for real month buckets (not the all-time totals).
+    if (/^\d{4}-\d{2}$/.test(m.key)) {
+      const hitSummary = `${m.full} — income ${money(m.income)}, expenses ${money(m.expenses)}. Click to view this month.`;
+      parts.push(`<rect x="${gx.toFixed(1)}" y="${padT}" width="${groupW.toFixed(1)}" height="${(innerH + padB - 4).toFixed(1)}" class="ftc-hit" data-month="${financeEscape(m.key)}" tabindex="0" role="button" aria-label="${financeEscape(hitSummary)}"><title>${financeEscape(hitSummary)}</title></rect>`);
+    }
+  });
+
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Monthly income and expenses">${parts.join("")}</svg>`;
+}
+
+// Donut of expenses by category with the total in the center.
+function financeDonutSVG(byCategory, total) {
+  if (!(total > 0)) return "";
+  const size = 170;
+  const c = size / 2;
+  const r = 60;
+  const circumference = 2 * Math.PI * r;
+  const order = [
+    ["material", "Material"],
+    ["payroll", "Payroll"],
+    ["monthly", "Monthly / Recurring"],
+    ["other", "Other"]
+  ];
+  let offset = 0;
+  const segments = order.map(([key, label]) => {
+    const value = number(byCategory[key]);
+    if (!(value > 0)) return "";
+    const frac = value / total;
+    const dash = frac * circumference;
+    const seg = `<circle cx="${c}" cy="${c}" r="${r}" class="fdc-${key}" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"><title>${financeEscape(label)}: ${financeEscape(money(value))} (${(frac * 100).toFixed(1)}%)</title></circle>`;
+    offset += dash;
+    return seg;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${size} ${size}" class="finance-donut-svg" role="img" aria-label="Expenses by category">
+    <g transform="rotate(-90 ${c} ${c})">${segments}</g>
+    <text x="${c}" y="${c - 1}" text-anchor="middle" class="fdc-total">${financeEscape(financeCompactMoney(total))}</text>
+    <text x="${c}" y="${c + 17}" text-anchor="middle" class="fdc-sub">expenses</text>
+  </svg>`;
+}
+
+function renderFinances() {
+  if (!$("#financesView")) return;
+
+  const mode = state.financesMode === "paid" ? "paid" : "billed";
+  const range = state.financesRange || "all";
+  let month = "";
+  if (range === "custom") {
+    const now = new Date();
+    month = /^\d{4}-\d{2}$/.test(String(state.financesMonth || ""))
+      ? state.financesMonth
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }
+  const bounds = financeRangeBounds(range, month);
+  const income = financeIncome(mode, bounds);
+  const expenses = financeExpensesTotal(bounds);
+  const profit = financeTrueProfit(mode, bounds);
+  const byCategory = financeExpensesByCategory(bounds);
+  const paidIncome = financePaidIncome(bounds);
+  const outstandingIncome = financeOutstandingIncome(bounds);
+  const billedIncome = financeIncome("billed", bounds);
+
+  const setText = (selector, value) => {
+    const el = $(selector);
+    if (el) el.textContent = value;
+  };
+
+  const rangeLabel = financeRangeLabel(range, month);
+  const rangeSuffix = bounds ? ` · ${range === "custom" ? rangeLabel : rangeLabel.toLowerCase()}` : "";
+  setText("#financeIncome", money(income));
+  setText("#financeIncomeCaption", (mode === "paid" ? "Paid invoices only" : "All billed invoices") + rangeSuffix);
+  setText("#financeExpenses", money(expenses));
+  setText("#financeExpensesCaption", "All receipts & costs" + rangeSuffix);
+  setText("#financeProfit", money(profit));
+  const marginText = income > 0 ? ` · ${((profit / income) * 100).toFixed(1)}% margin` : "";
+  setText("#financeProfitCaption", "Income − Expenses" + marginText);
+  setText("#financePaid", money(paidIncome));
+  setText("#financeOutstanding", money(outstandingIncome));
+  setText("#financeExpMaterial", money(byCategory.material));
+  setText("#financeExpPayroll", money(byCategory.payroll));
+  setText("#financeExpMonthly", money(byCategory.monthly));
+  setText("#financeExpOther", money(byCategory.other));
+  const pctOf = (value) => (expenses > 0 ? `${((value / expenses) * 100).toFixed(1)}%` : "0%");
+  setText("#financeExpMaterialPct", pctOf(byCategory.material));
+  setText("#financeExpPayrollPct", pctOf(byCategory.payroll));
+  setText("#financeExpMonthlyPct", pctOf(byCategory.monthly));
+  setText("#financeExpOtherPct", pctOf(byCategory.other));
+  setText("#financeTrendCaption", `${rangeLabel} · ${mode === "paid" ? "paid" : "billed"} income`);
+  setText("#financeDonutCaption", rangeLabel);
+
+  const profitCard = $("#financeProfitCard");
+  if (profitCard) profitCard.classList.toggle("is-loss", profit < 0);
+
+  $$("[data-finance-mode]").forEach((button) => {
+    const active = button.dataset.financeMode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+
+  const rangeSelect = $("#financeRangeSelect");
+  if (rangeSelect && rangeSelect.value !== range) rangeSelect.value = range;
+
+  // The month picker only appears once "Specific month…" is chosen.
+  const monthField = $("#financeMonthField");
+  if (monthField) monthField.classList.toggle("hidden", range !== "custom");
+
+  const monthInput = $("#financeMonthSelect");
+  if (monthInput && monthInput.value !== month) monthInput.value = month;
+
+  // --- Charts (inline SVG; see finance chart helpers above) ---
+  // The cash flow chart mirrors the selected range: one pair of grand-total
+  // bars for "all time" (200k axis growing in 50k steps), the chosen month
+  // alone, the quarter's 3 months, or the year's 12 (fixed 0–80k axis).
+  const nowDate = new Date();
+  const pad2 = (n) => String(n).padStart(2, "0");
+  let trendSeries;
+  if (range === "year") {
+    trendSeries = financeMonthlySeries(12, mode, `${nowDate.getFullYear()}-12`);
+  } else if (range === "quarter") {
+    trendSeries = financeMonthlySeries(3, mode, `${nowDate.getFullYear()}-${pad2(Math.floor(nowDate.getMonth() / 3) * 3 + 3)}`);
+  } else if (range === "custom") {
+    trendSeries = financeMonthlySeries(1, mode, month);
+  } else {
+    trendSeries = [{ key: "", label: "All time", full: "All time", income, expenses }];
+  }
+
+  const trendEl = $("#financeTrendChart");
+  if (trendEl) {
+    const svg = financeTrendChartSVG(trendSeries, { allTimeAxis: range === "all" });
+    trendEl.innerHTML = svg || '<p class="tiny finance-bar-empty">No income or expenses recorded for this period.</p>';
+  }
+
+  // "Click a month" only makes sense when more than one month is plotted.
+  const trendHint = $("#financeTrendHint");
+  if (trendHint) trendHint.classList.toggle("hidden", trendSeries.length === 1);
+
+  const donutEl = $("#financeDonutChart");
+  if (donutEl) {
+    const svg = financeDonutSVG(byCategory, expenses);
+    donutEl.innerHTML = svg || '<p class="tiny finance-bar-empty">No expenses recorded for this period.</p>';
+  }
+
+  const barSeg = (cls, value, total, label) => {
+    const pct = total > 0 ? (value / total) * 100 : 0;
+    if (pct <= 0) return "";
+    return `<span class="finance-bar-seg ${cls}" style="width:${pct.toFixed(2)}%" title="${financeEscape(label)}: ${financeEscape(money(value))} (${pct.toFixed(1)}%)"></span>`;
+  };
+
+  const incomeBar = $("#financeIncomeBar");
+  if (incomeBar) {
+    incomeBar.innerHTML = billedIncome > 0
+      ? `<span class="finance-bar">${barSeg("seg-paid", paidIncome, billedIncome, "Paid")}${barSeg("seg-outstanding", outstandingIncome, billedIncome, "Outstanding")}</span>`
+      : "";
+  }
+
+  const expensesList = financeFilteredExpenses(bounds).slice().sort((a, b) => {
+    const av = a.expense_date || a.created_at || "";
+    const bv = b.expense_date || b.created_at || "";
+    return String(bv).localeCompare(String(av));
+  });
+
+  const countEl = $("#expensesCount");
+  if (countEl) countEl.textContent = expensesList.length;
+
+  const body = $("#expensesTable");
+  if (!body) return;
+
+  if (!expensesList.length) {
+    body.innerHTML = bounds && (state.data.expenses || []).length
+      ? `<tr><td colspan="6" class="empty-cell">No expenses in ${financeEscape(range === "custom" ? rangeLabel : rangeLabel.toLowerCase())}. Choose "All time" to see every expense.</td></tr>`
+      : '<tr><td colspan="6" class="empty-cell">No expenses yet. Add a receipt on the left to start tracking costs.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = expensesList.map((row) => {
+    const id = financeEscape(row.id);
+    const dateText = financeEscape(formatDate(row.expense_date));
+    const catLabel = financeEscape(expenseCategoryLabel(row.category));
+    const catClass = financeEscape(String(row.category || "other").toLowerCase());
+    const amountText = financeEscape(money(row.amount));
+    const details = financeEscape(row.vendor ? `${row.vendor}${row.note ? " — " + row.note : ""}` : (row.note || "-"));
+    const receiptCell = financeExpenseHasReceipt(row)
+      ? `<button class="link-btn" type="button" data-view-receipt="${id}">View</button>` +
+        `<button class="link-btn" type="button" data-download-receipt="${id}">Download</button>`
+      : '<span class="tiny">No file</span>';
+    return `<tr>
+      <td>${dateText}</td>
+      <td><span class="expense-badge expense-${catClass}">${catLabel}</span></td>
+      <td class="money-cell">${amountText}</td>
+      <td>${details}</td>
+      <td class="table-actions receipt-cell">${receiptCell}</td>
+      <td class="table-actions"><button class="link-btn" type="button" data-edit-expense="${id}">Edit</button><button class="link-btn danger-text" type="button" data-delete-expense="${id}">Delete</button></td>
+    </tr>`;
+  }).join("");
+}
+
 function renderDashboardLists() {
   const recentJobs = state.data.jobs.slice(0, 6);
 
@@ -608,7 +1082,40 @@ async function insertRow(table, payload) {
   return data;
 }
 
+// Tables/keys where a native upsert isn't backed by a unique index, so we must
+// use the slower select-then-write path. Remembered after the first attempt so
+// we never repeatedly pay for a missing constraint.
+const _nativeUpsertUnsupported = new Set();
+
 async function manualUpsert(table, payload, keyColumn) {
+  const cacheKey = `${table}:${keyColumn}`;
+
+  // Fast path: a single atomic upsert (one round-trip instead of select + write).
+  // A native upsert resolves the conflict on keyColumn in the database, so it can
+  // NEVER create a duplicate. If the table has no unique index on keyColumn it
+  // errors immediately (no row is written), and we fall back to the manual path
+  // below and remember not to try the fast path again this session.
+  if (!_nativeUpsertUnsupported.has(cacheKey)) {
+    const looksLikeMissingConstraint = (message) =>
+      /on conflict|no unique|exclusion constraint|unique or exclusion|constraint matching/i.test(String(message || ""));
+    try {
+      const { data, error } = await state.supabase
+        .from(table)
+        .upsert(payload, { onConflict: keyColumn })
+        .select()
+        .single();
+      if (!error && data) return data;
+      if (error) {
+        if (looksLikeMissingConstraint(error.message)) _nativeUpsertUnsupported.add(cacheKey);
+        else throw error;
+      }
+    } catch (nativeError) {
+      if (looksLikeMissingConstraint(nativeError?.message)) _nativeUpsertUnsupported.add(cacheKey);
+      else throw nativeError;
+    }
+  }
+
+  // Fallback: select-then-update/insert (used when there is no unique index).
   const keyValue = payload[keyColumn];
 
   const { data: existing, error: findError } = await state.supabase
@@ -1000,19 +1507,9 @@ let costInvoiceUiInitialized = false;
 
 /* optimized: removed older duplicate function initializeCostInvoiceBuilders */
 
-function buildDefaultCostTrackerRows() {
-  COST_CATEGORIES.forEach((category) => {
-    const container = document.getElementById(COST_CONTAINER_BY_CATEGORY[category]);
-    if (!container || container.children.length) return;
-    (DEFAULT_COST_LINES[category] || [{}]).forEach((line) => addCostLine(category, line));
-  });
-}
+/* optimized: removed dead never-called function buildDefaultCostTrackerRows */
 
-function buildDefaultInvoiceRows() {
-  const container = $("#invoiceItems");
-  if (!container || container.children.length) return;
-  addInvoiceLine({ quantity: 1, description: "Insulation services", rate: 0 });
-}
+/* optimized: removed dead never-called function buildDefaultInvoiceRows */
 
 /* optimized: removed older duplicate function handleBuilderClick */
 
@@ -1107,10 +1604,7 @@ function publicCostFields(fields) {
 
 /* optimized: removed older duplicate function extractCostTrackerLineItems */
 
-function getLaborDayHoursMultiplier(_totalJobDays = null) {
-  // Labor hours are now always entered manually by the user.
-  return 1;
-}
+/* optimized: removed dead never-called function getLaborDayHoursMultiplier */
 
 function hasNumericInput(fields, field) {
   const rawValue = fields?.__raw?.[field];
@@ -1256,12 +1750,7 @@ function summarizeCostItems(items, overrideQuoted = null) {
 
 /* optimized: removed older duplicate function resetCostTrackerForm */
 
-function clearCostLines() {
-  COST_CATEGORIES.forEach((category) => {
-    const container = document.getElementById(COST_CONTAINER_BY_CATEGORY[category]);
-    if (container) container.innerHTML = "";
-  });
-}
+/* optimized: removed dead never-called function clearCostLines */
 
 /* optimized: removed older duplicate function clearInvoiceLines */
 
@@ -1366,6 +1855,7 @@ function renderAllNow() {
   renderAssignments();
   renderTimesheets();
   renderDocuments();
+  renderFinances();
 }
 
 /* Coalesce redundant renderAll() calls within a single tick.
@@ -1403,12 +1893,7 @@ function cloneCostTemplateLines(lines) {
 
 /* optimized: removed older duplicate function getActiveTemplateData */
 
-function loadActiveTemplateAfterRefresh() {
-  const template = getActiveRateTemplate();
-  if (template?.template_data) {
-    loadTemplateIntoCostForm(template.template_data, false);
-  }
-}
+/* optimized: removed dead never-called function loadActiveTemplateAfterRefresh */
 
 /* optimized: removed older duplicate function loadTemplateIntoCostForm */
 
@@ -1430,45 +1915,9 @@ function normalizeTemplateData(templateData) {
 
 /* optimized: removed older duplicate function getCurrentCostFormTemplateData */
 
-async function saveActiveTemplateFromCostForm() {
-  if (!state.supabase || !state.session) {
-    showToast("Sign in and connect Supabase before saving templates.", true);
-    return;
-  }
+/* optimized: removed dead never-called function saveActiveTemplateFromCostForm */
 
-  const templateName = $("#templateNameInput")?.value?.trim() || FACTORY_TEMPLATE_NAME;
-  const description = $("#templateDescriptionInput")?.value?.trim() || "Website cost tracker rate/template defaults";
-  const templateData = getCurrentCostFormTemplateData();
-  templateData.name = templateName;
-
-  try {
-    await state.supabase.from(TEMPLATE_TABLE).update({ is_active: false }).eq("is_active", true);
-
-    const payload = {
-      template_name: templateName,
-      description,
-      is_active: true,
-      template_data: templateData,
-      external_source: "dashboard_builder",
-      external_id: "cost-template:active",
-      updated_at: new Date().toISOString(),
-      last_synced_at: new Date().toISOString()
-    };
-
-    await manualUpsert(TEMPLATE_TABLE, payload, "external_id");
-    await loadAllData();
-    showToast("Active cost tracker template/rates saved to Supabase.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
-
-async function restoreFactoryTemplate() {
-  loadTemplateIntoCostForm(createFactoryTemplateData(), true);
-  const name = $("#templateNameInput");
-  if (name) name.value = FACTORY_TEMPLATE_NAME;
-  showToast("Factory template loaded. Click Save as Active Template to store it in Supabase.");
-}
+/* optimized: removed dead never-called function restoreFactoryTemplate */
 
 /* optimized: removed older duplicate function renderRateTemplates */
 
@@ -1494,55 +1943,7 @@ function clearCostTrackerJobInfo() {
 
 /* optimized: removed dead duplicate handleSaveCostTracker #3 (live copy defined later) */
 
-async function upsertAutoInvoiceFromCostTracker(tracker, job, status = "draft") {
-  const existing = findAutoInvoiceForJob(job.id, job.job_number);
-  const invoiceNumber = existing?.invoice_number || generateInvoiceNumber(job.job_number);
-  const invoiceItems = groupCostItemsForInvoice(tracker);
-  const summary = summarizeInvoiceItems(invoiceItems, existing?.tax_rate || 0, existing?.payments || 0);
-  const values = {
-    invoice_date: existing?.invoice_date || today(),
-    due_date: existing?.due_date || addDays(today(), 30),
-    bill_to: existing?.bill_to || `${job.company_name || ""}\nAttn: ${job.contact_name || ""}`.trim(),
-    po_number: existing?.po_number || job.job_number || "",
-    terms: existing?.terms || "",
-    project: existing?.project || job.job_name || "",
-    description: existing?.description || `${job.job_name || ""}\nDates: ${job.job_dates || formatDateRange(job.start_date, job.end_date)}\nLocation: ${job.location || ""}`.trim(),
-    tax_rate: existing?.tax_rate || 0,
-    payments: existing?.payments || 0
-  };
-  const invoiceData = buildInvoiceData(values, job, invoiceItems, summary, invoiceNumber);
-  const html = renderInvoiceHtml(invoiceData);
-
-  const payload = {
-    job_id: job.id,
-    client_id: job.client_id || null,
-    invoice_number: invoiceNumber,
-    invoice_date: values.invoice_date,
-    due_date: values.due_date,
-    subtotal: summary.subtotal,
-    tax: summary.tax,
-    status: existing?.status || status || "draft",
-    pdf_url: existing?.pdf_url || null,
-    google_drive_url: existing?.google_drive_url || existing?.pdf_url || null,
-    bill_to: values.bill_to || null,
-    po_number: values.po_number || null,
-    terms: values.terms || null,
-    project: values.project || null,
-    description: values.description || null,
-    tax_rate: number(values.tax_rate),
-    payments: number(values.payments),
-    line_items: invoiceItems,
-    html_snapshot: html,
-    download_filename: safeFileName(`${invoiceNumber}.html`),
-    auto_generated: true,
-    cost_tracker_id: tracker.id || null,
-    external_source: "dashboard_builder",
-    external_id: `invoice-auto:${job.job_number || job.id}`,
-    last_synced_at: new Date().toISOString()
-  };
-
-  return manualUpsert("invoices", payload, "external_id");
-}
+/* optimized: removed dead never-called function upsertAutoInvoiceFromCostTracker */
 
 function findAutoInvoiceForJob(jobId, jobNumber = "") {
   return state.data.invoices.find((invoice) => invoice.external_id === `invoice-auto:${jobNumber}`)
@@ -1560,19 +1961,7 @@ function findAutoInvoiceForJob(jobId, jobNumber = "") {
 
 /* optimized: removed older duplicate function handleCostInvoiceTableActions */
 
-async function activateTemplate(templateId) {
-  const template = state.data.rateTemplates.find((row) => row.id === templateId);
-  if (!template) return;
-
-  try {
-    await state.supabase.from(TEMPLATE_TABLE).update({ is_active: false }).eq("is_active", true);
-    await state.supabase.from(TEMPLATE_TABLE).update({ is_active: true, updated_at: new Date().toISOString() }).eq("id", templateId);
-    await loadAllData();
-    showToast("Template is now active for new jobs.");
-  } catch (error) {
-    showToast(error.message, true);
-  }
-}
+/* optimized: removed dead never-called function activateTemplate */
 
 /* optimized: removed older duplicate function loadCostTrackerForJob */
 
@@ -1599,7 +1988,6 @@ function loadInvoiceForJob(jobId, announce = true) {
       recomputeInvoiceTotals();
     }
   }
-  if (announce) showToast("Invoice draft opened for this job.");
 }
 
 /* optimized: removed older duplicate function loadCostTrackerIntoForm */
@@ -1721,12 +2109,7 @@ function safeFileName(value) {
     .replace(/^-|-$/g, "") || "download.html";
 }
 
-function formatDateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-US");
-}
+/* optimized: removed dead never-called function formatDateTime */
 
 function generateInvoiceNumber(jobNumber = "") {
   const year = new Date().getFullYear();
@@ -1766,10 +2149,7 @@ function getCostTrackerTotalDaysValue() {
   return number(input.value);
 }
 
-function regularHoursFromTotalDays(_totalDays) {
-  // Kept for compatibility with older code paths; labor hours are manual only.
-  return null;
-}
+/* optimized: removed dead never-called function regularHoursFromTotalDays */
 
 function handleCostTrackerManualHoursInput(event) {
   const input = event?.target?.closest?.('#costTrackerForm .sheet-cost-row[data-category="labor"] [data-field="hours"]');
@@ -2144,14 +2524,7 @@ async function updateRow(table, id, payload) {
 
 /* optimized: removed older duplicate function loadJobIntoForm */
 
-function setJobFormMode(isEditing) {
-  const title = $("#jobFormTitle");
-  const submit = $("#jobSubmitBtn") || $('#jobForm button[type="submit"]');
-  const cancel = $("#cancelJobEditBtn");
-  if (title) title.textContent = isEditing ? "Edit Job" : "Create Job";
-  if (submit) submit.textContent = isEditing ? "Update Job" : "Create Job";
-  if (cancel) cancel.classList.toggle("hidden", !isEditing);
-}
+/* optimized: removed dead never-called function setJobFormMode */
 
 /* optimized: removed older duplicate function resetJobFormMode */
 
@@ -2221,7 +2594,8 @@ function showView(viewName) {
     timesheets: "Timesheets",
     employees: "Employees",
     assignments: "Job Assignments",
-    documents: "Documents"
+    documents: "Documents",
+    finances: "Finances"
   };
 
   const title = $("#viewTitle");
@@ -2256,7 +2630,7 @@ async function loadAllData(options = {}) {
   const silent = Boolean(options.silent);
 
   try {
-    const [clients, jobs, costTrackers, invoices, employees, assignments, timesheets, documents] = await Promise.all([
+    const [clients, jobs, costTrackers, invoices, employees, assignments, timesheets, documents, expenses] = await Promise.all([
       selectTable("clients", "*", "company_name", true),
       selectTable("jobs", "*", "last_synced_at", false),
       selectTable("cost_trackers", "*", "last_synced_at", false),
@@ -2264,7 +2638,8 @@ async function loadAllData(options = {}) {
       selectTable("employees", "*", "full_name", true),
       selectTable("job_assignments", "*", "created_at", false),
       selectTable("timesheets", "*", "work_date", false),
-      selectTable("documents", "*", "last_synced_at", false)
+      selectTable("documents", "*", "last_synced_at", false),
+      selectTable("expenses", "*", "expense_date", false)
     ]);
 
     state.data.clients = clients || [];
@@ -2275,6 +2650,7 @@ async function loadAllData(options = {}) {
     state.data.assignments = assignments || [];
     state.data.timesheets = timesheets || [];
     state.data.documents = documents || [];
+    state.data.expenses = expenses || [];
     state.data.rateTemplates = [];
 
     hydrateSelects();
@@ -2283,7 +2659,7 @@ async function loadAllData(options = {}) {
     const selectedCostJob = $('#costTrackerForm [name="job_id"]')?.value;
     if (selectedCostJob) updateCostSheetHeaderFromSelectedJob();
 
-    if (!silent) showToast("Dashboard data refreshed.");
+    if (options.manual) showToast("Dashboard data refreshed.");
   } catch (error) {
     showToast(error.message || String(error), true);
   }
@@ -2307,7 +2683,7 @@ async function selectTable(table, columns = "*", orderColumn = "created_at", asc
   }
 
   if (response.error) {
-    if (["employees", "job_assignments", "timesheets", "documents"].includes(table)) {
+    if (["employees", "job_assignments", "timesheets", "documents", "expenses"].includes(table)) {
       console.warn(`${table} not available yet:`, response.error.message);
       return [];
     }
@@ -2727,10 +3103,17 @@ async function handleSaveCostTracker(event) {
       : await insertRow("cost_trackers", payload);
 
     mergeStateRow("costTrackers", tracker);
-    await loadAllData({ silent: true });
     loadCostTrackerIntoForm(tracker);
     refreshWebsiteLists();
     showToast(payload.job_id ? "Cost tracker saved and assigned to the selected job." : "Unassigned cost tracker saved by name. You can assign it to a job later.");
+    // The saved tracker is already merged into local state above, so the UI is
+    // correct immediately. Reconcile with the server in the background instead of
+    // blocking the save behind a full reload of every table — that wait was what
+    // made saving feel slow.
+    Promise.resolve()
+      .then(() => loadAllData({ silent: true, only: "costTrackers" }))
+      .then(() => { try { refreshWebsiteLists(); } catch {} })
+      .catch(() => {});
   } catch (error) {
     showToast(error.message || String(error), true);
   }
@@ -2767,7 +3150,6 @@ function loadCostTrackerIntoForm(tracker) {
 
   updateCostSheetHeaderFromSelectedJob();
   recomputeCostTrackerTotals();
-  showToast(tracker.job_id ? "Cost tracker loaded for editing." : "Unassigned cost tracker loaded. Choose a Job / AFE to assign it.");
 }
 
 function resetCostTrackerForm(preserveJob = false) {
@@ -2798,7 +3180,6 @@ function loadCostTrackerForJob(jobId, announce = true) {
   setFormValue(form, "total_job_days", job.total_job_days || calculateJobDays(job.start_date, job.end_date) || "");
   populateCostTrackerFromTemplateForJob(job);
   updateCostSheetHeaderFromSelectedJob();
-  if (announce) showToast("A new named cost tracker template is ready for this job. It will save as a separate tracker when you click Save Cost Tracker.");
 }
 
 /* ==========================================================================
@@ -2902,7 +3283,7 @@ async function quickAssignCostTracker(trackerId, jobId) {
     });
 
     mergeStateRow("costTrackers", updated);
-    await loadAllData({ silent: true });
+    await loadAllData({ silent: true, only: "costTrackers" });
     refreshWebsiteLists();
     showToast(jobId ? "Cost tracker assigned to the selected job." : "Cost tracker changed back to unassigned.");
   } catch (error) {
@@ -2977,7 +3358,7 @@ async function handleCreateJob(event) {
 
     form.reset();
     resetJobFormMode();
-    await loadAllData({ silent: true });
+    await loadAllData({ silent: true, only: ["jobs", "clients"] });
     refreshWebsiteLists();
 
     if (pendingTrackerId && !editingId) {
@@ -3168,7 +3549,7 @@ async function handleCreateEmployee(event) {
     refreshWebsiteLists();
     form.reset();
     resetEmployeeFormMode();
-    await loadAllData({ silent: true });
+    await loadAllData({ silent: true, only: "employees" });
     refreshWebsiteLists();
 
     showToast(editingId ? "Employee updated and saved to Supabase." : "Employee added to the website table and saved to Supabase.");
@@ -3238,7 +3619,7 @@ function renderCostTrackers() {
         <td data-label="Margin" class="money-cell">${formatPercent(costTrackerMargin(row))}</td>
         <td data-label="Actions" class="table-actions">
           <button class="link-btn" data-edit-cost="${escapeAttr(row.id)}" type="button">Edit</button>
-          <button class="link-btn" data-preview-cost="${escapeAttr(row.id)}" type="button">Preview</button>
+          <button class="link-btn" data-preview-cost="${escapeAttr(row.id)}" type="button">View</button>
           <button class="link-btn" data-download-cost="${escapeAttr(row.id)}" type="button">Download</button>
           ${row.job_id ? `<button class="link-btn" data-invoice-from-cost="${escapeAttr(row.id)}" type="button">Invoice</button>` : ""}
           <button class="link-btn danger-text" data-delete-type="costTrackers" data-delete-id="${escapeAttr(row.id)}" type="button">Delete</button>
@@ -3270,7 +3651,7 @@ function renderInvoices() {
         <td data-label="PDF">${invoice.pdf_url ? `<a href="${escapeAttr(invoice.pdf_url)}" target="_blank" rel="noreferrer">Open PDF</a>` : "-"}</td>
         <td data-label="Actions" class="table-actions">
           <button class="link-btn" data-edit-invoice="${escapeAttr(invoice.id)}" type="button">Edit</button>
-          <button class="link-btn" data-preview-invoice="${escapeAttr(invoice.id)}" type="button">Preview</button>
+          <button class="link-btn" data-preview-invoice="${escapeAttr(invoice.id)}" type="button">View</button>
           <button class="link-btn" data-download-invoice="${escapeAttr(invoice.id)}" type="button">Download</button>
           <button class="link-btn danger-text" data-delete-type="invoices" data-delete-id="${escapeAttr(invoice.id)}" type="button">Delete</button>
         </td>
@@ -3629,30 +4010,55 @@ function clearInvoiceLines() {
   if (legacyContainer) legacyContainer.innerHTML = "";
 }
 
+// Rate/Amount cells stay blank for empty or zero values, so only the line that
+// actually carries the total (typically the first row) shows a number. Comment
+// rows, blank rows, and saved invoices that stored 0 render as empty. The user
+// can still type a value into any row.
+function invoiceRateAmountValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const num = Number(value);
+  if (Number.isFinite(num) && num === 0) return "";
+  return value;
+}
+
 function addInvoiceLine(defaults = {}) {
   const templateBody = $("#invoiceTemplateLineItems");
   if (!templateBody) return;
-
-  // Rate/Amount show a value only when there actually is one. Zero or empty stays
-  // blank (no "0"), so continuation rows after the first stay empty — matching the
-  // View invoice, where only the first row carries the rate total and amount.
-  const moneyOrBlank = (value) => {
-    if (value === null || value === undefined || value === "") return "";
-    const numeric = Number(value);
-    return Number.isFinite(numeric) && numeric !== 0 ? value : "";
-  };
 
   const row = document.createElement("tr");
   row.className = "invoice-template-line";
   row.innerHTML = `
     <td><input data-field="quantity" type="number" min="0" step="1" value="${escapeAttr(valueOr(defaults.quantity, 1))}" /></td>
     <td><textarea class="line-description" data-field="description" rows="2" placeholder="Description">${escapeHtml(defaults.description || "")}</textarea></td>
-    <td><input data-field="rate" type="number" min="0" step="0.01" value="${escapeAttr(moneyOrBlank(defaults.rate))}" /></td>
-    <td><input data-field="amount" type="number" min="0" step="0.01" value="${escapeAttr(moneyOrBlank(defaults.amount))}" /></td>
+    <td><input data-field="rate" type="number" min="0" step="0.01" value="${escapeAttr(invoiceRateAmountValue(defaults.rate))}" /></td>
+    <td><input data-field="amount" type="number" min="0" step="0.01" value="${escapeAttr(invoiceRateAmountValue(defaults.amount))}" /></td>
     <td><button class="icon-btn remove-line" type="button" aria-label="Remove invoice line">×</button></td>
   `;
   templateBody.appendChild(row);
+  autosizeInvoiceDescription(row.querySelector(".line-description"));
 }
+
+// Invoice line-item descriptions can be multi-line. Grow the textarea to fit
+// its content (instead of clipping everything after the first line). The CSS
+// height is set with !important for the fixed A4 layout, so the inline height
+// must also be marked important to win the cascade.
+function autosizeInvoiceDescription(el) {
+  if (!el) return;
+  el.style.setProperty("height", "auto", "important");
+  const next = el.scrollHeight;
+  if (next > 0) el.style.setProperty("height", `${next}px`, "important");
+}
+
+function autosizeAllInvoiceDescriptions(root) {
+  (root || document).querySelectorAll?.(".invoice-template-line .line-description")
+    ?.forEach?.((el) => autosizeInvoiceDescription(el));
+}
+window.autosizeAllInvoiceDescriptions = autosizeAllInvoiceDescriptions;
+
+document.addEventListener("input", (event) => {
+  const ta = event.target;
+  if (ta?.classList?.contains?.("line-description")) autosizeInvoiceDescription(ta);
+});
 
 function handleBuilderClick(event) {
   const removeButton = event.target.closest(".remove-line");
@@ -3840,7 +4246,6 @@ function fillInvoiceFromCostTracker(tracker, options = {}) {
   clearInvoiceLines();
   groupCostItemsForInvoice(tracker).forEach((item) => addInvoiceLine(item));
   recomputeInvoiceTotals();
-  showToast("Invoice autofilled from the selected cost tracker. Review it, then save or download the PDF.");
 }
 
 function defaultCompanyBlock() {
@@ -3988,7 +4393,6 @@ function loadInvoiceIntoForm(invoice) {
   else addInvoiceLine({ quantity: 1, description: invoice.description || "Invoice total", rate: invoice.subtotal || 0, amount: invoice.subtotal || 0 });
 
   recomputeInvoiceTotals();
-  showToast("Invoice loaded into the template for editing.");
 }
 
 function previewInvoiceFromForm() {
@@ -4500,7 +4904,6 @@ function printDocumentCss() {
     if (savedTracker) {
       loadCostTrackerIntoForm(savedTracker, { source: "dropdown" });
       if (announce) {
-        showToast(`Loaded "${getTrackerName(savedTracker)}" for job ${job.job_number || job.job_name || ""}.`);
       }
       return;
     }
@@ -4517,7 +4920,6 @@ function printDocumentCss() {
     flashCostTrackerSheet();
 
     if (announce) {
-      showToast("No saved cost tracker exists for this job yet. A blank template is ready.");
     }
   };
 
@@ -4934,34 +5336,55 @@ function printDocumentCss() {
     const data = timesheetDataFromForm();
     const fileName = filename || timesheetFileName(data);
 
+    // Export via html2canvas + jsPDF directly (same proven mechanism as the working
+    // invoice export); the html2pdf() wrapper this used was throwing "download failed".
     try { await ensurePdfLibraries(); } catch {}
-    if (!window.html2pdf) {
-      showToast("PDF library was unavailable. Refresh and try again.", true);
+    const html2canvasLib = window.html2canvas;
+    const JsPdfCtor = window.jspdf?.jsPDF || window.jsPDF;
+    if (!html2canvasLib || !JsPdfCtor) {
+      if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet");
+      showToast("PDF library was unavailable. The print/save PDF window opened instead.", true);
       return;
     }
 
-    const wrapper = document.createElement("div");
-    wrapper.className = "pdf-workbench timesheet-pdf-workbench";
-    wrapper.innerHTML = html;
-    document.body.appendChild(wrapper);
+    const root = document.createElement("div");
+    root.style.position = "fixed";
+    root.style.left = "0";
+    root.style.top = "0";
+    root.style.width = "8.5in";
+    root.style.height = "11in";
+    root.style.background = "#ffffff";
+    root.style.pointerEvents = "none";
+    root.style.zIndex = "-2147483000";
+    root.innerHTML = html;
+    document.body.appendChild(root);
 
-    const element = wrapper.querySelector(".timesheet-template-document") || wrapper;
+    const element = root.querySelector(".timesheet-template-document") || root;
     try {
-      await window.html2pdf()
-        .set({
-          margin: 0,
-          filename: safeFileName(fileName),
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
-        })
-        .from(element)
-        .save();
+      const imgs = Array.from(root.querySelectorAll("img"));
+      await Promise.all(imgs.map((img) => new Promise((resolve) => {
+        img.crossOrigin = "anonymous";
+        if (!img.getAttribute("src") || img.complete) return resolve();
+        img.onload = resolve; img.onerror = resolve; window.setTimeout(resolve, 2500);
+      })));
+      try { await document.fonts?.ready; } catch {}
+      const rect = element.getBoundingClientRect();
+      const width = Math.ceil(rect.width || 816);
+      const height = Math.ceil(rect.height || 1056);
+      const canvas = await html2canvasLib(element, {
+        scale: 2, useCORS: true, allowTaint: true, backgroundColor: "#ffffff",
+        logging: false, scrollX: 0, scrollY: 0, width, height, windowWidth: width, windowHeight: height
+      });
+      if (!canvas.width || !canvas.height) throw new Error("Timesheet canvas was empty.");
+      const pdf = new JsPdfCtor({ unit: "in", format: "letter", orientation: "portrait", compress: true });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 8.5, 11, undefined, "FAST");
+      pdf.save(safeFileName(fileName));
       showToast("Timesheet PDF downloaded.");
     } catch (error) {
+      console.error("Timesheet PDF export failed:", error);
       showToast("Timesheet PDF download failed. Refresh and try again.", true);
     } finally {
-      wrapper.remove();
+      root.remove();
     }
   }
 
@@ -5048,8 +5471,23 @@ function printDocumentCss() {
       if (error) throw error;
 
       setTimesheetField("timesheet_group_id", groupId);
-      await loadAllData();
+      // Optimistic update so the save feels instant instead of blocking behind a
+      // full reload of every table (that wait was what made saving slow). Replace
+      // this group's rows in local state with the just-saved rows, repaint, refresh
+      // the open Job Details timesheets folder, then reconcile with the server in
+      // the background (which fills in the server-generated row IDs).
+      try {
+        const others = ((state.data && state.data.timesheets) || []).filter((entry) => entry.timesheet_group_id !== groupId);
+        state.data.timesheets = [...rows, ...others];
+      } catch {}
+      try { window.renderAll?.(); } catch {}
+      try { window.refreshWebsiteLists?.(); } catch {}
+      try { window.__pimpRefreshOpenJobDetails?.(data.job_id); } catch {}
       showToast("Daily timesheet saved.");
+      Promise.resolve()
+        .then(() => loadAllData({ silent: true, only: "timesheets" }))
+        .then(() => { try { window.refreshWebsiteLists?.(); } catch {} })
+        .catch(() => {});
     } catch (error) {
       showToast(error.message, true);
     }
@@ -5156,7 +5594,7 @@ function printDocumentCss() {
         <td data-label="Total Hours" class="money-cell">${cleanNumberDisplay(group.totalHours)}</td>
         <td data-label="Ticket #">${escapeHtml(group.ticket || "-")}</td>
         <td data-label="Actions" class="table-actions">
-          <button class="link-btn" data-view-timesheet-group="${escapeAttr(group.id)}" type="button">Preview</button>
+          <button class="link-btn" data-view-timesheet-group="${escapeAttr(group.id)}" type="button">View</button>
           <button class="link-btn" data-download-timesheet-group="${escapeAttr(group.id)}" type="button">Download</button>
           <button class="link-btn danger-text" data-delete-timesheet-group="${escapeAttr(group.id)}" type="button">Delete</button>
         </td>
@@ -5413,7 +5851,6 @@ function printDocumentCss() {
     window.fitInvoiceTemplateToViewport?.();
 
     const subtotal = trackerRateTotal(tracker);
-    showToast(`Invoice filled from "${getTrackerName(tracker)}". Subtotal uses Rate Total: ${money(subtotal)}.`);
   };
 
   fillInvoiceFromSelectedCostTracker = function fillInvoiceFromSelectedCostTrackerRateTotal() {
@@ -5442,28 +5879,15 @@ function printDocumentCss() {
 
     const visibleItems = rawItems.slice(0, 8);
     const emptyRowsNeeded = Math.max(0, 8 - visibleItems.length);
-    // A row only shows a Rate/Amount when it actually carries money. Description-only
-    // continuation rows stay blank (no $0.00), so the View matches the create editor,
-    // which leaves every row after the first one empty.
-    const hasMoney = (value) => {
-      if (value === "" || value === null || value === undefined) return false;
-      const numeric = Number(value);
-      return Number.isFinite(numeric) && numeric !== 0;
-    };
     const lineRows = [
-      ...visibleItems.map((item) => {
-        const showRate = hasMoney(item.rate);
-        const showAmount = hasMoney(item.amount);
-        const showMoney = showRate || showAmount;
-        return `
+      ...visibleItems.map((item) => `
         <tr>
           <td>${cleanNumberDisplay(item.quantity || 1)}</td>
           <td><div class="static-multiline">${escapeHtml(item.description || "")}</div></td>
-          <td class="amount-text">${showMoney ? money(showRate ? item.rate : item.amount) : ""}</td>
-          <td class="amount-text">${showMoney ? money(showAmount ? item.amount : item.rate) : ""}</td>
+          <td class="amount-text">${money(item.rate ?? item.amount)}</td>
+          <td class="amount-text">${money(item.amount)}</td>
         </tr>
-      `;
-      }),
+      `),
       ...Array.from({ length: emptyRowsNeeded }, () => `
         <tr class="invoice-empty-row"><td></td><td></td><td></td><td></td></tr>
       `)
@@ -7328,41 +7752,8 @@ function printDocumentCss() {
     try { return typeof findEmployee === "function" ? findEmployee(id) : null; } catch { return null; }
   }
 
-  window.renderInvoices = function renderInvoicesFinal() {
-    const table = document.getElementById("invoicesTable");
-    const count = document.getElementById("invoicesCount");
-    if (!table || !count) return;
-    const rows = typeof filtered === "function"
-      ? filtered(state.data.invoices || [], ["invoice_number", "status", "bill_to", "project"])
-      : (state.data.invoices || []);
-
-    count.textContent = rows.length;
-    table.innerHTML = rows.map((invoice) => {
-      const job = findJobFinal(invoice.job_id);
-      const status = normalizeInvoiceStatus(invoice.status);
-      return `
-        <tr>
-          <td data-label="Invoice #"><strong>${safeText(invoice.invoice_number || "-")}</strong></td>
-          <td data-label="Job">${safeText(job?.job_number || invoice.po_number || "-")}<br><span class="muted">${safeText(job?.job_name || invoice.project || "")}</span></td>
-          <td data-label="Status">
-            <select class="invoice-status-select" data-invoice-status-id="${safeAttrFinal(invoice.id)}" aria-label="Update invoice status">
-              ${invoiceStatusOptions(status)}
-            </select>
-          </td>
-          <td data-label="Invoice Date">${humanDate(invoice.invoice_date)}</td>
-          <td data-label="Due">${humanDate(invoice.due_date)}</td>
-          <td data-label="Total" class="money-cell">${humanMoney(invoiceTotalFinal(invoice))}</td>
-          <td data-label="Balance" class="money-cell">${humanMoney(invoiceBalanceFinal(invoice))}</td>
-          <td data-label="Actions" class="table-actions">
-            <button class="link-btn" data-edit-invoice="${safeAttrFinal(invoice.id)}" type="button">Edit</button>
-            <button class="link-btn" data-preview-invoice="${safeAttrFinal(invoice.id)}" type="button">Preview</button>
-            <button class="link-btn" data-download-invoice="${safeAttrFinal(invoice.id)}" type="button">Download</button>
-            <button class="link-btn danger-text" data-delete-type="invoices" data-delete-id="${safeAttrFinal(invoice.id)}" type="button">Delete</button>
-          </td>
-        </tr>`;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8">No records found.</td></tr>');
-  };
-  try { renderInvoices = window.renderInvoices; } catch {}
+  /* optimized: removed dead superseded renderInvoices (renderInvoicesFinal) —
+     the live invoices renderer is renderInvoicesWithInlineStatusFinal (standalone). */
 
   async function updateInvoiceStatusDirect(invoiceId, newStatus) {
     const status = normalizeInvoiceStatus(newStatus);
@@ -7531,7 +7922,7 @@ function printDocumentCss() {
       resetAssignmentForm();
       if (typeof hydrateSelects === "function") hydrateSelects();
       if (typeof renderAssignments === "function") renderAssignments();
-      if (typeof loadAllData === "function") await loadAllData({ silent: true });
+      if (typeof loadAllData === "function") await loadAllData({ silent: true, only: "assignments" });
     } catch (error) {
       showToast(error.message || String(error), true);
     }
@@ -7873,7 +8264,7 @@ document.addEventListener("click", (event) => {
   const previousRenderTimesheets = typeof renderTimesheets === "function" ? renderTimesheets : null;
   window.renderTimesheets = function renderTimesheetsFinalLabels() {
     if (previousRenderTimesheets) previousRenderTimesheets();
-    document.querySelectorAll('[data-view-timesheet-group]').forEach((button) => { button.textContent = "Preview"; });
+    document.querySelectorAll('[data-view-timesheet-group]').forEach((button) => { button.textContent = "View"; });
     document.querySelectorAll('[data-download-timesheet-group]').forEach((button) => { button.textContent = "Download"; });
     document.querySelectorAll('#previewTimesheetBtn').forEach((button) => button.remove());
   };
@@ -7918,15 +8309,8 @@ document.addEventListener("click", (event) => {
     if (pms && job) pms.value = job.job_number || '';
   }
 
-  const priorRenderInvoices = typeof renderInvoices === 'function' ? renderInvoices : null;
-  window.renderInvoices = function renderInvoicesWithoutPdfColumn() {
-    if (priorRenderInvoices) priorRenderInvoices();
-    fixInvoiceTableHeader();
-    document.querySelectorAll('#invoicesTable tr').forEach((tr) => {
-      tr.querySelectorAll('td[data-label="PDF"]').forEach((td) => td.remove());
-    });
-  };
-  try { renderInvoices = window.renderInvoices; } catch {}
+  /* optimized: removed dead superseded renderInvoices (renderInvoicesWithoutPdfColumn) —
+     the live invoices renderer is renderInvoicesWithInlineStatusFinal (standalone). */
 
   document.addEventListener('DOMContentLoaded', () => {
     removePendingJobStatuses();
@@ -8146,7 +8530,7 @@ document.addEventListener("click", (event) => {
     const statusClass = exists ? (downloaded ? "downloaded" : "available") : "missing";
     const statusText = exists ? (downloaded ? "Downloaded" : "Ready") : "Not made yet";
     const actionHtml = exists
-      ? `<button class="link-btn" ${previewAttr || ""} type="button">Preview</button>
+      ? `<button class="link-btn" ${previewAttr || ""} type="button">View</button>
          <button class="link-btn" ${downloadAttr || ""} type="button">Download</button>`
       : `<button class="link-btn" data-doc-guide="${safeAttrText(guideView)}" data-doc-guide-job="${safeAttrText(jobId || "")}" type="button">${safeText(guideLabel || "Go")}</button>`;
     return `
@@ -8626,7 +9010,7 @@ document.addEventListener("click", (event) => {
     const statusClass = exists ? (downloaded ? "downloaded" : "available") : "missing";
     const statusText = exists ? (downloaded ? "Downloaded" : "Ready") : "Not made yet";
     const actions = exists
-      ? `<button class="link-btn" ${previewAttr || ""} type="button">Preview</button>
+      ? `<button class="link-btn" ${previewAttr || ""} type="button">View</button>
          <button class="link-btn" ${downloadAttr || ""} type="button">Download</button>`
       : `<button class="link-btn" data-doc-guide="${attr(guideView)}" data-doc-guide-job="${attr(jobId || "")}" type="button">${html(guideLabel || "Go")}</button>`;
     return `
@@ -8680,7 +9064,7 @@ document.addEventListener("click", (event) => {
                   <span class="status document-status ${downloaded ? "downloaded" : "available"}">${downloaded ? "Downloaded" : "Ready"}</span>
                 </div>
                 <div class="timesheet-mini-actions">
-                  <button class="link-btn" data-view-timesheet-group="${attr(group.id)}" type="button">Preview</button>
+                  <button class="link-btn" data-view-timesheet-group="${attr(group.id)}" type="button">View</button>
                   <button class="link-btn" data-download-timesheet-group="${attr(group.id)}" type="button">Download</button>
                 </div>
               </article>
@@ -9138,14 +9522,8 @@ document.addEventListener("click", (event) => {
     try { hydrateSelects = window.hydrateSelects; } catch {}
   }
 
-  const previousRenderJobsFinal = typeof renderJobs === "function" ? renderJobs : null;
-  if (previousRenderJobsFinal) {
-    window.renderJobs = function renderJobsWithCostTrackerActionLabelFinal() {
-      previousRenderJobsFinal.call(this);
-      relabelJobActions();
-    };
-    try { renderJobs = window.renderJobs; } catch {}
-  }
+  /* optimized: removed dead superseded renderJobs wrapper (renderJobsWithCostTrackerActionLabelFinal) —
+     relabelJobActions still runs via the hydrateSelects wrapper; live renderer is renderClosedJobsFinal. */
 
   function rowCells(values) {
     return values.map((value) => `<td>${value}</td>`).join("");
@@ -9704,13 +10082,19 @@ document.addEventListener("click", (event) => {
       if (error) throw error;
 
       showToast(`${capitalize(config.label)} deleted.`);
-      // Reconcile with the server in the background (non-blocking) so the UI stays
-      // snappy. The row is already gone locally; this just catches any server-side
-      // cascades or edits without freezing the table behind a full reload.
-      Promise.resolve()
-        .then(() => loadAllData({ silent: true }))
-        .then(() => { try { refreshWebsiteLists(); } catch {} })
-        .catch(() => {});
+      // Only jobs and employees can have server-side cascades/detach effects, so
+      // only they need a background reconcile reload. Invoices and cost trackers
+      // have no dependencies — the optimistic local removal above is already
+      // complete and correct. Reloading for those caused the deleted row to briefly
+      // REAPPEAR and then vanish again (a fresh full fetch — or an in-flight reload
+      // returned by the loadAllData coalescer — could momentarily still include the
+      // just-deleted row). Skipping the reload keeps the row simply gone.
+      if (type === "jobs" || type === "employees") {
+        Promise.resolve()
+          .then(() => loadAllData({ silent: true, only: type === "jobs" ? ["jobs", "documents"] : ["employees", "assignments", "timesheets"] }))
+          .then(() => { try { refreshWebsiteLists(); } catch {} })
+          .catch(() => {});
+      }
     } catch (error) {
       // Server delete failed — restore the snapshot so the row reappears.
       affectedKeys.forEach((key) => {
@@ -10583,7 +10967,7 @@ function documentTypeVariants(type, fileName = "") {
 
       form.reset();
       try { if (typeof resetJobFormMode === "function") resetJobFormMode(); } catch {}
-      await loadAllData({ silent: true });
+      await loadAllData({ silent: true, only: ["jobs", "clients"] });
       try { refreshWebsiteLists(); } catch {}
       try { renderUploadedFilesPanel(); } catch {}
 
@@ -10669,7 +11053,7 @@ function documentTypeVariants(type, fileName = "") {
       form.reset();
       window.__pimpExpandedJobId = jobId;
 
-      await loadAllData({ silent: true });
+      await loadAllData({ silent: true, only: "jobs" });
       try { hydrateSelects(); } catch {}
       try { refreshWebsiteLists(); } catch {}
       try { renderUploadedFilesPanel(); } catch {}
@@ -11106,7 +11490,7 @@ async function openUploadedDocument(docId, download = false) {
     const latestTimesheetDoc = attachedTimesheetDocs[0];
 
     const trackerActions = latestTracker ? `
-      <button class="link-btn" data-preview-cost="${attr(latestTracker.id)}" type="button">Preview</button>
+      <button class="link-btn" data-preview-cost="${attr(latestTracker.id)}" type="button">View</button>
       <button class="link-btn" data-download-cost="${attr(latestTracker.id)}" type="button">Download</button>
       ${guideButton("costTrackers", job.id, "Edit")}
     ` : (latestCostDoc ? `
@@ -11116,7 +11500,7 @@ async function openUploadedDocument(docId, download = false) {
     ` : "");
 
     const invoiceActions = latestInvoice ? `
-      <button class="link-btn" data-preview-invoice="${attr(latestInvoice.id)}" type="button">Preview</button>
+      <button class="link-btn" data-preview-invoice="${attr(latestInvoice.id)}" type="button">View</button>
       <button class="link-btn" data-download-invoice="${attr(latestInvoice.id)}" type="button">Download</button>
       ${guideButton("invoices", job.id, "Edit")}
     ` : (latestInvoiceDoc ? `
@@ -11237,37 +11621,8 @@ async function openUploadedDocument(docId, download = false) {
     `;
   }
 
-  window.renderJobs = function renderJobsWithExpandableDocuments() {
-    const rows = typeof filtered === "function"
-      ? filtered(state.data.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state.data.jobs || []);
-
-    const count = document.getElementById("jobsCount");
-    const table = document.getElementById("jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-
-    table.innerHTML = rows.map((job) => {
-      const isOpen = window.__pimpExpandedJobId === job.id;
-      return `
-        <tr class="job-main-row ${isOpen ? "expanded" : ""}" data-job-row-id="${attr(job.id)}">
-          <td data-label="Job #"><strong>${html(job.job_number || "-")}</strong><br><button class="link-btn job-row-open-btn" data-toggle-job-details="${attr(job.id)}" type="button">${isOpen ? "Hide details" : "View details"}</button></td>
-          <td data-label="Project Name">${html(job.job_name || "-")}${jobSummaryChips(job)}</td>
-          <td data-label="Company">${html(job.company_name || "-")}</td>
-          <td data-label="Location">${html(job.location || "-")}</td>
-          <td data-label="Status"><span class="status ${html(job.status || "")}">${html(job.status || "unknown")}</span></td>
-          <td data-label="Dates">${html(dateText(job.start_date))}${job.end_date && job.end_date !== job.start_date ? " to " + html(dateText(job.end_date)) : ""}</td>
-          <td data-label="Files">Click job to view documents</td>
-          <td data-label="Actions" class="actions-cell">
-            <button class="link-btn" data-edit-job="${attr(job.id)}" type="button">Edit</button>
-            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-        ${isOpen ? buildJobDetails(job) : ""}
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8">No records found.</td></tr>');
-  };
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsWithExpandableDocuments) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
 
   window.renderDocuments = function renderDocumentsMovedToJobs() {
     const count = document.getElementById("documentsCount");
@@ -13355,11 +13710,18 @@ async function openUploadedDocument(docId, download = false) {
 
       form.reset();
       window.__pimpExpandedJobId = jobId;
-      try { await loadAllData({ silent: true }); } catch {}
+      // uploadFileAndSaveRecord() already merged the saved rows into local state
+      // (saveUploadedDocumentRecord -> mergeStateRecord), so DON'T push them again —
+      // that made every uploaded file show up twice in Attached Files. Just repaint
+      // from the already-updated state now, then reconcile in the background instead
+      // of blocking the UI on a full reload of every table.
       refreshUi();
-      // Repopulate the open Job Details modal (the Attached Files section) right away,
-      // instead of only after a manual page refresh.
+      // Repopulate the open Job Details modal (the Attached Files section) right away.
       try { window.__pimpRefreshOpenJobDetails?.(jobId); } catch {}
+      Promise.resolve()
+        .then(() => { if (typeof loadAllData === "function") return loadAllData({ silent: true, only: "documents" }); })
+        .then(() => { try { refreshUi(); } catch {} try { window.__pimpRefreshOpenJobDetails?.(jobId); } catch {} })
+        .catch(() => {});
 
       let message = `${uploadedDocs.length} file${uploadedDocs.length === 1 ? "" : "s"} added to ${job.job_number || job.job_name || "this job"}.`;
       if (importedTrackers.length) message += ` ${importedTrackers.length} editable cost tracker${importedTrackers.length === 1 ? "" : "s"} created.`;
@@ -13399,15 +13761,8 @@ async function openUploadedDocument(docId, download = false) {
       if (button) button.textContent = "Upload to Job";
     });
   }
-  const priorRenderJobs = window.renderJobs || (typeof renderJobs === "function" ? renderJobs : null);
-  if (priorRenderJobs) {
-    window.renderJobs = function renderJobsWithUploadRepairUi() {
-      const result = priorRenderJobs.apply(this, arguments);
-      improveJobUploadForms();
-      return result;
-    };
-    try { renderJobs = window.renderJobs; } catch {}
-  }
+  /* optimized: removed dead superseded renderJobs wrapper (renderJobsWithUploadRepairUi) —
+     improveJobUploadForms still runs on DOMContentLoaded; live renderer is renderClosedJobsFinal. */
 
   document.addEventListener("DOMContentLoaded", improveJobUploadForms);
   setTimeout(improveJobUploadForms, 0);
@@ -13611,14 +13966,23 @@ This removes it from the job documents list.`)) return;
       if (error) throw error;
 
       state.data.documents = (state.data.documents || []).filter((row) => row.id !== doc.id && row.external_id !== doc.external_id);
-      try { await loadAllData({ silent: true }); } catch {}
+      // Repaint from local state immediately so the deleted file disappears now,
+      // then reconcile with the server in the background instead of blocking on a
+      // full reload of every table (which is what made deleting feel slow).
       try { refreshWebsiteLists(); } catch {}
       try { renderAll(); } catch {}
       try { renderUploadedFilesPanel(); } catch {}
-      // Update the open Job Details modal (Attached Files section) immediately, so the
-      // deleted file disappears now instead of only after a manual page refresh.
       try { window.__pimpRefreshOpenJobDetails?.(doc.job_id); } catch {}
       try { showToast("Document deleted from this job."); } catch {}
+      Promise.resolve()
+        .then(() => { if (typeof loadAllData === "function") return loadAllData({ silent: true, only: "documents" }); })
+        .then(() => {
+          try { refreshWebsiteLists(); } catch {}
+          try { renderAll(); } catch {}
+          try { renderUploadedFilesPanel(); } catch {}
+          try { window.__pimpRefreshOpenJobDetails?.(doc.job_id); } catch {}
+        })
+        .catch(() => {});
     } catch (error) {
       try { showToast(error.message || String(error), true); } catch {}
     }
@@ -13922,17 +14286,8 @@ This removes it from the job documents list.`)) return;
     });
   }
 
-  const previousRenderJobs = typeof window.renderJobs === "function" ? window.renderJobs : (typeof renderJobs === "function" ? renderJobs : null);
-  if (previousRenderJobs && !previousRenderJobs.__sidebarCleanupWrapped) {
-    const wrappedRenderJobs = function renderJobsWithoutCostTrackerActionButton() {
-      const result = previousRenderJobs.apply(this, arguments);
-      removeCostTrackerButtonsFromJobActions();
-      return result;
-    };
-    wrappedRenderJobs.__sidebarCleanupWrapped = true;
-    window.renderJobs = wrappedRenderJobs;
-    try { renderJobs = window.renderJobs; } catch {}
-  }
+  /* optimized: removed dead superseded renderJobs wrapper (renderJobsWithoutCostTrackerActionButton) —
+     live renderer is renderClosedJobsFinal (standalone, has no cost-tracker action buttons). */
 
   document.addEventListener("DOMContentLoaded", () => {
     initSidebarToggle();
@@ -14837,7 +15192,6 @@ This removes it from the job documents list.`)) return;
     } catch {}
 
     try { window.fitInvoiceTemplateToViewport?.(); } catch {}
-    try { showToast(`Invoice filled from "${trackerName(tracker)}". Subtotal uses Rate Total: ${moneyText(finalTrackerRateTotal(tracker))}.`); } catch {}
   };
   try { fillInvoiceFromCostTracker = window.fillInvoiceFromCostTracker; } catch {}
 
@@ -15335,6 +15689,10 @@ This removes it from the job documents list.`)) return;
   window.clearInvoiceFormFields = function clearInvoiceFormFields() {
     const form = qs("#invoiceForm");
     if (!form) return;
+
+    try {
+      if (!window.confirm("Clear this invoice? Any unsaved changes will be lost.")) return;
+    } catch {}
 
     clearFormFields(form);
     resetInvoiceDefaults(form);
@@ -15861,47 +16219,8 @@ This removes it from the job documents list.`)) return;
     `;
   }
 
-  window.renderCostTrackers = function renderCostTrackersEquipmentMergedIntoLabor() {
-    const rows = typeof filtered === "function"
-      ? filtered(state.data.costTrackers, ["tracker_name", "notes", "status"])
-      : (state?.data?.costTrackers || []);
-    const table = qs("#costTrackersTable");
-    const count = qs("#costTrackersCount");
-    if (!table || !count) return;
-
-    normalizeCostTrackerTableHeader();
-    count.textContent = rows.length;
-
-    table.innerHTML = rows.map((row) => {
-      const job = typeof findJob === "function" ? findJob(row.job_id) : null;
-      const trackerName = typeof getTrackerName === "function" ? getTrackerName(row) : (row.tracker_name || row.name || "Cost Tracker");
-      const jobLabel = job
-        ? `<strong>${escapeValue(job.job_number || "-")}</strong><br><span class="muted">${escapeValue(job.job_name || "")}</span>`
-        : `<strong>Unassigned</strong><br><span class="muted">Assign below or create a job</span>`;
-      const assignControl = typeof buildInlineJobAssignmentControl === "function" ? buildInlineJobAssignmentControl(row) : "";
-      const margin = typeof costTrackerMargin === "function" ? costTrackerMargin(row) : 0;
-      const formattedMargin = typeof formatPercent === "function" ? formatPercent(margin) : `${(margin * 100).toFixed(2)}%`;
-
-      return `
-        <tr class="${row.job_id ? "" : "is-unassigned"}">
-          <td data-label="Name" class="title-cell"><strong>${escapeValue(trackerName)}</strong><br><span class="muted">${row.job_id ? "Assigned tracker" : "Saved without job"}</span></td>
-          <td data-label="Job / Assignment" class="assignment-cell">
-            ${jobLabel}
-            ${assignControl}
-          </td>
-          <td data-label="Rate Total" class="money-cell rate-total-cell">${moneyValue(typeof costTrackerQuoted === "function" ? costTrackerQuoted(row) : row.quoted_price)}</td>
-          <td data-label="Actions" class="table-actions">
-            <button class="link-btn" data-edit-cost="${escapeValue(row.id)}" type="button">Edit</button>
-            <button class="link-btn" data-preview-cost="${escapeValue(row.id)}" type="button">Preview</button>
-            <button class="link-btn" data-download-cost="${escapeValue(row.id)}" type="button">Download</button>
-            ${row.job_id ? `<button class="link-btn" data-invoice-from-cost="${escapeValue(row.id)}" type="button">Invoice</button>` : ""}
-            <button class="link-btn danger-text" data-delete-type="costTrackers" data-delete-id="${escapeValue(row.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(4) : '<tr><td colspan="4" class="muted">No records found.</td></tr>');
-  };
-  try { renderCostTrackers = window.renderCostTrackers; } catch {}
+  /* optimized: removed dead superseded renderCostTrackers (renderCostTrackersEquipmentMergedIntoLabor) —
+     the live cost-tracker renderer is renderCostTrackersRateOnlyTable (standalone). */
 
   function bindDateInputs() {
     qsa('#jobForm [name="start_date"], #jobForm [name="end_date"]').forEach((input) => {
@@ -16215,7 +16534,7 @@ This removes it from the job documents list.`)) return;
           <td data-label="Ticket #">${esc(daily.ticket || "-")}</td>
           <td data-label="Actions" class="table-actions timesheet-child-actions">
             <button class="link-btn" data-edit-timesheet-daily="${escAttr(daily.id)}" type="button">Edit</button>
-            <button class="link-btn" data-view-timesheet-daily="${escAttr(daily.id)}" type="button">Preview</button>
+            <button class="link-btn" data-view-timesheet-daily="${escAttr(daily.id)}" type="button">View</button>
             <button class="link-btn" data-download-timesheet-daily="${escAttr(daily.id)}" type="button">Download</button>
             <button class="link-btn danger-text" data-delete-timesheet-daily="${escAttr(daily.id)}" type="button">Delete</button>
           </td>
@@ -16479,34 +16798,56 @@ This removes it from the job documents list.`)) return;
   }
 
   async function downloadPdf(html, filename) {
+    // Export via html2canvas + jsPDF directly (the same mechanism as the working
+    // invoice export). The html2pdf() wrapper this used to call was throwing
+    // "download failed".
     try { await ensurePdfLibraries(); } catch {}
-    if (!window.html2pdf) {
+    const html2canvasLib = window.html2canvas;
+    const JsPdfCtor = window.jspdf?.jsPDF || window.jsPDF;
+    if (!html2canvasLib || !JsPdfCtor) {
       if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet");
       if (typeof showToast === "function") showToast("PDF library was unavailable. The print/save PDF window opened instead.", true);
       return;
     }
 
-    const wrapper = document.createElement("div");
-    wrapper.className = "pdf-workbench timesheet-pdf-workbench";
-    wrapper.innerHTML = html;
-    document.body.appendChild(wrapper);
+    const root = document.createElement("div");
+    root.style.position = "fixed";
+    root.style.left = "0";
+    root.style.top = "0";
+    root.style.width = "8.5in";
+    root.style.height = "11in";
+    root.style.background = "#ffffff";
+    root.style.pointerEvents = "none";
+    root.style.zIndex = "-2147483000";
+    root.innerHTML = html;
+    document.body.appendChild(root);
+    const docEl = root.querySelector(".timesheet-template-document") || root;
 
     try {
-      await window.html2pdf()
-        .set({
-          margin: 0,
-          filename: safeFile(filename || "timesheet.pdf"),
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
-        })
-        .from(wrapper.querySelector(".timesheet-template-document") || wrapper)
-        .save();
+      const imgs = Array.from(root.querySelectorAll("img"));
+      await Promise.all(imgs.map((img) => new Promise((resolve) => {
+        img.crossOrigin = "anonymous";
+        if (!img.getAttribute("src") || img.complete) return resolve();
+        img.onload = resolve; img.onerror = resolve; window.setTimeout(resolve, 2500);
+      })));
+      try { await document.fonts?.ready; } catch {}
+      const rect = docEl.getBoundingClientRect();
+      const width = Math.ceil(rect.width || 816);
+      const height = Math.ceil(rect.height || 1056);
+      const canvas = await html2canvasLib(docEl, {
+        scale: 2, useCORS: true, allowTaint: true, backgroundColor: "#ffffff",
+        logging: false, scrollX: 0, scrollY: 0, width, height, windowWidth: width, windowHeight: height
+      });
+      if (!canvas.width || !canvas.height) throw new Error("Timesheet canvas was empty.");
+      const pdf = new JsPdfCtor({ unit: "in", format: "letter", orientation: "portrait", compress: true });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 8.5, 11, undefined, "FAST");
+      pdf.save(safeFile(filename || "timesheet.pdf"));
       if (typeof showToast === "function") showToast("Timesheet PDF downloaded.");
     } catch (error) {
+      console.error("Timesheet PDF export failed:", error);
       if (typeof showToast === "function") showToast("Timesheet PDF download failed. Refresh and try again.", true);
     } finally {
-      wrapper.remove();
+      root.remove();
     }
   }
 
@@ -16527,7 +16868,18 @@ This removes it from the job documents list.`)) return;
         }
       }
 
-      state.data.timesheets = (state.data.timesheets || []).filter((entry) => timesheetGroupKey(entry) !== dailyId);
+      // Remove the deleted rows locally the SAME way the server delete matched
+      // them (by timesheet_group_id, or by row id), not only by the computed key —
+      // otherwise a group id stored only in the summary JSON leaves rows behind and
+      // the timesheet reappears until a full reload.
+      const removedGroupId = daily.first?.timesheet_group_id ? String(daily.first.timesheet_group_id) : "";
+      const removedRowIds = new Set((daily.rows || []).map((row) => String(row?.id ?? "")).filter(Boolean));
+      state.data.timesheets = (state.data.timesheets || []).filter((entry) => {
+        if (String(timesheetGroupKey(entry)) === String(dailyId)) return false;
+        if (removedGroupId && String(entry?.timesheet_group_id || "") === removedGroupId) return false;
+        if (entry?.id != null && removedRowIds.has(String(entry.id))) return false;
+        return true;
+      });
       window.renderTimesheets();
       if (typeof showToast === "function") showToast("Timesheet deleted.");
     } catch (error) {
@@ -16892,7 +17244,6 @@ This removes it from the job documents list.`)) return;
     if (tracker && previousLoadCostTrackerIntoForm) {
       previousLoadCostTrackerIntoForm.call(window, tracker, { source: "popup" });
       openTemplateModal("cost", `Edit Cost Tracker — ${getTrackerName(tracker)}`);
-      if (announce) safeShowToast("Cost tracker opened in a popup window.");
       return;
     }
 
@@ -16903,7 +17254,6 @@ This removes it from the job documents list.`)) return;
     }
 
     openTemplateModal("cost", "Create Cost Tracker");
-    if (announce) safeShowToast("No saved cost tracker was found. A new cost tracker template opened for this job.");
   }
 
   function loadInvoiceForJobPopup(jobId, announce = true) {
@@ -16912,7 +17262,6 @@ This removes it from the job documents list.`)) return;
     if (invoice && previousLoadInvoiceIntoForm) {
       previousLoadInvoiceIntoForm.call(window, invoice);
       openTemplateModal("invoice", `Edit Invoice — ${invoice.invoice_number || "Invoice"}`);
-      if (announce) safeShowToast("Invoice opened in a popup window.");
       return;
     }
 
@@ -16920,7 +17269,6 @@ This removes it from the job documents list.`)) return;
     if (tracker && previousFillInvoiceFromCostTracker) {
       previousFillInvoiceFromCostTracker.call(window, tracker, { keepInvoiceNumber: false });
       openTemplateModal("invoice", "Create Invoice from Cost Tracker");
-      if (announce) safeShowToast("A new invoice opened using this job’s cost tracker.");
       return;
     }
 
@@ -16931,7 +17279,6 @@ This removes it from the job documents list.`)) return;
     }
 
     openTemplateModal("invoice", "Create Invoice");
-    if (announce) safeShowToast("No saved invoice or cost tracker was found. A blank invoice opened for this job.");
   }
 
   window.loadCostTrackerIntoForm = function loadCostTrackerIntoPopupFinal(tracker, options = {}) {
@@ -17418,50 +17765,8 @@ This removes it from the job documents list.`)) return;
     }
   }, true);
 
-  const previousRenderInvoices = typeof window.renderInvoices === "function"
-    ? window.renderInvoices
-    : (typeof renderInvoices === "function" ? renderInvoices : null);
-
-  window.renderInvoices = function renderInvoicesWithViewEditDeleteFinal() {
-    const table = qs("#invoicesTable");
-    const count = qs("#invoicesCount");
-    if (!table || !count) {
-      if (previousRenderInvoices) return previousRenderInvoices.apply(this, arguments);
-      return;
-    }
-
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.invoices || [], ["invoice_number", "status", "bill_to", "project"])
-      : (state?.data?.invoices || []);
-
-    count.textContent = rows.length;
-    table.innerHTML = rows.map((invoice) => {
-      const job = findJobSafe(invoice.job_id);
-      const projectText = job?.job_name || invoice.project || "";
-      const jobText = job?.job_number || invoice.po_number || "-";
-      const status = invoice.status || "unsent";
-
-      return `
-        <tr>
-          <td data-label="Invoice #"><strong>${text(invoice.invoice_number || "-")}</strong></td>
-          <td data-label="Job / Project">${text(jobText)}<br><span class="muted">${text(projectText)}</span></td>
-          <td data-label="Status"><span class="status ${attr(status)}">${text(String(status).replaceAll("_", " "))}</span></td>
-          <td data-label="Invoice Date">${dateText(invoice.invoice_date)}</td>
-          <td data-label="Due">${dateText(invoice.due_date)}</td>
-          <td data-label="Total" class="money-cell">${moneyText(invoiceTotalSafe(invoice))}</td>
-          <td data-label="Balance" class="money-cell">${moneyText(invoiceBalanceSafe(invoice))}</td>
-          <td data-label="Actions" class="table-actions invoice-row-actions">
-            <button class="link-btn" data-preview-invoice="${attr(invoice.id)}" type="button">View</button>
-            <button class="link-btn" data-edit-invoice="${attr(invoice.id)}" type="button">Edit</button>
-            <button class="link-btn" data-download-invoice="${attr(invoice.id)}" type="button">Download</button>
-            <button class="link-btn danger-text" data-delete-type="invoices" data-delete-id="${attr(invoice.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8" class="muted">No records found.</td></tr>');
-  };
-
-  try { renderInvoices = window.renderInvoices; } catch {}
+  /* optimized: removed dead superseded renderInvoices (renderInvoicesWithViewEditDeleteFinal) —
+     the live invoices renderer is renderInvoicesWithInlineStatusFinal (standalone). */
 
   const previousHydrateSelects = typeof window.hydrateSelects === "function"
     ? window.hydrateSelects
@@ -17875,27 +18180,21 @@ This removes it from the job documents list.`)) return;
             title: "Timesheets",
             exists: timesheetExists,
             subtitle: timesheetGroups.length ? `${timesheetGroups.length} saved day${timesheetGroups.length === 1 ? "" : "s"} for this job.` : (latestTimesheetDoc ? `${latestTimesheetDoc.file_name || latestTimesheetDoc.original_file_name || "Uploaded timesheet"} • attached file` : ""),
-            actions: timesheetActions,
+            actions: `
+              <button class="link-btn" data-open-job-timesheets="${safeAttr(job.id)}" type="button">Open Timesheets</button>
+              <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">Add Timesheet</button>
+            `,
             missingAction: `<button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">Create Timesheet</button>`
           })}
         </div>
 
-        <div class="job-details-split-grid">
-          <section class="job-detail-section">
-            <div class="job-detail-section-header">
-              <h5>Timesheets Folder</h5>
-              <button class="link-btn" data-doc-guide="timesheets" data-doc-guide-job="${safeAttr(job.id)}" type="button">+ Timesheet</button>
-            </div>
-            ${timesheetList(timesheetGroups, job.id)}
-          </section>
-
-          <section class="job-detail-section">
-            <div class="job-detail-section-header">
-              <h5>Attached Files</h5>
-            </div>
-            ${uploadedFileList(job.id)}
-          </section>
-        </div>
+${docs.length ? `
+        <section class="job-detail-section job-detail-attached-files-section">
+          <div class="job-detail-section-header">
+            <h5>Attached Files</h5>
+          </div>
+          ${uploadedFileList(job.id)}
+        </section>` : ""}
 
         <section class="job-detail-upload-card">
           <div class="job-detail-upload-heading">
@@ -17958,27 +18257,31 @@ This removes it from the job documents list.`)) return;
     const title = qs("#jobDetailsModalTitle", overlay);
     if (title) title.textContent = `${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}`;
     if (body) body.innerHTML = buildJobDetailsMarkup(job);
+
+    // Reveal the overlay BEFORE running the upgrade passes below. JavaScript is
+    // single-threaded, so the browser still paints only once — after this whole
+    // function returns — meaning there is no flash from showing it "early". The
+    // reason this MUST come first: every upgrade function locates its target with
+    // the selector "#jobDetailsModalOverlay:not(.hidden) #jobDetailsModalBody".
+    // While the overlay still had the "hidden" class, that selector matched
+    // nothing, so the cost-tracker / invoice / document-upload upgrades silently
+    // skipped and the old base design painted, then the async observers corrected
+    // it a moment later (the visible flash). Revealing first lets every upgrade
+    // apply synchronously, before the first paint.
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+
     // buildJobDetailsMarkup emits the base (older) layout for the cost tracker,
-    // invoice, timesheets, and upload cards; several observers then "upgrade" each
-    // one to its final design a moment after open. Doing that here — synchronously,
-    // while the overlay is still hidden and before the browser paints — means the
-    // window shows the final design from the very first frame instead of flashing
-    // the old design and correcting itself. The observers stay in place but find
-    // nothing left to change, so this is purely a head start, not a behavior change.
+    // invoice, timesheets, and upload cards; upgrade each to its final design now,
+    // synchronously, before the browser paints. The async observers stay in place
+    // but find nothing left to change, so this is purely a head start.
     try { window.PIMP_cleanupJobDetailsAndRateOnlyCostTracker?.(); } catch {}
     try { window.PIMP_cleanJobDetailsInvoiceStatusOnly?.(); } catch {}
     try { window.PIMP_normalizeJobDetailsInvoiceStatusControl?.(); } catch {}
     try { window.PIMP_normalizeJobDetailsDocumentUpload?.(); } catch {}
-    overlay.classList.remove("hidden");
-    overlay.setAttribute("aria-hidden", "false");
-    // Swap the base markup's timesheet folder for the final combined folder
-    // synchronously, before the browser paints, so the modal never flashes the older
-    // folder design and then "fixes" itself a moment later. The async observers that
-    // also maintain this folder simply stand down once its marker is present.
     try { window.PIMP_updateTimesheetFolderInJobDetails?.(); } catch {}
-    // Add the Open/Close timesheets button in the same synchronous frame so it is present
-    // the whole time the window is open instead of popping in a moment after open.
     try { window.PIMP_fixJobDetailsTimesheetFolderToggle?.(); } catch {}
+
     document.body.classList.add("job-details-modal-open");
     window.__pimpExpandedJobId = null;
     setTimeout(() => qs(".job-details-modal-close", overlay)?.focus?.(), 30);
@@ -18415,37 +18718,8 @@ This removes it from the job documents list.`)) return;
     `;
   }
 
-  window.renderJobs = function renderJobsWithoutFilesColumnFinal() {
-    normalizeJobsHeaderNoFiles();
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-
-    table.innerHTML = rows.map((job) => {
-      const totalDays = job.total_job_days || window.calculateJobDays(job.start_date, job.end_date);
-      return `
-        <tr class="job-main-row" data-job-row-id="${attr(job.id)}">
-          <td data-label="Job #"><strong>${html(job.job_number || "-")}</strong><br><button class="link-btn job-row-open-btn" data-open-job-details-modal="${attr(job.id)}" type="button">View Details</button></td>
-          <td data-label="Project Name">${html(job.job_name || "-")}${jobSummaryChipsFinal(job)}</td>
-          <td data-label="Company">${html(job.company_name || "-")}</td>
-          <td data-label="Location">${html(job.location || "-")}</td>
-          <td data-label="Status"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
-          <td data-label="Dates">${html(dateText(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${html(dateText(job.end_date))}` : ""}<br><span class="muted">${totalDays ? `${html(cleanDays(totalDays))} weekday${asNumber(totalDays) === 1 ? "" : "s"}` : "Total days auto-calculated"}</span></td>
-          <td data-label="Actions" class="actions-cell">
-            <button class="link-btn" data-edit-job="${attr(job.id)}" type="button">Edit</button>
-            <button class="link-btn" data-open-cost-for-job="${attr(job.id)}" type="button">Cost Tracker</button>
-            <button class="link-btn" data-open-invoice-for-job="${attr(job.id)}" type="button">Invoice</button>
-            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
-  };
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsWithoutFilesColumnFinal) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
 
   function setInvoiceNumberManualPlaceholder(form = qs("#invoiceForm")) {
     const input = form?.querySelector?.('[name="invoice_number"]');
@@ -18945,48 +19219,8 @@ This removes it from the job documents list.`)) return;
     `;
   }
 
-  window.renderJobs = function renderJobsNoCostInvoiceActionsTimesheetDatesAbsoluteFinal() {
-    normalizeJobsHeader();
-
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-
-    table.innerHTML = rows.map((job) => {
-      const totalDays = weekdayTotalForJob(job);
-      const totalText = totalDays
-        ? `${esc(cleanNum(totalDays))} weekday${num(totalDays) === 1 ? "" : "s"}`
-        : "Total days auto-calculated";
-
-      return `
-        <tr class="job-main-row" data-job-row-id="${attr(job.id)}">
-          <td data-label="Job #">
-            <strong>${esc(job.job_number || "-")}</strong><br>
-            <button class="link-btn job-row-open-btn" data-open-job-details-modal="${attr(job.id)}" type="button">View Details</button>
-          </td>
-          <td data-label="Project Name">${esc(job.job_name || "-")}${jobSummaryChipsAbsoluteFinal(job)}</td>
-          <td data-label="Company">${esc(job.company_name || "-")}</td>
-          <td data-label="Location">${esc(job.location || "-")}</td>
-          <td data-label="Status"><span class="status ${attr(job.status || "")}">${esc(job.status || "unknown")}</span></td>
-          <td data-label="Dates">
-            ${esc(fmtDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${esc(fmtDate(job.end_date))}` : ""}<br>
-            <span class="muted">${totalText}</span>
-          </td>
-          <td data-label="Actions" class="actions-cell">
-            <button class="link-btn" data-open-job-details-modal="${attr(job.id)}" type="button">View Details</button>
-            <button class="link-btn" data-edit-job="${attr(job.id)}" type="button">Edit</button>
-            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
-  };
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsNoCostInvoiceActionsTimesheetDatesAbsoluteFinal) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
 
   const previousRenderAll = typeof window.renderAll === "function"
     ? window.renderAll
@@ -19251,45 +19485,8 @@ This removes it from the job documents list.`)) return;
     `;
   }
 
-  window.renderJobs = function renderJobsNoViewDetailsActionFinal() {
-    normalizeJobsHeader();
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-
-    table.innerHTML = rows.map((job) => {
-      const totalDays = weekdayTotalForJobFinal(job);
-      const totalText = totalDays
-        ? `${safeHtml(cleanDaysDisplay(totalDays))} weekday${asNumber(totalDays) === 1 ? "" : "s"}`
-        : "Total days auto-calculated";
-
-      return `
-        <tr class="job-main-row" data-job-row-id="${safeAttr(job.id)}" data-open-job-details-modal="${safeAttr(job.id)}">
-          <td data-label="Job #">
-            <strong>${safeHtml(job.job_number || "-")}</strong>
-          </td>
-          <td data-label="Project Name">${safeHtml(job.job_name || "-")}${jobSummaryChips(job)}</td>
-          <td data-label="Company">${safeHtml(job.company_name || "-")}</td>
-          <td data-label="Location">${safeHtml(job.location || "-")}</td>
-          <td data-label="Status"><span class="status ${safeAttr(job.status || "")}">${safeHtml(job.status || "unknown")}</span></td>
-          <td data-label="Dates">
-            ${safeHtml(formatSafeDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${safeHtml(formatSafeDate(job.end_date))}` : ""}<br>
-            <span class="muted">${totalText}</span>
-          </td>
-          <td data-label="Actions" class="actions-cell">
-            <button class="link-btn" data-edit-job="${safeAttr(job.id)}" type="button">Edit</button>
-            <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${safeAttr(job.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
-  };
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsNoViewDetailsActionFinal) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
 
   function wrapCostTrackerLoader(name) {
     const previous = typeof window[name] === "function" ? window[name] : (typeof globalThis[name] === "function" ? globalThis[name] : null);
@@ -19522,7 +19719,7 @@ This removes it from the job documents list.`)) return;
         sourceSelect.setAttribute("aria-disabled", "true");
         sourceSelect.tabIndex = -1;
       }
-      ensureLockedNotice(form, "invoice-locked-job-note", `Editing invoice for Job / AFE: ${labelForJob(jobId || activeJobDetailsJobId())}`);
+      removeLockedNotice(form, "invoice-locked-job-note");
     } else {
       if (sourceSelect) {
         sourceSelect.removeAttribute("aria-disabled");
@@ -19809,45 +20006,8 @@ This removes it from the job documents list.`)) return;
     headerRow.innerHTML = labels.map((label) => `<th>${safeHtml(label)}</th>`).join("");
   }
 
-  window.renderJobs = function renderJobsWithActionButtonsFixedFinal() {
-    normalizeJobsHeader();
-
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-
-    table.innerHTML = rows.map((job) => {
-      const totalDays = weekdayTotalForJob(job);
-      const totalText = totalDays
-        ? `${safeHtml(cleanDaysDisplay(totalDays))} weekday${numberValue(totalDays) === 1 ? "" : "s"}`
-        : "Total days auto-calculated";
-
-      return `
-        <tr class="job-main-row" data-job-row-id="${safeAttr(job.id)}">
-          <td data-label="Job #"><strong>${safeHtml(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name">${safeHtml(job.job_name || "-")}${jobSummaryChips(job)}</td>
-          <td data-label="Company">${safeHtml(job.company_name || "-")}</td>
-          <td data-label="Location">${safeHtml(job.location || "-")}</td>
-          <td data-label="Status"><span class="status ${safeAttr(job.status || "")}">${safeHtml(job.status || "unknown")}</span></td>
-          <td data-label="Dates">
-            ${safeHtml(formatSafeDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${safeHtml(formatSafeDate(job.end_date))}` : ""}<br>
-            <span class="muted">${totalText}</span>
-          </td>
-          <td data-label="Actions" class="actions-cell">
-            <button class="link-btn job-action-button" data-edit-job="${safeAttr(job.id)}" type="button">Edit</button>
-            <button class="link-btn danger-text job-action-button" data-delete-type="jobs" data-delete-id="${safeAttr(job.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
-  };
-
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsWithActionButtonsFixedFinal) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
 
   // Guard against any older row-level opener seeing action clicks.
   // The final renderer also removes data-open-job-details-modal from the row,
@@ -20154,47 +20314,8 @@ This removes it from the job documents list.`)) return;
       .join("");
   }
 
-  window.renderJobs = function renderJobsProfessionalWorkdaysFinal() {
-    normalizeHeader();
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-
-    table.innerHTML = rows.map((job) => {
-      const days = workdaysForJob(job);
-      const dateRange = `${formatSafeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${formatSafeDate(job.end_date)}` : ""}`;
-      const daysText = days ? `${cleanDays(days)} workday${asNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-      return `
-        <tr class="job-main-row professional-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong>${html(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack">
-              <strong>${html(job.job_name || "-")}</strong>
-              ${docChips(job)}
-            </div>
-          </td>
-          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
-          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
-          <td data-label="Dates" class="job-dates-cell">
-            <span class="job-date-range">${html(dateRange)}</span>
-            <span class="job-workday-count">${html(daysText)}</span>
-          </td>
-          <td data-label="Actions" class="actions-cell job-actions-cell">
-            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
-  };
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsProfessionalWorkdaysFinal) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
 
   function bindCostTrackerSelector() {
     qsa('#costTrackerForm [name="job_id"]').forEach((select) => {
@@ -20401,49 +20522,8 @@ This removes it from the job documents list.`)) return;
       .join("");
   }
 
-  function renderJobsFinal() {
-    normalizeHeader();
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-
-    table.innerHTML = rows.map((job) => {
-      const days = workdaysForJob(job);
-      const dateRange = `${formatSafeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${formatSafeDate(job.end_date)}` : ""}`;
-      const daysText = days ? `${cleanDays(days)} workday${asNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-      return `
-        <tr class="job-main-row professional-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack">
-              <strong>${html(job.job_name || "-")}</strong>
-              ${docChips(job)}
-            </div>
-          </td>
-          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
-          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
-          <td data-label="Dates" class="job-dates-cell">
-            <span class="job-date-range">${html(dateRange)}</span>
-            <span class="job-workday-count">${html(daysText)}</span>
-          </td>
-          <td data-label="Actions" class="actions-cell job-actions-cell">
-            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
-  }
-
-  window.renderJobs = renderJobsFinal;
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsFinal) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
 
   function editJob(jobId) {
     const job = (state?.data?.jobs || []).find((row) => String(row.id || "") === String(jobId || ""));
@@ -20586,46 +20666,8 @@ This removes it from the job documents list.`)) return;
       .map((label) => `<th>${html(label)}</th>`)
       .join("");
   }
-  function renderJobsPlainFinal() {
-    normalizeHeader();
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-    table.innerHTML = rows.map((job) => {
-      const days = workdaysForJob(job);
-      const dateRange = `${formatSafeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${formatSafeDate(job.end_date)}` : ""}`;
-      const daysText = days ? `${cleanDays(days)} workday${asNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-      return `
-        <tr class="job-main-row professional-job-row" data-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack">
-              <strong>${html(job.job_name || "-")}</strong>
-              ${docChips(job)}
-            </div>
-          </td>
-          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
-          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
-          <td data-label="Dates" class="job-dates-cell">
-            <span class="job-date-range">${html(dateRange)}</span>
-            <span class="job-workday-count">${html(daysText)}</span>
-          </td>
-          <td data-label="Actions" class="actions-cell job-actions-cell">
-            <button class="link-btn job-table-action edit" data-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-            <button class="link-btn job-table-action delete danger-text" data-delete-type="jobs" data-delete-id="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-          </td>
-        </tr>
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
-  }
-  window.renderJobs = renderJobsPlainFinal;
-  try { renderJobs = window.renderJobs; } catch {}
+  /* optimized: removed dead superseded renderJobs (renderJobsPlainFinal) —
+     the live closed-jobs renderer is renderClosedJobsFinal (standalone). */
   function editJob(jobId) {
     const job = (state?.data?.jobs || []).find((row) => String(row.id || "") === String(jobId || ""));
     if (!job) {
@@ -21552,36 +21594,72 @@ This removes it from the job documents list.`)) return;
   }
 
   async function downloadDailyPdf(daily) {
-    const html = timesheetHtmlForDaily(daily);
+    // Force a fresh render (ignore any stored html snapshot, which can be a stale
+    // format that captures as an empty page) and export via html2canvas + jsPDF —
+    // the same mechanism as the working invoice export. The html2pdf() wrapper was
+    // throwing "download failed".
+    const html = timesheetHtmlForDaily({ ...daily, html: "" });
     try { await ensurePdfLibraries(); } catch {}
-    if (!window.html2pdf) {
+    const html2canvasLib = window.html2canvas;
+    const JsPdfCtor = window.jspdf?.jsPDF || window.jsPDF;
+    if (!html2canvasLib || !JsPdfCtor) {
       try { if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet"); } catch {}
       try { if (typeof showToast === "function") showToast("PDF library was unavailable. The print/save PDF window opened instead.", true); } catch {}
       return;
     }
 
-    const wrapper = document.createElement("div");
-    wrapper.className = "pdf-workbench timesheet-pdf-workbench";
-    wrapper.innerHTML = html;
-    document.body.appendChild(wrapper);
+    const root = document.createElement("div");
+    root.style.position = "fixed";
+    root.style.left = "0";
+    root.style.top = "0";
+    root.style.width = "8.5in";
+    root.style.height = "11in";
+    root.style.background = "#ffffff";
+    root.style.pointerEvents = "none";
+    root.style.zIndex = "-2147483000";
+    root.innerHTML = html;
+    document.body.appendChild(root);
+    const docEl = root.querySelector(".timesheet-template-document") || root;
     try {
-      await window.html2pdf()
-        .set({
-          margin: 0,
-          filename: filenameForDaily(daily),
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: { unit: "in", format: "letter", orientation: "portrait" }
-        })
-        .from(wrapper.querySelector(".timesheet-template-document") || wrapper)
-        .save();
+      const imgs = Array.from(root.querySelectorAll("img"));
+      await Promise.all(imgs.map((img) => new Promise((resolve) => {
+        img.crossOrigin = "anonymous";
+        if (!img.getAttribute("src") || img.complete) return resolve();
+        img.onload = resolve; img.onerror = resolve; window.setTimeout(resolve, 2500);
+      })));
+      try { await document.fonts?.ready; } catch {}
+      const rect = docEl.getBoundingClientRect();
+      const width = Math.ceil(rect.width || 816);
+      const height = Math.ceil(rect.height || 1056);
+      const canvas = await html2canvasLib(docEl, {
+        scale: 2, useCORS: true, allowTaint: true, backgroundColor: "#ffffff",
+        logging: false, scrollX: 0, scrollY: 0, width, height, windowWidth: width, windowHeight: height
+      });
+      if (!canvas.width || !canvas.height) throw new Error("Timesheet canvas was empty.");
+      const pdf = new JsPdfCtor({ unit: "in", format: "letter", orientation: "portrait", compress: true });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 8.5, 11, undefined, "FAST");
+      pdf.save(filenameForDaily(daily));
       try { if (typeof showToast === "function") showToast("Timesheet PDF downloaded."); } catch {}
-    } catch {
+    } catch (error) {
+      console.error("Timesheet PDF export failed:", error);
       try { if (typeof showToast === "function") showToast("Timesheet PDF download failed. Refresh and try again.", true); } catch {}
     } finally {
-      wrapper.remove();
+      root.remove();
     }
   }
+
+  // Exposed so the standalone Timesheets window (a separate overlay) can download a
+  // saved daily sheet directly, without relying on the job-details-scoped click
+  // handler above reaching it.
+  window.PIMP_downloadTimesheetDailyById = async function (dailyId) {
+    try {
+      const daily = getDailyById(dailyId);
+      if (daily) await downloadDailyPdf(daily);
+      else if (typeof showToast === "function") showToast("I could not find that saved timesheet to download.", true);
+    } catch (error) {
+      try { if (typeof showToast === "function") showToast("Timesheet PDF download failed. Refresh and try again.", true); } catch {}
+    }
+  };
 
   function openPreview(daily) {
     if (!daily) return;
@@ -21912,7 +21990,19 @@ This removes it from the job documents list.`)) return;
         }
       }
 
-      state.data.timesheets = (state.data.timesheets || []).filter((entry) => timesheetGroupKey(entry) !== String(dailyId));
+      // Remove the deleted rows locally the SAME way the server delete above
+      // matched them (by timesheet_group_id, or by row id when there is no group
+      // id), not only by the computed key. A group id that lives only in the
+      // summary JSON would otherwise not match entry.timesheet_group_id, leaving
+      // the rows behind so the timesheet "reappears" until a full reload.
+      const removedGroupId = daily.first?.timesheet_group_id ? String(daily.first.timesheet_group_id) : "";
+      const removedRowIds = new Set((daily.rows || []).map((row) => String(row?.id ?? "")).filter(Boolean));
+      state.data.timesheets = (state.data.timesheets || []).filter((entry) => {
+        if (String(timesheetGroupKey(entry)) === String(dailyId)) return false;
+        if (removedGroupId && String(entry?.timesheet_group_id || "") === removedGroupId) return false;
+        if (entry?.id != null && removedRowIds.has(String(entry.id))) return false;
+        return true;
+      });
       try { if (typeof renderTimesheets === "function") renderTimesheets(); } catch {}
       refreshJobDetailsFolder();
       // The combined folder renderer owns this section now (refreshJobDetailsFolder
@@ -21920,6 +22010,11 @@ This removes it from the job documents list.`)) return;
       // directly. This updates the Job Details window immediately, without a reload.
       try { window.PIMP_updateTimesheetFolderInJobDetails?.(); } catch {}
       try { window.PIMP_fixJobDetailsTimesheetFolderToggle?.(); } catch {}
+      // The timesheets list now lives in its own window and the Job Details card
+      // shows the saved-day count; refresh both so the deleted row disappears and
+      // the card updates without a manual page refresh.
+      try { window.PIMP_refreshJobTimesheetsWindow?.(); } catch {}
+      try { window.__pimpRefreshOpenJobDetails?.(); } catch {}
       try { if (typeof showToast === "function") showToast("Timesheet deleted."); } catch {}
     } catch (error) {
       try { if (typeof showToast === "function") showToast(error.message || String(error), true); } catch {}
@@ -21929,7 +22024,13 @@ This removes it from the job documents list.`)) return;
   document.addEventListener("click", async (event) => {
     const jobDetailsBody = getOpenJobDetailsBody();
     const insideJobDetails = Boolean(jobDetailsBody && event.target.closest?.("#jobDetailsModalBody"));
-    if (!insideJobDetails) return;
+    // The Timesheets window (opened from the Job Details Timesheets card) lives
+    // in its own overlay, not inside #jobDetailsModalBody. Handle its timesheet
+    // row actions here too, so Edit opens the in-place edit popup and calls
+    // stopImmediatePropagation — otherwise the global bubble handler would fire
+    // loadDailyIntoForm() and navigate to the Timesheets page instead.
+    const insideTimesheetsWindow = Boolean(event.target.closest?.("#jobTimesheetsWindowBody"));
+    if (!insideJobDetails && !insideTimesheetsWindow) return;
 
     const toggle = event.target.closest?.("[data-toggle-job-detail-timesheet-folder]");
     if (toggle) {
@@ -22123,6 +22224,12 @@ This removes it from the job documents list.`)) return;
     const section = getTimesheetFolderSection(body);
     if (!section) return;
 
+    // The newer V2 folder-toggle controls (normalizeFolderControls) are added
+    // synchronously when the window opens and own this section now. Stand down
+    // when they are present so this older generation doesn't add a competing
+    // button a moment after open — that async pop-in was the visible flash.
+    if (section.querySelector("[data-job-details-folder-toggle-v2]")) return;
+
     const header = qs(".job-detail-section-header", section);
     if (!header) return;
 
@@ -22297,39 +22404,15 @@ This removes it from the job documents list.`)) return;
       }
     }
 
-    if (!header) return;
-    let actions = qs(".job-detail-section-header-actions", header);
-    if (!actions) {
-      actions = document.createElement("div");
-      actions.className = "job-detail-section-header-actions";
-      header.appendChild(actions);
+    // The folder card itself is the toggle now (its summary carries the V2
+    // attribute above, so clicking the folder opens/closes it). Remove any older
+    // separate "Open/Close timesheets" button and its container so it never
+    // appears in the section header — and stop it from popping in a moment after
+    // the window opens.
+    if (header) {
+      qsa("[data-job-details-folder-toggle-button], .job-details-folder-toggle-btn, .job-detail-section-header-actions", header)
+        .forEach((node) => node.remove());
     }
-
-    // Reuse the old small button if it exists, but remove the old attribute
-    // so older handlers no longer catch it.
-    qsa("[data-job-details-folder-toggle-button]", actions).forEach((oldButton) => {
-      oldButton.removeAttribute("data-job-details-folder-toggle-button");
-      oldButton.setAttribute("data-job-details-folder-toggle-v2", folderId || "");
-      oldButton.classList.add("job-details-folder-toggle-btn");
-    });
-
-    let button = qs("button.job-details-folder-toggle-btn[data-job-details-folder-toggle-v2]", actions);
-    if (!button) {
-      button = document.createElement("button");
-      button.type = "button";
-      button.className = "btn ghost job-details-folder-toggle-btn";
-      button.setAttribute("data-job-details-folder-toggle-v2", folderId || "");
-      actions.insertBefore(button, actions.firstChild);
-    } else {
-      button.setAttribute("data-job-details-folder-toggle-v2", folderId || "");
-    }
-
-    const open = folderIsOpen(card);
-    button.textContent = open ? "Close timesheets" : "Open timesheets";
-    button.setAttribute("aria-expanded", open ? "true" : "false");
-    button.classList.toggle("is-open", open);
-    button.disabled = !card || !folderId;
-    button.title = card ? (open ? "Collapse timesheets folder" : "Open timesheets folder") : "No saved timesheets for this job yet";
   }
 
   function handleToggleClick(event) {
@@ -22517,7 +22600,7 @@ This removes it from the job documents list.`)) return;
           <td data-label="Balance" class="money-cell">${moneyFinalPatch(invoiceBalanceFinalPatch(invoice))}</td>
           <td data-label="Actions" class="table-actions">
             <button class="link-btn" data-edit-invoice="${safeTextFinal(invoice.id)}" type="button">Edit</button>
-            <button class="link-btn" data-preview-invoice="${safeTextFinal(invoice.id)}" type="button">Preview</button>
+            <button class="link-btn" data-preview-invoice="${safeTextFinal(invoice.id)}" type="button">View</button>
             <button class="link-btn" data-download-invoice="${safeTextFinal(invoice.id)}" type="button">Download</button>
             <button class="link-btn danger-text" data-delete-type="invoices" data-delete-id="${safeTextFinal(invoice.id)}" type="button">Delete</button>
           </td>
@@ -22645,18 +22728,23 @@ This removes it from the job documents list.`)) return;
       window.PIMP_LAST_AUTO_REFRESH_AT = Date.now();
       window.PIMP_LAST_AUTO_REFRESH_REASON = reason;
     } catch (error) {
+      // Auto refresh (on tab focus/return) stays silent — no popup unless the
+      // user explicitly clicks Refresh Data. Errors are logged for debugging.
       console.warn("Auto refresh failed:", error);
-      if (typeof showToast === "function") {
-        showToast("Dashboard could not refresh automatically. Use Refresh Data if needed.", true);
-      }
     } finally {
       refreshDashboardDataWhenUserReturns.running = false;
     }
   }
 
+  const RETURN_REFRESH_MIN_INTERVAL_MS = 60000;
   function requestReturnRefresh(reason) {
     if (!state?.session) return;
     if (document.visibilityState && document.visibilityState !== "visible") return;
+
+    // Throttle: switching tabs quickly should not trigger a full reload+render
+    // every time. Only auto-refresh if it has been a while since the last one.
+    const lastAt = Number(window.PIMP_LAST_AUTO_REFRESH_AT || 0);
+    if (lastAt && Date.now() - lastAt < RETURN_REFRESH_MIN_INTERVAL_MS) return;
 
     window.clearTimeout(requestReturnRefresh.timer);
     requestReturnRefresh.timer = window.setTimeout(() => {
@@ -22831,7 +22919,7 @@ This removes it from the job documents list.`)) return;
           <td data-label="Rate Total" class="money-cell rate-total-cell">${moneyText(trackerRate(row))}</td>
           <td data-label="Actions" class="table-actions">
             <button class="link-btn" data-edit-cost="${rowId}" type="button">Edit</button>
-            <button class="link-btn" data-preview-cost="${rowId}" type="button">Preview</button>
+            <button class="link-btn" data-preview-cost="${rowId}" type="button">View</button>
             <button class="link-btn" data-download-cost="${rowId}" type="button">Download</button>
             ${row.job_id ? `<button class="link-btn" data-invoice-from-cost="${rowId}" type="button">Invoice</button>` : ""}
             <button class="link-btn danger-text" data-delete-type="costTrackers" data-delete-id="${rowId}" type="button">Delete</button>
@@ -22934,7 +23022,7 @@ This removes it from the job documents list.`)) return;
   });
 
   function start() {
-    try { observer.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch {}
+    try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
     cleanInvoiceStatusText();
     window.setTimeout(cleanInvoiceStatusText, 250);
   }
@@ -23372,7 +23460,7 @@ This removes it from the job documents list.`)) return;
 
   function start() {
     blankEquipmentNonCostTotals();
-    try { observer.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch {}
+    try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
     window.setTimeout(blankEquipmentNonCostTotals, 100);
     window.setTimeout(blankEquipmentNonCostTotals, 500);
   }
@@ -23886,11 +23974,8 @@ This removes it from the job documents list.`)) return;
     try { eval(`${name} = window["${name}"]`); } catch {}
   }
 
-  wrapGlobalFunction("renderJobs", (previous) => function renderJobsProjectNameWrapper() {
-    const result = previous.apply(this, arguments);
-    renameJobTableLabels();
-    return result;
-  });
+  /* optimized: removed dead superseded renderJobs wrapper (renderJobsProjectNameWrapper) —
+     live renderer is renderClosedJobsFinal (standalone); it sets its own header labels. */
 
   wrapGlobalFunction("updateCostSheetHeaderFromSelectedJob", (previous) => function updateCostSheetHeaderProjectNameWrapper() {
     const result = previous.apply(this, arguments);
@@ -24861,45 +24946,14 @@ This removes it from the job documents list.`)) return;
   function normalizeDashboardHeader() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Status", "Dates", "Rate Total"]
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
       .map((label) => `<th>${html(label)}</th>`)
       .join("");
   }
   function renderDashboardActiveJobs() {
-    const table = qs("#dashboardActiveJobsTable");
-    const count = qs("#dashboardActiveJobsCount");
-    if (!table) return;
-    normalizeDashboardHeader();
-    const rows = activeDashboardJobs();
-    if (count) count.textContent = rows.length;
-
-    table.innerHTML = rows.map((job) => {
-      const tracker = latestCostTrackerForJob(job.id);
-      const rateTotal = rateTotalForTracker(tracker);
-      const days = workdaysForJob(job);
-      const dateRange = `${fmtDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${fmtDate(job.end_date)}` : ""}`;
-      const daysText = days ? `${cleanDays(days)} workday${num(days) === 1 ? "" : "s"}` : "Auto-calculated";
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-      return `
-        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack">
-              <strong>${html(job.job_name || "-")}</strong>
-              ${docChips(job)}
-            </div>
-          </td>
-          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
-          <td data-label="Status" class="job-status-cell"><span class="status ${attr(job.status || "")}">${html(job.status || "unknown")}</span></td>
-          <td data-label="Dates" class="job-dates-cell">
-            <span class="job-date-range">${html(dateRange)}</span>
-            <span class="job-workday-count">${html(daysText)}</span>
-          </td>
-          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(fmtMoney(rateTotal)) : "—"}</strong></td>
-        </tr>
-      `;
-    }).join("") || `<tr><td colspan="7" class="muted">No active jobs found.</td></tr>`;
+    /* optimized: superseded by renderStableOpenJobs (the live Open Jobs renderer).
+       No-op so legacy triggers don't rebuild the table with this old design; the
+       no-flicker renderer + its observers own the Open Jobs table now. */
   }
   window.renderDashboardActiveJobs = renderDashboardActiveJobs;
 
@@ -25107,63 +25161,14 @@ This removes it from the job documents list.`)) return;
   function normalizeDashboardHeader() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Project Status", "Invoice Status", "Dates", "Rate Total", "Actions"]
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
       .map((label) => `<th>${text(label)}</th>`)
       .join("");
   }
 
   function renderDashboardActiveJobsFinal() {
-    const table = qs("#dashboardActiveJobsTable");
-    const count = qs("#dashboardActiveJobsCount");
-    if (!table) return;
-
-    normalizeDashboardHeader();
-    const rows = dashboardActiveJobs();
-    if (count) count.textContent = rows.length;
-
-    table.innerHTML = rows.map((job) => {
-      const tracker = latestCostTrackerForJob(job.id);
-      const invoice = latestInvoiceForJob(job.id);
-      const rateTotal = rateTotalForTracker(tracker);
-      const days = workdaysForJob(job);
-      const dateRange = `${safeDate(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${safeDate(job.end_date)}` : ""}`;
-      const daysText = days ? `${days} workday${toNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
-      const projectStatus = normalizeProjectStatus(job.status);
-      const invoiceStatus = normalizeInvoiceStatus(invoice?.status);
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-
-      return `
-        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${text(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell"><strong>${text(job.job_name || "-")}</strong></td>
-          <td data-label="Company" class="job-company-cell">${text(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${text(job.location || "-")}</td>
-          <td data-label="Project Status" class="dashboard-project-status-cell">
-            <select class="dashboard-inline-status-select dashboard-project-status-select status ${attr(projectStatus)}" data-dashboard-job-status-id="${attr(job.id)}" aria-label="Change project status for ${attr(title)}">
-              ${projectStatusOptions(projectStatus)}
-            </select>
-          </td>
-          <td data-label="Invoice Status" class="dashboard-invoice-status-cell">
-            ${invoice ? `
-              <select class="dashboard-inline-status-select dashboard-invoice-status-select status ${attr(invoiceStatus)}" data-dashboard-invoice-status-id="${attr(invoice.id)}" aria-label="Change invoice status for ${attr(invoice.invoice_number || title)}">
-                ${invoiceStatusOptions(invoiceStatus)}
-              </select>
-            ` : `<span class="muted dashboard-no-invoice">No invoice</span>`}
-          </td>
-          <td data-label="Dates" class="job-dates-cell">
-            <span class="job-date-range">${text(dateRange)}</span>
-            <span class="job-workday-count">${text(daysText)}</span>
-          </td>
-          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? text(moneyText(rateTotal)) : "—"}</strong></td>
-          <td data-label="Actions" class="dashboard-actions-cell">
-            <div class="dashboard-actions-inline">
-              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join("") || `<tr><td colspan="9" class="muted">No active jobs found.</td></tr>`;
+    /* optimized: superseded by renderStableOpenJobs (the live Open Jobs renderer).
+       No-op so legacy triggers don't rebuild the table with this old design. */
   }
 
   async function updateDashboardJobStatus(jobId, statusValue, selectElement) {
@@ -25518,68 +25523,14 @@ This removes it from the job documents list.`)) return;
   function normalizeDashboardHeaderFinal() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Project Status", "Dates", "Rate Total", "Invoice Status", "Actions"]
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
       .map((label) => `<th>${esc(label)}</th>`)
       .join("");
   }
 
   function renderDashboardActiveJobsDocChipsFinal() {
-    const table = qs("#dashboardActiveJobsTable");
-    const count = qs("#dashboardActiveJobsCount");
-    if (!table) return;
-
-    normalizeDashboardHeaderFinal();
-    const rows = activeDashboardJobs();
-    if (count) count.textContent = rows.length;
-
-    table.innerHTML = rows.map((job) => {
-      const tracker = latestCostTrackerForJob(job.id);
-      const invoice = latestInvoiceForJob(job.id);
-      const rateTotal = rateTotalForTracker(tracker);
-      const days = workdaysForJob(job);
-      const dateRange = `${dateLabel(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${dateLabel(job.end_date)}` : ""}`;
-      const daysText = days ? `${days} workday${toNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
-      const projectStatus = normalizeProjectStatus(job.status);
-      const invoiceStatus = normalizeInvoiceStatus(invoice?.status);
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-
-      return `
-        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${esc(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack dashboard-project-stack">
-              <strong>${esc(job.job_name || "-")}</strong>
-              ${jobDocumentChips(job)}
-            </div>
-          </td>
-          <td data-label="Company" class="job-company-cell">${esc(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${esc(job.location || "-")}</td>
-          <td data-label="Project Status" class="dashboard-project-status-cell">
-            <select class="dashboard-inline-status-select dashboard-project-status-select status ${attr(projectStatus)}" data-dashboard-final-job-status-id="${attr(job.id)}" aria-label="Change project status for ${attr(title)}">
-              ${projectStatusOptions(projectStatus)}
-            </select>
-          </td>
-          <td data-label="Dates" class="job-dates-cell">
-            <span class="job-date-range">${esc(dateRange)}</span>
-            <span class="job-workday-count">${esc(daysText)}</span>
-          </td>
-          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? esc(moneyLabel(rateTotal)) : "—"}</strong></td>
-          <td data-label="Invoice Status" class="dashboard-invoice-status-cell">
-            ${invoice ? `
-              <select class="dashboard-inline-status-select dashboard-invoice-status-select status ${attr(invoiceStatus)}" data-dashboard-final-invoice-status-id="${attr(invoice.id)}" aria-label="Change invoice status for ${attr(invoice.invoice_number || title)}">
-                ${invoiceStatusOptions(invoiceStatus)}
-              </select>
-            ` : `<span class="muted dashboard-no-invoice">No invoice</span>`}
-          </td>
-          <td data-label="Actions" class="dashboard-actions-cell">
-            <div class="dashboard-actions-inline">
-              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join("") || `<tr><td colspan="9" class="muted">No active jobs found.</td></tr>`;
+    /* optimized: superseded by renderStableOpenJobs (the live Open Jobs renderer).
+       No-op so legacy triggers don't rebuild the table with this old design. */
   }
 
   async function updateProjectStatusFinal(jobId, nextStatus, selectElement) {
@@ -25883,56 +25834,14 @@ This removes it from the job documents list.`)) return;
   function normalizeDashboardHeader() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Project Status", "Dates", "Rate Total", "Actions"]
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
       .map((label) => `<th>${esc(label)}</th>`)
       .join("");
   }
 
   function renderDashboardNoInvoiceStatusColumn() {
-    const table = qs("#dashboardActiveJobsTable");
-    const count = qs("#dashboardActiveJobsCount");
-    if (!table) return;
-    normalizeDashboardHeader();
-    const rows = activeDashboardJobs();
-    if (count) count.textContent = rows.length;
-    table.innerHTML = rows.map((job) => {
-      const tracker = latestCostTrackerForJob(job.id);
-      const rateTotal = rateTotalForTracker(tracker);
-      const days = workdaysForJob(job);
-      const dateRange = `${dateLabel(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${dateLabel(job.end_date)}` : ""}`;
-      const daysText = days ? `${days} workday${num(days) === 1 ? "" : "s"}` : "Auto-calculated";
-      const projectStatus = normalizeProjectStatus(job.status);
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-      return `
-        <tr class="job-main-row professional-job-row dashboard-active-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${esc(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack dashboard-project-stack">
-              <strong>${esc(job.job_name || "-")}</strong>
-              ${documentIndicators(job)}
-            </div>
-          </td>
-          <td data-label="Company" class="job-company-cell">${esc(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${esc(job.location || "-")}</td>
-          <td data-label="Project Status" class="dashboard-project-status-cell">
-            <select class="dashboard-inline-status-select dashboard-project-status-select status ${attr(projectStatus)}" data-dashboard-no-invoice-job-status-id="${attr(job.id)}" aria-label="Change project status for ${attr(title)}">
-              ${projectStatusOptions(projectStatus)}
-            </select>
-          </td>
-          <td data-label="Dates" class="job-dates-cell">
-            <span class="job-date-range">${esc(dateRange)}</span>
-            <span class="job-workday-count">${esc(daysText)}</span>
-          </td>
-          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? esc(moneyLabel(rateTotal)) : "—"}</strong></td>
-          <td data-label="Actions" class="dashboard-actions-cell">
-            <div class="dashboard-actions-inline">
-              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join("") || `<tr><td colspan="8" class="muted">No active jobs found.</td></tr>`;
+    /* optimized: superseded by renderStableOpenJobs (the live Open Jobs renderer).
+       No-op so legacy triggers don't rebuild the table with this old design. */
   }
 
   async function updateProjectStatus(jobId, nextStatus, selectElement) {
@@ -26411,7 +26320,7 @@ This removes it from the job documents list.`)) return;
   function normalizeDashboardHeader() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Invoice Status", "Dates", "Rate Total", "Actions"]
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
       .map((label) => `<th>${html(label)}</th>`)
       .join("");
   }
@@ -26424,7 +26333,7 @@ This removes it from the job documents list.`)) return;
     // Reuse the Open Jobs condensed table styling so Closed Jobs looks identical,
     // just without the Actions column.
     table.classList.add("dashboard-active-jobs-table");
-    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total"]
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
       .map((label) => `<th>${html(label)}</th>`)
       .join("");
   }
@@ -26452,43 +26361,9 @@ This removes it from the job documents list.`)) return;
   }
 
   function renderOpenJobsDashboardFinal() {
-    normalizeDashboardLabels();
-    normalizeDashboardHeader();
-    const table = qs("#dashboardActiveJobsTable");
-    const count = qs("#dashboardActiveJobsCount");
-    if (!table) return;
-
-    const rows = openJobs();
-    if (count) count.textContent = rows.length;
-
-    table.innerHTML = rows.map((job) => {
-      const tracker = latestCostTrackerForJob(job.id);
-      const invoice = latestInvoiceForJob(job.id);
-      const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-      return `
-        <tr class="job-main-row professional-job-row dashboard-active-job-row open-job-row" data-dashboard-job-row-id="${attr(job.id)}" title="Open job details for ${attr(title)}">
-          <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
-          <td data-label="Project Name" class="job-name-cell">
-            <div class="job-name-stack dashboard-project-stack">
-              <strong>${html(job.job_name || "-")}</strong>
-              ${documentIndicators(job)}
-            </div>
-          </td>
-          <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
-          <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
-          <td data-label="Invoice Status" class="dashboard-invoice-status-cell">${invoiceStatusControl(invoice, title, "open-jobs")}</td>
-          <td data-label="Dates" class="job-dates-cell">${jobDateMarkup(job)}</td>
-          <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
-          <td data-label="Actions" class="dashboard-actions-cell">
-            <div class="dashboard-actions-inline">
-              <button class="link-btn job-table-action view" data-open-job-details-modal="${attr(job.id)}" type="button" title="Open job details">Details</button>
-              <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-              <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-            </div>
-          </td>
-        </tr>
-      `;
-    }).join("") || `<tr><td colspan="8" class="muted">No open jobs found.</td></tr>`;
+    /* optimized: superseded by renderStableOpenJobs (the live Open Jobs renderer).
+       No-op so legacy triggers don't rebuild the table with this old design.
+       (renderClosedJobsFinal below remains the live Closed Jobs renderer.) */
   }
 
   function renderClosedJobsFinal() {
@@ -26971,7 +26846,8 @@ This removes it from the job documents list.`)) return;
     { key: "employees", table: "employees", order: "full_name", ascending: true },
     { key: "assignments", table: "job_assignments", order: "created_at", ascending: false },
     { key: "timesheets", table: "timesheets", order: "work_date", ascending: false },
-    { key: "documents", table: "documents", order: "last_synced_at", ascending: false }
+    { key: "documents", table: "documents", order: "last_synced_at", ascending: false },
+    { key: "expenses", table: "expenses", order: "expense_date", ascending: false }
   ];
 
   function toast(message, isError = false) {
@@ -27040,7 +26916,18 @@ This removes it from the job documents list.`)) return;
     if (!state?.supabase || !state?.session) return;
     const silent = Boolean(options.silent);
 
-    const results = await Promise.all(TABLES_TO_LOAD.map(selectTableSafely));
+    // options.only ("expenses" | ["jobs","clients"] | table name) narrows the
+    // refetch to the named tables. Post-mutation reloads use this so saving a
+    // record no longer refetches every table. Unknown names fall back to a
+    // full load so behavior can never be narrower than intended.
+    let targets = TABLES_TO_LOAD;
+    if (options.only) {
+      const wanted = (Array.isArray(options.only) ? options.only : [options.only]).map(String);
+      const matched = TABLES_TO_LOAD.filter((c) => wanted.includes(c.key) || wanted.includes(c.table));
+      if (matched.length === wanted.length) targets = matched;
+    }
+
+    const results = await Promise.all(targets.map(selectTableSafely));
     assignLoadedRows(results);
     renderTablesSafely();
 
@@ -27051,7 +26938,7 @@ This removes it from the job documents list.`)) return;
     }
 
     const failedOptional = results.filter((result) => result.error && !result.required);
-    if (!silent) {
+    if (options.manual) {
       if (failedOptional.length) {
         toast("Jobs loaded. Some optional tables could not load; check the browser console for details.", true);
       } else {
@@ -27066,7 +26953,7 @@ This removes it from the job documents list.`)) return;
 
   document.addEventListener("click", (event) => {
     if (!event.target?.closest?.("#refreshBtn")) return;
-    window.setTimeout(() => loadAllDataSafely({ silent: false }), 0);
+    window.setTimeout(() => loadAllDataSafely({ manual: true }), 0);
   }, true);
 })();
 
@@ -27423,7 +27310,7 @@ This removes it from the job documents list.`)) return;
       <article class="timesheet-template-document timesheet-print-document">
         <div class="timesheet-top-rule"></div>
         <div class="timesheet-title">Insulation Daily Time Sheet:</div>
-        <div class="timesheet-logo-wrap"><img src="NEW_logo.png" alt="PIMP" /><strong>PIMP</strong></div>
+        <div class="timesheet-logo-wrap"><img src="${window.PIMP_LOGO_DATA_URL || 'NEW_logo.png'}" alt="PIMP" /><strong>PIMP</strong></div>
         <div class="ts-label ts-customer-label">Client Contact:</div><div class="ts-cell ts-customer-value">${html(data.customer)}</div>
         <div class="ts-label ts-afe-label">Project Name:</div><div class="ts-cell ts-afe-value">${html(data.customer_afe_no)}</div>
         <div class="ts-label ts-pms-label">Job Number:</div><div class="ts-cell ts-pms-value">${html(data.pms_job_number)}</div>
@@ -27579,9 +27466,22 @@ This removes it from the job documents list.`)) return;
         .concat(insertedRows);
 
       setHiddenGroupId(form, data.groupId);
-      try { if (typeof loadAllData === "function") await loadAllData({ silent: true }); } catch { try { if (typeof renderAll === "function") renderAll(); } catch {} }
+      // The saved rows are already merged into local state above, so the UI is
+      // correct now. Repaint, refresh the Job Details folder, and show success
+      // immediately — then reconcile with the server in the background instead of
+      // blocking the save (and the "Saving..." button) behind a full reload of
+      // every table, which was what made saving feel slow.
+      try { if (typeof renderAll === "function") renderAll(); } catch {}
       updateTimesheetFolderInJobDetails();
+      try { refreshJobTimesheetsWindow(); } catch {}
+      // Refresh the Job Details card so a first-ever save flips it from
+      // "Create Timesheet" to "Open Timesheets" + "Add Timesheet" without reopening.
+      try { window.__pimpRefreshOpenJobDetails?.(data.job_id); } catch {}
       toast("Timesheet saved.");
+      Promise.resolve()
+        .then(() => { if (typeof loadAllData === "function") return loadAllData({ silent: true, only: "timesheets" }); })
+        .then(() => { try { updateTimesheetFolderInJobDetails(); } catch {} try { refreshJobTimesheetsWindow(); } catch {} try { window.__pimpRefreshOpenJobDetails?.(data.job_id); } catch {} })
+        .catch(() => {});
     } catch (error) {
       console.error("Timesheet save failed:", error);
       toast(`Timesheet could not save: ${error?.message || error}`, true);
@@ -27626,6 +27526,278 @@ This removes it from the job documents list.`)) return;
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
   else start();
 
+  // ----------------------------------------------------------------------
+  // Timesheets window — opened by the "Open Timesheets" button on the Job
+  // Details Timesheets card. Lists every created + uploaded timesheet for the
+  // job with Edit / View / Download / Delete. Rows reuse the same folder-row
+  // classes and data-* attributes as the inline folder, so the existing
+  // document-level handlers drive the actions with no extra wiring.
+  // ----------------------------------------------------------------------
+  function jobTimesheetsWindowBodyHtml(jobId) {
+    const dailySheets = savedDailyTimesheetsForJob(jobId);
+    const uploadedDocs = uploadedTimesheetDocsForJob(jobId);
+
+    if (!dailySheets.length && !uploadedDocs.length) {
+      return `<p class="muted job-detail-empty">No timesheets have been saved for this job yet.</p>`;
+    }
+
+    const createdRows = dailySheets.map((sheet) => `
+      <article class="job-timesheet-folder-row">
+        <div class="job-timesheet-folder-main">
+          <strong>${html(formatDateSafe(sheet.date))}</strong>
+          <span>${html(cleanNumber(sheet.employeeCount))} employee line${sheet.employeeCount === 1 ? "" : "s"} • ${html(cleanNumber(sheet.totalHours))} total hours${sheet.ticket ? ` • Ticket ${html(sheet.ticket)}` : ""}</span>
+        </div>
+        <div class="job-timesheet-folder-actions">
+          <button class="link-btn" data-edit-timesheet-daily="${attr(sheet.id)}" type="button">Edit</button>
+          <button class="link-btn" data-view-timesheet-daily="${attr(sheet.id)}" type="button">View</button>
+          <button class="link-btn" data-download-timesheet-daily="${attr(sheet.id)}" type="button">Download</button>
+          <button class="link-btn danger-text" data-delete-timesheet-daily="${attr(sheet.id)}" type="button">Delete</button>
+        </div>
+      </article>
+    `).join("");
+
+    const uploadedRows = uploadedDocs.map((doc) => {
+      const docKey = documentId(doc);
+      const name = doc.file_name || doc.original_file_name || "Uploaded timesheet";
+      const detail = ["Uploaded file", safeFileSize(doc.file_size), doc.file_status || "uploaded"].filter(Boolean).join(" • ");
+      return `
+        <article class="job-timesheet-folder-row uploaded-timesheet-folder-row">
+          <div class="job-timesheet-folder-main">
+            <strong>${html(name)}</strong>
+            <span>${html(detail)}</span>
+          </div>
+          <div class="job-timesheet-folder-actions">
+            <button class="link-btn" data-open-uploaded-doc="${attr(docKey)}" type="button">Open</button>
+            <button class="link-btn" data-download-uploaded-doc="${attr(docKey)}" type="button">Download</button>
+            <button class="link-btn danger-text" data-delete-type="documents" data-delete-id="${attr(docKey)}" type="button">Delete</button>
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    return `<div class="job-timesheet-window-list">${createdRows}${uploadedRows}</div>`;
+  }
+
+  function ensureJobTimesheetsWindow() {
+    let overlay = qs("#jobTimesheetsWindowOverlay");
+    if (overlay) return overlay;
+    overlay = document.createElement("div");
+    overlay.id = "jobTimesheetsWindowOverlay";
+    overlay.className = "job-details-modal-overlay job-timesheets-window-overlay hidden";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <div class="job-details-modal-card job-timesheets-window-card" role="dialog" aria-modal="true" aria-labelledby="jobTimesheetsWindowTitle">
+        <div class="job-details-modal-header">
+          <div>
+            <p class="eyebrow">Timesheets</p>
+            <h3 id="jobTimesheetsWindowTitle">Timesheets</h3>
+            <p class="tiny">View, edit, download, or delete this job's saved timesheets.</p>
+          </div>
+          <button class="icon-btn job-timesheets-window-close" type="button" aria-label="Close timesheets window">×</button>
+        </div>
+        <div class="job-details-modal-body" id="jobTimesheetsWindowBody"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay || event.target.closest?.(".job-timesheets-window-close")) {
+        event.preventDefault();
+        closeJobTimesheetsWindow();
+        return;
+      }
+      // Deleting a row mutates timesheet data via the global delete handlers;
+      // repaint the list after the optimistic state update (and again after the
+      // background reconcile) so the removed row disappears here too, regardless
+      // of whether the confirm was blocking or async.
+      if (event.target.closest?.("[data-delete-timesheet-daily], [data-delete-type='documents']")) {
+        window.setTimeout(refreshJobTimesheetsWindow, 500);
+        window.setTimeout(refreshJobTimesheetsWindow, 1500);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        const open = qs("#jobTimesheetsWindowOverlay:not(.hidden)");
+        if (open) closeJobTimesheetsWindow();
+      }
+    });
+
+    return overlay;
+  }
+
+  function openJobTimesheetsWindow(jobId) {
+    if (!jobId) return;
+    const overlay = ensureJobTimesheetsWindow();
+    overlay.dataset.jobId = String(jobId);
+    const title = qs("#jobTimesheetsWindowTitle", overlay);
+    const body = qs("#jobTimesheetsWindowBody", overlay);
+    if (title) title.textContent = `${jobLabel(jobId)} Timesheets`;
+    if (body) body.innerHTML = jobTimesheetsWindowBodyHtml(jobId);
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+  }
+
+  function closeJobTimesheetsWindow() {
+    const overlay = qs("#jobTimesheetsWindowOverlay");
+    if (!overlay) return;
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+  }
+
+  function refreshJobTimesheetsWindow() {
+    const overlay = qs("#jobTimesheetsWindowOverlay:not(.hidden)");
+    if (!overlay) return;
+    const jobId = overlay.dataset.jobId;
+    if (!jobId) return;
+    const body = qs("#jobTimesheetsWindowBody", overlay);
+    if (body) body.innerHTML = jobTimesheetsWindowBodyHtml(jobId);
+  }
+
+  document.addEventListener("click", (event) => {
+    const opener = event.target.closest?.("[data-open-job-timesheets]");
+    if (!opener) return;
+    event.preventDefault();
+    const jobId = opener.dataset.openJobTimesheets;
+    const openOverlay = qs("#jobTimesheetsWindowOverlay:not(.hidden)");
+    // Toggle: clicking the button again for the same job closes the window.
+    if (openOverlay && String(openOverlay.dataset.jobId) === String(jobId)) {
+      closeJobTimesheetsWindow();
+    } else {
+      openJobTimesheetsWindow(jobId);
+    }
+  }, true);
+
+  function waitForTimesheetImages(root) {
+    const imgs = Array.from(root.querySelectorAll("img"));
+    if (!imgs.length) return Promise.resolve();
+    return Promise.all(imgs.map((img) => {
+      if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+      return new Promise((resolve) => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+        window.setTimeout(resolve, 3000);
+      });
+    }));
+  }
+
+  // Export a saved timesheet's PDF using html2canvas + jsPDF directly — this mirrors
+  // the app's proven timesheet exporter. The html2pdf() wrapper was throwing
+  // "download failed"; the direct path renders the template on-screen (hidden behind
+  // everything), waits for the logo image, and captures with allowTaint so a
+  // cross-origin/slow image can't abort the export. Self-contained (no cross-closure
+  // calls) so the window's Download button always works.
+  async function exportTimesheetHtmlToPdf(html, filename) {
+    try { if (typeof window.ensurePdfLibraries === "function") await window.ensurePdfLibraries(); } catch {}
+    const html2canvasLib = window.html2canvas;
+    const JsPdfCtor = window.jspdf?.jsPDF || window.jsPDF;
+    if (!html2canvasLib || !JsPdfCtor) {
+      try { if (typeof printHtmlDocument === "function") printHtmlDocument(html, "Timesheet"); } catch {}
+      try { toast("PDF library was unavailable. The print/save window opened instead.", true); } catch {}
+      return;
+    }
+    const root = document.createElement("div");
+    root.className = "timesheet-pdf-capture-root";
+    root.style.position = "fixed";
+    root.style.left = "0";
+    root.style.top = "0";
+    root.style.width = "8.5in";
+    root.style.height = "11in";
+    root.style.background = "#ffffff";
+    root.style.pointerEvents = "none";
+    root.style.zIndex = "-2147483000";
+    root.innerHTML = html;
+    document.body.appendChild(root);
+    const docEl = root.querySelector(".timesheet-template-document") || root;
+    try {
+      await waitForTimesheetImages(root);
+      const rect = docEl.getBoundingClientRect();
+      const width = Math.ceil(rect.width || 816);
+      const height = Math.ceil(rect.height || 1056);
+      const canvas = await html2canvasLib(docEl, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        scrollX: 0,
+        scrollY: 0,
+        width,
+        height,
+        windowWidth: width,
+        windowHeight: height
+      });
+      if (!canvas.width || !canvas.height) throw new Error("Timesheet canvas was empty.");
+      const pdf = new JsPdfCtor({ unit: "in", format: "letter", orientation: "portrait", compress: true });
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", 0, 0, 8.5, 11, undefined, "FAST");
+      pdf.save(filename);
+      try { toast("Timesheet PDF downloaded."); } catch {}
+    } catch (error) {
+      console.error("Timesheet PDF export failed:", error);
+      try { toast("Timesheet PDF download failed. Refresh and try again.", true); } catch {}
+    } finally {
+      root.remove();
+    }
+  }
+
+  async function downloadJobTimesheetPdf(sheetId) {
+    const overlay = qs("#jobTimesheetsWindowOverlay");
+    const jobId = overlay?.dataset.jobId || "";
+    const sheet = savedDailyTimesheetsForJob(jobId).find((s) => String(s.id) === String(sheetId));
+    if (!sheet) {
+      try { toast("Could not find that timesheet to download.", true); } catch {}
+      return;
+    }
+    const first = sheet.first || {};
+    let summary = {};
+    try { summary = parseJson(first.summary, {}) || {}; } catch {}
+    const savedLines = parseJson(first.line_items, null);
+    const lines = (Array.isArray(savedLines) && savedLines.length) ? savedLines : (sheet.rows || []).map((row) => ({
+      employee_identifier: row.employee_identifier || "",
+      employee_name: row.employee_name || "",
+      classification: row.classification || "",
+      hours: toNumber(row.hours),
+      tr: Boolean(row.tr || toNumber(row.travel_hours) > 0),
+      pd: Boolean(row.pd || toNumber(row.per_diem) > 0),
+      notes: row.notes || ""
+    }));
+    const data = {
+      customer: sheet.customer || first.customer || summary.customer || "",
+      customer_afe_no: first.customer_afe_no || summary.customer_afe_no || sheet.job?.job_name || "",
+      pms_job_number: first.pms_job_number || summary.pms_job_number || sheet.jobNumber || sheet.job?.job_number || "",
+      work_date: sheet.date || first.work_date || "",
+      location: sheet.location || first.location || summary.location || "",
+      description_of_services: first.description_of_services || summary.description_of_services || summary.descriptionOfServices || "",
+      lines
+    };
+    // Always rebuild from current data rather than trusting first.html_snapshot —
+    // older saved snapshots can be a stale/full-document format that html2canvas
+    // renders as an empty page (which then throws "canvas was empty").
+    const html = buildSimpleTimesheetHtml(data);
+    const filename = first.download_filename || timesheetFileName(data);
+    await exportTimesheetHtmlToPdf(html, filename);
+  }
+
+  // Download inside the Timesheets window. Registered on `window` in the capture
+  // phase so it runs BEFORE any document-level handler that might otherwise swallow
+  // the click without downloading.
+  window.addEventListener("click", (event) => {
+    const btn = event.target.closest?.("#jobTimesheetsWindowBody [data-download-timesheet-daily]");
+    if (!btn) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+    const id = btn.dataset.downloadTimesheetDaily;
+    // Prefer the shared daily-timesheet exporter (getDailyById -> downloadDailyPdf):
+    // its id lookup is byte-compatible with this window's ids, it renders a fresh
+    // page via html2canvas (the engine that works for invoices), and it embeds the
+    // logo through the data-URL used everywhere else. Fall back to the local export.
+    if (typeof window.PIMP_downloadTimesheetDailyById === "function") window.PIMP_downloadTimesheetDailyById(id);
+    else downloadJobTimesheetPdf(id);
+  }, true);
+
+  window.PIMP_openJobTimesheetsWindow = openJobTimesheetsWindow;
+  window.PIMP_refreshJobTimesheetsWindow = refreshJobTimesheetsWindow;
   window.PIMP_updateTimesheetFolderInJobDetails = updateTimesheetFolderInJobDetails;
 })();
 
@@ -28296,7 +28468,7 @@ This removes it from the job documents list.`)) return;
   function normalizeDashboardHeader() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job #", "Project Name", "Company", "Location", "Invoice Status", "Dates", "Rate Total", "Actions"]
+    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
       .map((label) => `<th>${html(label)}</th>`)
       .join("");
   }
@@ -28638,7 +28810,7 @@ This removes it from the job documents list.`)) return;
 
   function initLegacyStatusToSubmittedDisplayPatch() {
     cleanupLegacyStatusLabels();
-    try { observer.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch {}
+    try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initLegacyStatusToSubmittedDisplayPatch);
@@ -29575,6 +29747,7 @@ This removes it from the job documents list.`)) return;
         keepInvoiceBlocksSeparated();
         reserveInvoiceBottomActionsSpace();
         try { window.fitInvoiceTemplateToViewport?.(); } catch {}
+        try { window.autosizeAllInvoiceDescriptions?.(); } catch {}
         // fitInvoiceTemplateToViewport can change the zoom, so reserve space again.
         window.setTimeout(reserveInvoiceBottomActionsSpace, 20);
       }, delay);
@@ -30808,11 +30981,19 @@ function on(selector, eventName, handler) {
 
   let renderingStableOpenJobs = false;
 
+  const OPEN_JOBS_HEADER_LABELS = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"];
   function normalizeOpenJobsHeader() {
     const headerRow = qs(".dashboard-active-jobs-table thead tr");
     if (!headerRow) return;
-    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"].map((label) => `<th>${esc(label)}</th>`).join("");
+    const current = qsa("th", headerRow).map((th) => clean(th.textContent));
+    if (current.length === OPEN_JOBS_HEADER_LABELS.length && current.every((label, i) => label === OPEN_JOBS_HEADER_LABELS[i])) return;
+    headerRow.innerHTML = OPEN_JOBS_HEADER_LABELS.map((label) => `<th>${esc(label)}</th>`).join("");
   }
+
+  // A legacy patch can still rewrite the header row to an old column layout.
+  // Reverting it inside a MutationObserver (which runs before the browser
+  // paints) means the old header design is never shown.
+  const openJobsHeaderObserver = new MutationObserver(() => normalizeOpenJobsHeader());
 
   function renderStableOpenJobs() {
     const tbody = qs("#dashboardActiveJobsTable");
@@ -30955,6 +31136,12 @@ function on(selector, eventName, handler) {
       tbody.__pimpNoFlickerObserved = true;
       try { tbodyObserver.observe(tbody, { childList: true, subtree: false }); } catch {}
     }
+    const thead = qs(".dashboard-active-jobs-table thead");
+    if (thead && !thead.__pimpNoFlickerHeaderObserved) {
+      thead.__pimpNoFlickerHeaderObserved = true;
+      normalizeOpenJobsHeader();
+      try { openJobsHeaderObserver.observe(thead, { childList: true, subtree: true }); } catch {}
+    }
   }
 
   function selectedCostTrackerJob() {
@@ -31069,54 +31256,574 @@ function on(selector, eventName, handler) {
   window.PIMP_enforceCostTrackerProjectDatesNoFlicker = enforceProjectDates;
 })();
 
+/* ========================================================================
+   FINAL PERFORMANCE GUARD: COALESCE FULL DATA REFRESHES
+   ------------------------------------------------------------------------
+   Several workflows can request a full dashboard refresh at almost the same
+   time (auth refresh, manual refresh, save handlers, tab refocus). This wrapper
+   keeps the existing loadAllData behavior but prevents duplicate overlapping
+   Supabase reads and full-table rerenders.
+   ======================================================================== */
+(function installFinalLoadAllDataCoalescer() {
+  const PATCH_FLAG = "__pimpFinalLoadAllDataCoalescer";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  function getCurrentLoader() {
+    if (typeof window.loadAllData === "function") return window.loadAllData;
+    try { if (typeof loadAllData === "function") return loadAllData; } catch {}
+    return null;
+  }
+
+  const originalLoadAllData = getCurrentLoader();
+  if (typeof originalLoadAllData !== "function" || originalLoadAllData.__pimpCoalescedLoadAllData) return;
+
+  let inFlight = null;
+  let rerunAfterCurrent = false;
+  let rerunOptions = { silent: true };
+
+  const coalescedLoadAllData = async function coalescedLoadAllData(options = {}) {
+    if (inFlight) {
+      const prevOnly = rerunAfterCurrent ? rerunOptions.only : undefined;
+      const prevWasFull = rerunAfterCurrent && !prevOnly;
+      const nextOnly = (options || {}).only;
+      rerunOptions = { ...rerunOptions, ...(options || {}), silent: true };
+      if (prevWasFull || !nextOnly) {
+        // a queued full reload (or this one) wins over any narrowed scope
+        delete rerunOptions.only;
+      } else if (prevOnly) {
+        const a = Array.isArray(prevOnly) ? prevOnly : [prevOnly];
+        const b = Array.isArray(nextOnly) ? nextOnly : [nextOnly];
+        rerunOptions.only = [...new Set([...a, ...b])];
+      }
+      rerunAfterCurrent = true;
+      return inFlight;
+    }
+
+    inFlight = Promise.resolve()
+      .then(() => originalLoadAllData.call(this, options))
+      .finally(async () => {
+        inFlight = null;
+        if (rerunAfterCurrent) {
+          const nextOptions = rerunOptions;
+          rerunAfterCurrent = false;
+          rerunOptions = { silent: true };
+          await coalescedLoadAllData(nextOptions);
+        }
+      });
+
+    return inFlight;
+  };
+
+  coalescedLoadAllData.__pimpCoalescedLoadAllData = true;
+  window.loadAllData = coalescedLoadAllData;
+  try { globalThis.loadAllData = coalescedLoadAllData; } catch {}
+  try { eval('loadAllData = window.loadAllData'); } catch {}
+})();
 
 /* ========================================================================
-   INVOICE EDITOR — AUTO-SIZING LINE DESCRIPTION BOXES
+   FINAL PERFORMANCE GUARD: COALESCE REDUNDANT RENDERS
    ------------------------------------------------------------------------
-   Each line-item Description textarea grows to show all of its text on multiple
-   lines instead of one clipped line. This is the reliable fallback for engines
-   without CSS `field-sizing: content`. The line-items box scrolls within its A4
-   footprint (see styles.css), so the rest of the invoice layout stays in place.
+   The layered render patches cause one renderAll() to rebuild the same
+   tables many times in a single synchronous pass (e.g. the Open Jobs table
+   is rebuilt ~8x because several renderAll wrapper layers each call
+   renderDashboardActiveJobs() again). This guard collapses that to one
+   rebuild per table per render: while a top-level render is running, the
+   first call to each table renderer runs and any further calls in the same
+   synchronous cascade are skipped (the data has not changed between them).
+
+   Renders stay SYNCHRONOUS — the first call runs immediately — so any code
+   that reads the DOM right after a render still sees fresh output. Output is
+   identical to before; only the redundant repeats are removed. A global
+   window.__pimpRendering flag is exposed so observers can skip work while a
+   render is mutating the DOM (see the observer self-trigger guards).
    ======================================================================== */
-(function installInvoiceLineDescriptionAutoSize() {
-  if (window.__pimpInvoiceLineDescAutoSize) return;
-  window.__pimpInvoiceLineDescAutoSize = true;
+(function installFinalRenderCoalescer() {
+  const PATCH_FLAG = "__pimpFinalRenderCoalescer";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
 
-  const SELECTOR = "#invoiceTemplateEditor .invoice-template-line .line-description";
+  let burstDepth = 0;            // > 0 while a top-level coalesced render runs
+  let renderedThisBurst = null;  // names already rendered in the current burst
 
-  function autoSize(textarea) {
-    if (!textarea) return;
-    // Reset first (with !important so it beats the fixed-height author rule) so the
-    // measured scrollHeight reflects the full content, then grow to fit it.
-    textarea.style.setProperty("height", "auto", "important");
-    const next = textarea.scrollHeight;
-    if (next > 0) textarea.style.setProperty("height", next + "px", "important");
+  function coalesce(name) {
+    const original = typeof window[name] === "function" ? window[name] : null;
+    if (!original || original.__pimpRenderCoalesced) return;
+
+    const wrapped = function pimpCoalescedRender() {
+      // Nested call within an ongoing render cascade: render each table once.
+      if (burstDepth > 0) {
+        if (renderedThisBurst.has(name)) return undefined; // redundant repeat
+        renderedThisBurst.add(name);
+        return original.apply(this, arguments);
+      }
+      // Top-level render: open a burst so nested/redundant renders collapse.
+      burstDepth++;
+      if (burstDepth === 1) {
+        renderedThisBurst = new Set([name]);
+        window.__pimpRendering = true;
+      } else {
+        renderedThisBurst.add(name);
+      }
+      try {
+        return original.apply(this, arguments);
+      } finally {
+        burstDepth--;
+        if (burstDepth === 0) {
+          renderedThisBurst = null;
+          window.__pimpRendering = false;
+        }
+      }
+    };
+
+    wrapped.__pimpRenderCoalesced = true;
+    window[name] = wrapped;
+    try { globalThis[name] = wrapped; } catch {}
+    try { eval(`${name} = window["${name}"]`); } catch {}
   }
 
-  function autoSizeAll() {
-    document.querySelectorAll(SELECTOR).forEach(autoSize);
+  ["renderAll", "renderDashboardActiveJobs", "renderJobs", "renderInvoices", "renderCostTrackers"].forEach(coalesce);
+})();
+
+/* ============================================================================
+   FINANCES PAGE — expense receipts + true profit
+   Company-wide expenses (material / payroll / monthly / other). Each expense
+   can carry a scanned receipt (reuses the "job-documents" storage bucket) and a
+   dollar total. Income comes from invoices; the page shows True Profit and a
+   billed/paid toggle. Self-contained per the layered-patch convention.
+   ========================================================================== */
+(function installFinancesPage() {
+  const BUCKET = "job-documents";
+
+  function safeName(name) {
+    return String(name || "receipt").replace(/[^a-z0-9._-]+/gi, "_").slice(-120) || "receipt";
   }
 
-  document.addEventListener("input", (event) => {
-    const textarea = event.target?.closest?.(SELECTOR);
-    if (textarea) autoSize(textarea);
+  function findExpense(id) {
+    return (state.data.expenses || []).find((row) => String(row.id) === String(id)) || null;
+  }
+
+  async function uploadReceipt(file) {
+    const path = `expenses/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName(file.name)}`;
+    const { error } = await state.supabase.storage.from(BUCKET).upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+      contentType: file.type || "application/octet-stream"
+    });
+    if (error) throw error;
+    return path;
+  }
+
+  // Insert an expense, dropping optional columns if the schema is older.
+  async function insertExpense(record) {
+    const attempts = [
+      record,
+      { category: record.category, amount: record.amount, expense_date: record.expense_date, storage_bucket: record.storage_bucket, storage_path: record.storage_path },
+      { category: record.category, amount: record.amount, expense_date: record.expense_date }
+    ];
+    let lastError = null;
+    for (const attempt of attempts) {
+      try {
+        const { data, error } = await state.supabase.from("expenses").insert(attempt).select().single();
+        if (error) throw error;
+        return data;
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        if (!/column|schema cache|does not exist|Could not find/i.test(message)) break;
+      }
+    }
+    throw lastError || new Error("Could not save the expense.");
+  }
+
+  // Update an expense, dropping optional columns if the schema is older
+  // (mirrors insertExpense). Storage fields are only sent when they changed.
+  async function updateExpense(id, record) {
+    const core = { category: record.category, amount: record.amount, expense_date: record.expense_date };
+    const attempts = [record];
+    if ("storage_path" in record) attempts.push({ ...core, storage_bucket: record.storage_bucket, storage_path: record.storage_path });
+    attempts.push(core);
+    let lastError = null;
+    for (const attempt of attempts) {
+      try {
+        const { data, error } = await state.supabase.from("expenses").update(attempt).eq("id", id).select().single();
+        if (error) throw error;
+        return data;
+      } catch (error) {
+        lastError = error;
+        const message = String(error?.message || error || "");
+        if (!/column|schema cache|does not exist|Could not find/i.test(message)) break;
+      }
+    }
+    throw lastError || new Error("Could not update the expense.");
+  }
+
+  function expenseEditId(form) {
+    return form?.querySelector('[name="record_id"]')?.value || "";
+  }
+
+  function enterExpenseEditMode(expense) {
+    const form = $("#expenseForm");
+    if (!form || !expense) return;
+    const setField = (name, value) => {
+      const field = form.querySelector(`[name="${name}"]`);
+      if (field) field.value = value;
+    };
+    setField("record_id", expense.id);
+    setField("category", String(expense.category || "other").toLowerCase());
+    setField("amount", number(expense.amount));
+    setField("expense_date", String(expense.expense_date || "").slice(0, 10) || today());
+    setField("vendor", expense.vendor || "");
+    setField("note", expense.note || "");
+    const fileField = form.querySelector('[name="receipt"]');
+    if (fileField) fileField.value = "";
+    const title = $("#expenseFormTitle");
+    if (title) title.textContent = "Edit Expense";
+    const submitBtn = $("#expenseSubmitBtn");
+    if (submitBtn) submitBtn.textContent = "Save Changes";
+    const cancelBtn = $("#cancelExpenseEditBtn");
+    if (cancelBtn) cancelBtn.classList.remove("hidden");
+    const hint = $("#expenseReceiptHint");
+    if (hint) hint.classList.toggle("hidden", !financeExpenseHasReceipt(expense));
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function exitExpenseEditMode() {
+    const form = $("#expenseForm");
+    if (!form) return;
+    form.reset();
+    const recordField = form.querySelector('[name="record_id"]');
+    if (recordField) recordField.value = "";
+    const title = $("#expenseFormTitle");
+    if (title) title.textContent = "Add Expense";
+    const submitBtn = $("#expenseSubmitBtn");
+    if (submitBtn) submitBtn.textContent = "Add Expense";
+    const cancelBtn = $("#cancelExpenseEditBtn");
+    if (cancelBtn) cancelBtn.classList.add("hidden");
+    const hint = $("#expenseReceiptHint");
+    if (hint) hint.classList.add("hidden");
+    primeExpenseDate();
+  }
+
+  async function handleExpenseSubmit(form) {
+    if (!state?.supabase || !state?.session) {
+      showToast("Sign in before saving expenses.", true);
+      return;
+    }
+    const submitBtn = form.querySelector('[type="submit"]');
+    const amount = number(form.querySelector('[name="amount"]')?.value);
+    if (!(amount >= 0) || form.querySelector('[name="amount"]')?.value === "") {
+      showToast("Enter a valid expense amount.", true);
+      return;
+    }
+    const category = String(form.querySelector('[name="category"]')?.value || "other").toLowerCase();
+    const expenseDate = form.querySelector('[name="expense_date"]')?.value || today();
+    const vendor = form.querySelector('[name="vendor"]')?.value?.trim() || null;
+    const note = form.querySelector('[name="note"]')?.value?.trim() || null;
+    const file = form.querySelector('[name="receipt"]')?.files?.[0] || null;
+    const editId = expenseEditId(form);
+    const editing = findExpense(editId);
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Saving…";
+    }
+
+    try {
+      let storagePath = null;
+      if (file) {
+        try {
+          storagePath = await uploadReceipt(file);
+        } catch (uploadError) {
+          throw new Error(`Receipt upload failed: ${uploadError.message || uploadError}`);
+        }
+      }
+
+      const now = new Date().toISOString();
+
+      if (editing) {
+        const record = {
+          category,
+          amount,
+          expense_date: expenseDate,
+          vendor,
+          note,
+          last_synced_at: now
+        };
+        if (storagePath) {
+          record.storage_bucket = BUCKET;
+          record.storage_path = storagePath;
+          record.receipt_url = null;
+        }
+
+        const saved = await updateExpense(editing.id, record);
+        // Best-effort cleanup of the replaced receipt file.
+        if (storagePath && editing.storage_path && editing.storage_path !== storagePath) {
+          try { await state.supabase.storage.from(editing.storage_bucket || BUCKET).remove([editing.storage_path]); } catch {}
+        }
+        const merged = { ...editing, ...record, ...(saved || {}) };
+        state.data.expenses = (state.data.expenses || []).map((row) =>
+          String(row.id) === String(editing.id) ? merged : row
+        );
+        exitExpenseEditMode();
+        try { renderFinances(); } catch {}
+        showToast("Expense updated.");
+      } else {
+        const record = {
+          category,
+          amount,
+          expense_date: expenseDate,
+          vendor,
+          note,
+          storage_bucket: storagePath ? BUCKET : null,
+          storage_path: storagePath,
+          receipt_url: null,
+          last_synced_at: now
+        };
+
+        const saved = await insertExpense(record);
+        const merged = { ...record, ...(saved || {}) };
+        state.data.expenses = [merged, ...(state.data.expenses || []).filter((row) => row.id !== merged.id)];
+        try { renderFinances(); } catch {}
+
+        form.reset();
+        const dateField = form.querySelector('[name="expense_date"]');
+        if (dateField) dateField.value = today();
+
+        showToast("Expense saved.");
+      }
+      Promise.resolve()
+        .then(() => loadAllData({ silent: true, only: "expenses" }))
+        .then(() => { try { renderFinances(); } catch {} })
+        .catch(() => {});
+    } catch (error) {
+      const message = String(error?.message || error || "");
+      if (/expenses|relation|does not exist|schema cache/i.test(message) && /expenses/i.test(message)) {
+        showToast("The 'expenses' table is not set up yet. Run the Finances SQL in Supabase, then try again.", true);
+      } else {
+        showToast(message || "Could not save the expense.", true);
+      }
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = expenseEditId(form) ? "Save Changes" : "Add Expense";
+      }
+    }
+  }
+
+  async function deleteExpense(id) {
+    const expense = findExpense(id);
+    if (!expense) return;
+    if (!window.confirm(`Delete this ${expenseCategoryLabel(expense.category)} expense (${money(expense.amount)})?`)) return;
+
+    try {
+      if (expense.storage_path) {
+        try {
+          await state.supabase.storage.from(expense.storage_bucket || BUCKET).remove([expense.storage_path]);
+        } catch {}
+      }
+      const { error } = await state.supabase.from("expenses").delete().eq("id", expense.id);
+      if (error) throw error;
+
+      state.data.expenses = (state.data.expenses || []).filter((row) => String(row.id) !== String(id));
+      if (expenseEditId($("#expenseForm")) === String(id)) exitExpenseEditMode();
+      try { renderFinances(); } catch {}
+      showToast("Expense deleted.");
+      Promise.resolve()
+        .then(() => loadAllData({ silent: true, only: "expenses" }))
+        .then(() => { try { renderFinances(); } catch {} })
+        .catch(() => {});
+    } catch (error) {
+      showToast(error.message || "Could not delete the expense.", true);
+    }
+  }
+
+  async function openReceipt(id, download) {
+    const expense = findExpense(id);
+    if (!expense) return;
+    let url = expense.receipt_url || "";
+    if (!url && expense.storage_path && state?.supabase) {
+      try {
+        const { data, error } = await state.supabase.storage
+          .from(expense.storage_bucket || BUCKET)
+          .createSignedUrl(expense.storage_path, 60 * 60, { download: download ? true : false });
+        if (error) throw error;
+        url = data?.signedUrl || "";
+      } catch (error) {
+        showToast(`Could not open the receipt: ${error.message || error}`, true);
+        return;
+      }
+    }
+    if (!url) {
+      showToast("This expense has no receipt file attached.", true);
+      return;
+    }
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  // Export the current Finances view (summary + expense list, honoring the
+  // active date range and income basis) to Excel via the lazy-loaded library.
+  async function exportFinances(button) {
+    const originalLabel = button?.textContent;
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Exporting…";
+    }
+    try {
+      const XLSX = await ensureSpreadsheetLibrary();
+      const mode = state.financesMode === "paid" ? "paid" : "billed";
+      const range = state.financesRange || "all";
+      const month = range === "custom" ? (state.financesMonth || "") : "";
+      const bounds = financeRangeBounds(range, month);
+      const byCategory = financeExpensesByCategory(bounds);
+
+      const rows = [
+        ["Pro Insulation MP — Finances Summary"],
+        ["Generated", new Date().toLocaleString("en-US")],
+        ["Date range", financeRangeLabel(range, month)],
+        ["Income basis", mode === "paid" ? "Paid invoices only" : "All billed invoices"],
+        [],
+        ["Income", financeIncome(mode, bounds)],
+        ["Paid (received)", financePaidIncome(bounds)],
+        ["Outstanding (open)", financeOutstandingIncome(bounds)],
+        ["Expenses", financeExpensesTotal(bounds)],
+        ["  Material", byCategory.material],
+        ["  Payroll", byCategory.payroll],
+        ["  Monthly / Recurring", byCategory.monthly],
+        ["  Other", byCategory.other],
+        ["True Profit", financeTrueProfit(mode, bounds)],
+        [],
+        ["Expenses"],
+        ["Date", "Category", "Amount", "Vendor", "Note", "Receipt"]
+      ];
+
+      financeFilteredExpenses(bounds)
+        .slice()
+        .sort((a, b) => String(b.expense_date || b.created_at || "").localeCompare(String(a.expense_date || a.created_at || "")))
+        .forEach((row) => {
+          rows.push([
+            String(row.expense_date || "").slice(0, 10),
+            expenseCategoryLabel(row.category),
+            number(row.amount),
+            row.vendor || "",
+            row.note || "",
+            financeExpenseHasReceipt(row) ? "Yes" : "No"
+          ]);
+        });
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 22 }, { wch: 20 }, { wch: 12 }, { wch: 24 }, { wch: 36 }, { wch: 10 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Finances");
+      XLSX.writeFile(wb, `finances_${range === "custom" && month ? month : range}_${today()}.xlsx`);
+      showToast("Finances exported.");
+    } catch (error) {
+      showToast(error.message || "Could not export finances.", true);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalLabel || "Download Excel";
+      }
+    }
+  }
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id === "expenseForm") {
+      event.preventDefault();
+      handleExpenseSubmit(event.target);
+    }
   }, true);
 
-  function start() {
-    const tbody = document.getElementById("invoiceTemplateLineItems");
-    if (tbody) {
-      const observer = new MutationObserver(() => {
-        window.clearTimeout(observer.__pimpAutoSizeTimer);
-        observer.__pimpAutoSizeTimer = window.setTimeout(autoSizeAll, 0);
-      });
-      try { observer.observe(tbody, { childList: true, subtree: true }); } catch {}
-    }
-    autoSizeAll();
-    [60, 250].forEach((delay) => window.setTimeout(autoSizeAll, delay));
+  function selectFinanceMonth(monthKey) {
+    if (!/^\d{4}-\d{2}$/.test(String(monthKey || ""))) return;
+    state.financesRange = "custom";
+    state.financesMonth = monthKey;
+    try { renderFinances(); } catch {}
   }
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
-  else start();
+  document.addEventListener("click", (event) => {
+    const modeBtn = event.target.closest?.("[data-finance-mode]");
+    if (modeBtn) {
+      state.financesMode = modeBtn.dataset.financeMode === "paid" ? "paid" : "billed";
+      try { renderFinances(); } catch {}
+      return;
+    }
+    const monthHit = event.target.closest?.("#financeTrendChart [data-month]");
+    if (monthHit) {
+      selectFinanceMonth(monthHit.getAttribute("data-month"));
+      return;
+    }
+    if (event.target.closest?.("#exportFinancesBtn")) {
+      event.preventDefault();
+      exportFinances(event.target.closest("#exportFinancesBtn"));
+      return;
+    }
+    if (event.target.closest?.("#cancelExpenseEditBtn")) {
+      event.preventDefault();
+      exitExpenseEditMode();
+      return;
+    }
+    const editId = event.target.closest?.("[data-edit-expense]")?.dataset.editExpense;
+    if (editId) {
+      event.preventDefault();
+      enterExpenseEditMode(findExpense(editId));
+      return;
+    }
+    const deleteId = event.target.closest?.("[data-delete-expense]")?.dataset.deleteExpense;
+    if (deleteId) {
+      event.preventDefault();
+      deleteExpense(deleteId);
+      return;
+    }
+    const viewId = event.target.closest?.("[data-view-receipt]")?.dataset.viewReceipt;
+    if (viewId) {
+      event.preventDefault();
+      openReceipt(viewId, false);
+      return;
+    }
+    const downloadId = event.target.closest?.("[data-download-receipt]")?.dataset.downloadReceipt;
+    if (downloadId) {
+      event.preventDefault();
+      openReceipt(downloadId, true);
+    }
+  });
 
-  window.PIMP_autoSizeInvoiceLineDescriptions = autoSizeAll;
+  document.addEventListener("change", (event) => {
+    if (event.target?.id === "financeRangeSelect") {
+      const value = String(event.target.value || "all");
+      state.financesRange = ["quarter", "year", "custom"].includes(value) ? value : "all";
+      if (state.financesRange !== "custom") state.financesMonth = "";
+      try { renderFinances(); } catch {}
+      return;
+    }
+    if (event.target?.id === "financeMonthSelect") {
+      const value = String(event.target.value || "");
+      if (/^\d{4}-\d{2}$/.test(value)) {
+        selectFinanceMonth(value);
+      } else {
+        state.financesRange = "all";
+        state.financesMonth = "";
+        try { renderFinances(); } catch {}
+      }
+    }
+  });
+
+  // Keyboard access for the clickable months in the cash flow chart.
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const hit = event.target.closest?.("#financeTrendChart [data-month]");
+    if (!hit) return;
+    event.preventDefault();
+    selectFinanceMonth(hit.getAttribute("data-month"));
+  });
+
+  function primeExpenseDate() {
+    const field = document.querySelector('#expenseForm [name="expense_date"]');
+    if (field && !field.value) field.value = today();
+  }
+  document.addEventListener("DOMContentLoaded", primeExpenseDate);
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.('.nav-btn[data-view="finances"]')) setTimeout(primeExpenseDate, 0);
+  });
 })();
+
