@@ -540,6 +540,14 @@ function invoiceIsPaid(invoice) {
   return invoiceStatusRaw(invoice) === "paid";
 }
 
+// An invoice is "billed" once it has been issued to the client: awaiting
+// approval, submitted (approved), or paid. Unsent drafts and cancelled/void
+// invoices do not count. "sent"/"overdue" are legacy stored values that mean
+// the same as awaiting approval.
+function invoiceIsBilled(invoice) {
+  return ["awaiting_approval", "sent", "overdue", "approved", "paid"].includes(invoiceStatusRaw(invoice));
+}
+
 // Date-range filter for the Finances page. Returns { start, end } (inclusive
 // ISO day strings) for "quarter" | "year" | "custom" (a specific "YYYY-MM"
 // via `monthKey`, defaulting to the current month), or null for "all".
@@ -584,8 +592,10 @@ function financeDateInBounds(value, bounds) {
 }
 
 // income counted toward profit. "paid" = cash received; "billed" = every
-// non-cancelled invoice (open + paid). Matches the Finances profit toggle.
-// `bounds` (optional) restricts income to invoices dated inside the range.
+// invoice issued to the client (awaiting approval, submitted, or paid).
+// Unsent drafts and cancelled invoices are excluded. Matches the Finances
+// profit toggle. `bounds` (optional) restricts income to invoices dated
+// inside the range.
 function financeIncome(mode, bounds = null) {
   const invoices = (state.data.invoices || []).filter((row) =>
     financeDateInBounds(row.invoice_date || row.created_at, bounds)
@@ -593,14 +603,14 @@ function financeIncome(mode, bounds = null) {
   if (mode === "paid") {
     return invoices.filter(invoiceIsPaid).reduce((sum, row) => sum + invoiceTotal(row), 0);
   }
-  return invoices.filter((row) => !invoiceIsCancelled(row)).reduce((sum, row) => sum + invoiceTotal(row), 0);
+  return invoices.filter(invoiceIsBilled).reduce((sum, row) => sum + invoiceTotal(row), 0);
 }
 
 function financePaidIncome(bounds = null) {
   return financeIncome("paid", bounds);
 }
 
-// billed but not yet paid (still owed to the business)
+// billed but not yet paid — invoices awaiting approval or submitted
 function financeOutstandingIncome(bounds = null) {
   return financeIncome("billed", bounds) - financeIncome("paid", bounds);
 }
@@ -916,45 +926,87 @@ function renderFinances() {
       : "";
   }
 
-  const expensesList = financeFilteredExpenses(bounds).slice().sort((a, b) => {
-    const av = a.expense_date || a.created_at || "";
-    const bv = b.expense_date || b.created_at || "";
-    return String(bv).localeCompare(String(av));
-  });
+  const allExpenses = financeFilteredExpenses(bounds);
 
   const countEl = $("#expensesCount");
-  if (countEl) countEl.textContent = expensesList.length;
+  if (countEl) countEl.textContent = allExpenses.length;
 
   const body = $("#expensesTable");
   if (!body) return;
 
-  if (!expensesList.length) {
+  if (!allExpenses.length) {
     body.innerHTML = bounds && (state.data.expenses || []).length
-      ? `<tr><td colspan="6" class="empty-cell">No expenses in ${financeEscape(range === "custom" ? rangeLabel : rangeLabel.toLowerCase())}. Choose "All time" to see every expense.</td></tr>`
-      : '<tr><td colspan="6" class="empty-cell">No expenses yet. Add a receipt on the left to start tracking costs.</td></tr>';
+      ? `<tr><td colspan="5" class="empty-cell">No expenses in ${financeEscape(range === "custom" ? rangeLabel : rangeLabel.toLowerCase())}. Choose "All time" to see every expense.</td></tr>`
+      : '<tr><td colspan="5" class="empty-cell">No expenses yet. Add a receipt on the left to start tracking costs.</td></tr>';
     return;
   }
 
-  body.innerHTML = expensesList.map((row) => {
+  // Group expenses by category (Material, Payroll, Monthly, Other), then sort
+  // each group by date newest-first. Each category is a collapsible header row
+  // so the tab stays short: the header always shows the item count and
+  // subtotal; the line items only appear once the user expands the category.
+  const CATEGORY_ORDER = ["material", "payroll", "monthly", "other"];
+  const normalizeCat = (category) => {
+    const key = String(category || "other").toLowerCase();
+    return CATEGORY_ORDER.includes(key) ? key : "other";
+  };
+
+  const groups = new Map();
+  allExpenses.forEach((row) => {
+    const key = normalizeCat(row.category);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  });
+
+  const isCollapsed = (category) =>
+    typeof window.PIMP_isExpenseCatCollapsed === "function"
+      ? window.PIMP_isExpenseCatCollapsed(category)
+      : true;
+
+  const expenseRowHtml = (row) => {
     const id = financeEscape(row.id);
     const dateText = financeEscape(formatDate(row.expense_date));
-    const catLabel = financeEscape(expenseCategoryLabel(row.category));
-    const catClass = financeEscape(String(row.category || "other").toLowerCase());
     const amountText = financeEscape(money(row.amount));
     const details = financeEscape(row.vendor ? `${row.vendor}${row.note ? " — " + row.note : ""}` : (row.note || "-"));
     const receiptCell = financeExpenseHasReceipt(row)
       ? `<button class="link-btn" type="button" data-view-receipt="${id}">View</button>` +
         `<button class="link-btn" type="button" data-download-receipt="${id}">Download</button>`
       : '<span class="tiny">No file</span>';
-    return `<tr>
+    return `<tr class="finance-expense-row">
       <td>${dateText}</td>
-      <td><span class="expense-badge expense-${catClass}">${catLabel}</span></td>
       <td class="money-cell">${amountText}</td>
       <td>${details}</td>
       <td class="table-actions receipt-cell">${receiptCell}</td>
       <td class="table-actions"><button class="link-btn" type="button" data-edit-expense="${id}">Edit</button><button class="link-btn danger-text" type="button" data-delete-expense="${id}">Delete</button></td>
     </tr>`;
-  }).join("");
+  };
+
+  const pieces = [];
+  CATEGORY_ORDER.forEach((category) => {
+    const rows = groups.get(category);
+    if (!rows || !rows.length) return;
+    rows.sort((a, b) =>
+      String(b.expense_date || b.created_at || "").localeCompare(String(a.expense_date || a.created_at || ""))
+    );
+    const subtotal = rows.reduce((sum, row) => sum + number(row.amount), 0);
+    const collapsed = isCollapsed(category);
+    const catLabel = financeEscape(expenseCategoryLabel(category));
+    pieces.push(
+      `<tr class="finance-expense-group-header ${collapsed ? "collapsed" : "expanded"}" data-expense-cat="${financeEscape(category)}" tabindex="0" role="button" aria-expanded="${collapsed ? "false" : "true"}">
+        <td colspan="5">
+          <div class="finance-cat-headrow">
+            <span class="finance-cat-caret" aria-hidden="true">${collapsed ? "&#9656;" : "&#9662;"}</span>
+            <span class="expense-badge expense-${financeEscape(category)}">${catLabel}</span>
+            <span class="finance-cat-count">${rows.length} item${rows.length === 1 ? "" : "s"}</span>
+            <strong class="finance-cat-subtotal">${financeEscape(money(subtotal))}</strong>
+          </div>
+        </td>
+      </tr>`
+    );
+    if (!collapsed) pieces.push(rows.map(expenseRowHtml).join(""));
+  });
+
+  body.innerHTML = pieces.join("");
 }
 
 function renderDashboardLists() {
@@ -1478,11 +1530,11 @@ const COST_CONTAINER_BY_CATEGORY = {
 
 const DEFAULT_COST_LINES = {
   labor: [
-    { description: "Superintendant", cost_rate: 42.24, ot_cost_rate: 63.36, bill_rate: 65, ot_bill_rate: 97.5 },
-    { description: "Foreman", cost_rate: 38.28, ot_cost_rate: 57.42, bill_rate: 59.5, ot_bill_rate: 89.25 },
-    { description: "Metal Technician", cost_rate: 34.32, ot_cost_rate: 51.48, bill_rate: 53, ot_bill_rate: 79.5 },
-    { description: "Laborer", cost_rate: 30.36, ot_cost_rate: 45.54, bill_rate: 47, ot_bill_rate: 70.5 },
-    { description: "Truck Driver", cost_rate: 39.6, ot_cost_rate: 59.4, bill_rate: 62, ot_bill_rate: 93.5 }
+    { description: "Superintendant", cost_rate: 42.24, ot_cost_rate: 54, bill_rate: 65, ot_bill_rate: 97.5 },
+    { description: "Foreman", cost_rate: 38.28, ot_cost_rate: 49.95, bill_rate: 59.5, ot_bill_rate: 89.25 },
+    { description: "Metal Technician", cost_rate: 34.32, ot_cost_rate: 45, bill_rate: 53, ot_bill_rate: 79.5 },
+    { description: "Laborer", cost_rate: 30.36, ot_cost_rate: 40.5, bill_rate: 47, ot_bill_rate: 70.5 },
+    { description: "Truck Driver", cost_rate: 39.6, ot_cost_rate: 60, bill_rate: 62, ot_bill_rate: 93 }
   ],
   equipment: [
     { description: "Pick-up", cost_rate: 17, day_cost: 136, bill_rate: 25, day_rate: 200 },
@@ -2260,6 +2312,19 @@ function addSheetCostRow(category, defaults = {}) {
       <td><button class="sheet-remove-btn" data-remove-sheet-row type="button">×</button></td>`;
   }
 
+  // Personnel (labor) rate & cost columns are fixed company rates: lock them so
+  // they display but can't be edited. Qty / Hours / OT Hours stay editable.
+  if (category === "labor") {
+    ["cost_rate", "ot_cost_rate", "bill_rate", "ot_bill_rate"].forEach((field) => {
+      const input = row.querySelector(`[data-field="${field}"]`);
+      if (!input) return;
+      input.readOnly = true;
+      input.tabIndex = -1;
+      input.setAttribute("aria-readonly", "true");
+      input.classList.add("locked-rate");
+    });
+  }
+
   body.appendChild(row);
   recomputeCostTrackerTotals();
 }
@@ -2539,8 +2604,10 @@ function loadEmployeeIntoForm(employee) {
   setFormValue(form, "phone", employee.phone || "");
   setFormValue(form, "role", employee.role || "Insulator");
   setFormValue(form, "status", employee.status || "active");
+  setFormValue(form, "pay_rate", employee.pay_rate ?? "");
 
   setEmployeeFormMode(true);
+  try { window.PIMP_refreshEmployeeDocuments?.(); } catch {}
   form.scrollIntoView({ behavior: "smooth", block: "start" });
   showToast("Employee loaded. Make changes and click Update Employee.");
 }
@@ -2561,6 +2628,7 @@ function resetEmployeeFormMode() {
     setFormValue(form, "record_id", "");
   }
   setEmployeeFormMode(false);
+  try { window.PIMP_refreshEmployeeDocuments?.(); } catch {}
 }
 
 
@@ -3526,12 +3594,22 @@ async function handleCreateEmployee(event) {
   const values = formToObject(form);
   const editingId = values.record_id || "";
 
+  // A document can be attached in the form while adding/updating an employee.
+  // Capture it now (before the form is reset) and upload it once the employee
+  // is saved and we have an id to attach it to.
+  const pendingDocFile = form.querySelector("#employeeDocumentFile")?.files?.[0] || null;
+  const pendingDocLabel = (form.querySelector("#employeeDocumentLabel")?.value || "").trim() || null;
+
+  const payRateRaw = String(values.pay_rate ?? "").trim();
+  const payRate = payRateRaw === "" ? null : Number(payRateRaw);
+
   const payload = {
     full_name: String(values.full_name || "").trim(),
     email: values.email ? String(values.email).trim() : null,
     phone: values.phone ? String(values.phone).trim() : null,
     role: values.role || null,
-    status: values.status || "active"
+    status: values.status || "active",
+    pay_rate: Number.isFinite(payRate) ? payRate : null
   };
 
   if (!payload.full_name) {
@@ -3539,10 +3617,37 @@ async function handleCreateEmployee(event) {
     return;
   }
 
+  const saveEmployeeRow = (data) =>
+    editingId ? updateRow("employees", editingId, data) : insertRow("employees", data);
+
   try {
-    const employee = editingId
-      ? await updateRow("employees", editingId, payload)
-      : await insertRow("employees", payload);
+    let employee;
+    let payRateDropped = false;
+    try {
+      employee = await saveEmployeeRow(payload);
+    } catch (error) {
+      // The pay_rate column may not exist in Supabase yet. Rather than block the
+      // whole save, retry without it and warn — the rest of the record still saves.
+      const message = String(error?.message || error).toLowerCase();
+      if ("pay_rate" in payload && /pay_rate|column|schema cache|does not exist|could not find/.test(message)) {
+        const { pay_rate, ...withoutPayRate } = payload;
+        employee = await saveEmployeeRow(withoutPayRate);
+        payRateDropped = true;
+      } else {
+        throw error;
+      }
+    }
+
+    // Upload the attached document (if any) now that the employee has an id.
+    let docUploadError = null;
+    if (pendingDocFile && employee?.id) {
+      try {
+        await window.PIMP_uploadEmployeeDocumentForId?.(employee.id, pendingDocFile, pendingDocLabel);
+      } catch (uploadError) {
+        docUploadError = uploadError;
+        console.warn("Employee document upload failed:", uploadError);
+      }
+    }
 
     mergeStateRow("employees", employee);
     hydrateSelects();
@@ -3552,7 +3657,16 @@ async function handleCreateEmployee(event) {
     await loadAllData({ silent: true, only: "employees" });
     refreshWebsiteLists();
 
-    showToast(editingId ? "Employee updated and saved to Supabase." : "Employee added to the website table and saved to Supabase.");
+    if (docUploadError) {
+      const message = String(docUploadError.message || docUploadError);
+      showToast(/employee_documents|relation .* does not exist|could not find the table|schema cache/i.test(message)
+        ? "Employee saved, but the document was not uploaded — the employee_documents table does not exist in Supabase yet."
+        : `Employee saved, but the document upload failed: ${message}`, true);
+    } else if (payRateDropped) {
+      showToast("Employee saved, but pay rate was not stored — add a pay_rate column to the employees table in Supabase.", true);
+    } else {
+      showToast(editingId ? "Employee updated and saved to Supabase." : "Employee added to the website table and saved to Supabase.");
+    }
   } catch (error) {
     showToast(error.message || String(error), true);
   }
@@ -3674,13 +3788,15 @@ function renderEmployees() {
       <td data-label="Role">${escapeHtml(employee.role || "-")}</td>
       <td data-label="Email">${escapeHtml(employee.email || "-")}</td>
       <td data-label="Phone">${escapeHtml(employee.phone || "-")}</td>
+      <td data-label="Pay Rate">${employee.pay_rate != null && employee.pay_rate !== "" ? escapeHtml(money(employee.pay_rate) + "/hr") : "-"}</td>
+      <td data-label="Document">${typeof window.PIMP_employeeHasDocument === "function" && window.PIMP_employeeHasDocument(employee.id) ? '<span class="doc-flag yes">Yes</span>' : ''}</td>
       <td data-label="Status"><span class="status ${escapeHtml(employee.status || "")}">${escapeHtml(employee.status || "active")}</span></td>
       <td data-label="Actions" class="table-actions">
         <button class="link-btn" data-edit-employee="${escapeAttr(employee.id)}" type="button">Edit</button>
         <button class="link-btn danger-text" data-delete-type="employees" data-delete-id="${escapeAttr(employee.id)}" type="button">Delete</button>
       </td>
     </tr>
-  `).join("") || emptyRow(6);
+  `).join("") || emptyRow(8);
 }
 
 function renderAssignments() {
@@ -16506,7 +16622,6 @@ This removes it from the job documents list.`)) return;
       <th>Location</th>
       <th>Timesheets / Employees</th>
       <th>Total Hours</th>
-      <th>Ticket #</th>
       <th>Actions</th>
     `;
   }
@@ -16531,7 +16646,6 @@ This removes it from the job documents list.`)) return;
           <td data-label="Location">${esc(daily.location || folder.location || "-")}</td>
           <td data-label="Employees" class="money-cell">${cleanNum(daily.employeeCount)}</td>
           <td data-label="Total Hours" class="money-cell">${cleanNum(daily.totalHours)}</td>
-          <td data-label="Ticket #">${esc(daily.ticket || "-")}</td>
           <td data-label="Actions" class="table-actions timesheet-child-actions">
             <button class="link-btn" data-edit-timesheet-daily="${escAttr(daily.id)}" type="button">Edit</button>
             <button class="link-btn" data-view-timesheet-daily="${escAttr(daily.id)}" type="button">View</button>
@@ -16554,7 +16668,6 @@ This removes it from the job documents list.`)) return;
           <td data-label="Location">${esc(folder.location || "-")}</td>
           <td data-label="Timesheets / Employees" class="money-cell">${folder.dailySheets.length} sheet${folder.dailySheets.length === 1 ? "" : "s"}<br><span class="muted">${cleanNum(folder.employeeCount)} employee line${folder.employeeCount === 1 ? "" : "s"}</span></td>
           <td data-label="Total Hours" class="money-cell total-money">${cleanNum(folder.totalHours)}</td>
-          <td data-label="Ticket #">${esc(folder.latestTicket || "-")}</td>
           <td data-label="Actions" class="table-actions timesheet-folder-actions">
             <button class="link-btn" data-toggle-timesheet-folder="${escAttr(folder.id)}" type="button">${openText}</button>
             ${folder.jobId ? `<button class="link-btn" data-new-timesheet-for-job="${escAttr(folder.jobId)}" type="button">New Sheet</button>` : ""}
@@ -16562,7 +16675,7 @@ This removes it from the job documents list.`)) return;
         </tr>
         ${dailyRows}
       `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8" class="muted">No records found.</td></tr>');
+    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
   };
   try { renderTimesheets = window.renderTimesheets; } catch {}
 
@@ -23694,7 +23807,10 @@ ${docs.length ? `
   }
 
   function applyReferenceRatesToLine(category, line) {
-    if (!["labor", "equipment"].includes(category)) return { ...(line || {}) };
+    // Personnel (labor) rates are fixed company rates and must never be
+    // auto-overwritten from a saved "reference" tracker; they always come from
+    // the locked defaults. Only equipment still auto-fills from a reference.
+    if (category !== "equipment") return { ...(line || {}) };
 
     const rates = getReferenceRates();
     const categoryRates = rates?.[category] || {};
@@ -28919,9 +29035,13 @@ ${docs.length ? `
   }
 
   function invoiceNumberFromJobNumber(jobNumber) {
-    const raw = text(jobNumber);
-    const match = raw.match(/\d+/);
-    return match ? `Invoice ${match[0]}` : "";
+    const raw = String(jobNumber || "").trim();
+    if (!raw) return "";
+    // Invoice number mirrors the job number with a "-26" (2026) suffix, e.g.
+    // job "0015" -> "Invoice 0015-26". If the job number already ends in a
+    // two-digit year suffix, keep it as-is instead of doubling it.
+    const withYear = /-\d{2}$/.test(raw) ? raw : `${raw}-26`;
+    return `Invoice ${withYear}`;
   }
 
   function invoiceNumberForJob(job) {
@@ -29361,12 +29481,13 @@ ${docs.length ? `
   }
 
   function invoiceNumberFromJobNumber(jobNumber) {
-    const raw = clean(jobNumber);
-    // Use all of the numbers before the first dash, e.g. "0015-26" -> "Invoice 0015".
-    const beforeDash = raw.split("-")[0];
-    const firstNumberGroup = (beforeDash.match(/\d+/) || raw.match(/\d+/))?.[0] || "";
-    if (!firstNumberGroup) return "";
-    return `Invoice ${firstNumberGroup}`;
+    const raw = String(jobNumber || "").trim();
+    if (!raw) return "";
+    // Invoice number mirrors the job number with a "-26" (2026) suffix, e.g.
+    // job "0015" -> "Invoice 0015-26". If the job number already ends in a
+    // two-digit year suffix, keep it as-is instead of doubling it.
+    const withYear = /-\d{2}$/.test(raw) ? raw : `${raw}-26`;
+    return `Invoice ${withYear}`;
   }
 
   function resolveInvoiceJob(form = qs("#invoiceForm")) {
@@ -30801,16 +30922,57 @@ function on(selector, eventName, handler) {
     try { return (state?.data?.jobs || []).find((job) => String(job.id || "") === id) || null; } catch { return null; }
   }
 
+  // --- Per-job lookup indexes -------------------------------------------------
+  // The dashboard renders every open job and, per row, looks up its latest
+  // invoice, latest cost tracker, and attached documents. Doing that with a
+  // fresh Array.filter/sort each time is O(jobs x rows) per render. These cached
+  // maps make each lookup O(1). A map is rebuilt only when its source array is
+  // replaced (a fresh load) or changes length (a row added/removed); in-place
+  // edits to a row's fields are still reflected because the maps hold the row
+  // objects by reference.
+  const _latestCache = new Map(); // sourceKey -> { src, len, map(job_id -> latest row) }
+
+  function latestByJob(sourceKey, rows) {
+    let entry = _latestCache.get(sourceKey);
+    if (!entry || entry.src !== rows || entry.len !== rows.length) {
+      const map = new Map();
+      for (const row of rows) {
+        const jobId = String(row.job_id || "");
+        if (!jobId) continue;
+        const current = map.get(jobId);
+        if (!current || dateValue(row) > dateValue(current)) map.set(jobId, row);
+      }
+      entry = { src: rows, len: rows.length, map };
+      _latestCache.set(sourceKey, entry);
+    }
+    return entry.map;
+  }
+
   function latestInvoiceForJob(jobId) {
-    const id = String(jobId || "");
-    const rows = (state?.data?.invoices || []).filter((invoice) => String(invoice.job_id || "") === id);
-    return rows.sort((a, b) => dateValue(b) - dateValue(a))[0] || null;
+    return latestByJob("invoices", state?.data?.invoices || []).get(String(jobId || "")) || null;
   }
 
   function latestCostTrackerForJob(jobId) {
-    const id = String(jobId || "");
-    const rows = (state?.data?.costTrackers || []).filter((tracker) => String(tracker.job_id || "") === id);
-    return rows.sort((a, b) => dateValue(b) - dateValue(a))[0] || null;
+    return latestByJob("costTrackers", state?.data?.costTrackers || []).get(String(jobId || "")) || null;
+  }
+
+  let _docsByJob = null, _docsSrc = null, _docsLen = -1;
+  function documentsForJob(jobId) {
+    const rows = state?.data?.documents || [];
+    if (_docsSrc !== rows || _docsLen !== rows.length) {
+      const map = new Map();
+      for (const doc of rows) {
+        const id = String(doc.job_id || "");
+        if (!id) continue;
+        let list = map.get(id);
+        if (!list) { list = []; map.set(id, list); }
+        list.push(doc);
+      }
+      _docsByJob = map;
+      _docsSrc = rows;
+      _docsLen = rows.length;
+    }
+    return _docsByJob.get(String(jobId || "")) || [];
   }
 
   function dateValue(row) {
@@ -30892,23 +31054,41 @@ function on(selector, eventName, handler) {
     return num(job?.total_job_days || job?.total_days || job?.job_days);
   }
 
+  // Indexed job_id -> distinct daily-sheet count, matching the shared
+  // __pimpUniqueDailyTimesheetsForJob key logic (one sheet per job/date, split
+  // further by ticket) but built once per data change instead of scanning every
+  // timesheet for each rendered row.
+  let _tsCountByJob = null, _tsSrc = null, _tsLen = -1;
+  function timesheetCountByJob() {
+    const rows = state?.data?.timesheets || [];
+    if (_tsSrc !== rows || _tsLen !== rows.length) {
+      const perJob = new Map();
+      for (const entry of rows) {
+        const jobId = String(entry?.job_id || "");
+        if (!jobId) continue;
+        const date = entry.work_date || entry.date || entry.timesheet_date || "no-date";
+        const ticket = entry.ticket_number || entry.ticket_no || entry.ticket || "";
+        const key = ticket ? `${date}::${ticket}` : `${date}`;
+        let set = perJob.get(jobId);
+        if (!set) { set = new Set(); perJob.set(jobId, set); }
+        set.add(key);
+      }
+      const counts = new Map();
+      perJob.forEach((set, jobId) => counts.set(jobId, set.size));
+      _tsCountByJob = counts;
+      _tsSrc = rows;
+      _tsLen = rows.length;
+    }
+    return _tsCountByJob;
+  }
+
   function uniqueDailyTimesheets(jobId) {
-    try { if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") return window.__pimpUniqueDailyTimesheetsForJob(jobId); } catch {}
-    const seen = new Set();
-    try {
-      (state?.data?.timesheets || []).forEach((entry) => {
-        if (String(entry.job_id || "") !== String(jobId || "")) return;
-        const summary = parseJsonSafe(entry.summary, {});
-        const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
-        if (key) seen.add(String(key));
-      });
-    } catch {}
-    return seen.size;
+    return timesheetCountByJob().get(String(jobId || "")) || 0;
   }
 
   function documentChips(job) {
     const jobId = String(job?.id || "");
-    const documents = (state?.data?.documents || []).filter((doc) => String(doc.job_id || "") === jobId);
+    const documents = documentsForJob(jobId);
     const trackerMade = Boolean(latestCostTrackerForJob(jobId)) || documents.some((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
     const invoiceMade = Boolean(latestInvoiceForJob(jobId)) || documents.some((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
     const timesheetsMade = uniqueDailyTimesheets(jobId) > 0 || documents.some((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
@@ -31001,20 +31181,29 @@ function on(selector, eventName, handler) {
     renderingStableOpenJobs = true;
     try {
       normalizeOpenJobsHeader();
-      const jobs = (state?.data?.jobs || [])
-        .filter((job) => statusSection(job) !== "paid")
-        .filter((job) => {
-          const term = clean(qs("#dashboardActiveJobsSearch")?.value).toLowerCase();
-          if (!term) return true;
-          const invoice = latestInvoiceForJob(job.id);
-          const tracker = latestCostTrackerForJob(job.id);
-          return [job.job_number, job.job_name, job.company_name, job.location, invoiceStatusLabel(invoice?.status), invoice?.invoice_number, tracker ? "cost tracker" : "", uniqueDailyTimesheets(job.id) ? "timesheets" : ""].join(" ").toLowerCase().includes(term);
-        });
+      // Read the search box once, not once per job.
+      const term = clean(qs("#dashboardActiveJobsSearch")?.value).toLowerCase();
+      const matchesSearch = (job) => {
+        if (!term) return true;
+        const invoice = latestInvoiceForJob(job.id);
+        const tracker = latestCostTrackerForJob(job.id);
+        return [job.job_number, job.job_name, job.company_name, job.location, invoiceStatusLabel(invoice?.status), invoice?.invoice_number, tracker ? "cost tracker" : "", uniqueDailyTimesheets(job.id) ? "timesheets" : ""].join(" ").toLowerCase().includes(term);
+      };
 
-      // Two sections, each sorted by Job # with the greatest number on top.
-      // Paid invoices are filtered out above and shown in Closed Jobs instead.
-      const needsInvoice = jobs.filter((job) => statusSection(job) === "needs_invoice").sort(compareJobNumber);
-      const review = jobs.filter((job) => statusSection(job) === "review").sort(compareJobNumber);
+      // Single pass: compute each job's invoice-status section once (it used to
+      // run three times per job), drop paid jobs (they live in Closed Jobs),
+      // apply the search, and split into the two on-screen groups. Each group is
+      // sorted by Job # with the greatest number on top.
+      const needsInvoice = [];
+      const review = [];
+      for (const job of (state?.data?.jobs || [])) {
+        const section = statusSection(job);
+        if (section === "paid" || !matchesSearch(job)) continue;
+        if (section === "needs_invoice") needsInvoice.push(job);
+        else if (section === "review") review.push(job);
+      }
+      needsInvoice.sort(compareJobNumber);
+      review.sort(compareJobNumber);
       const total = needsInvoice.length + review.length;
       const count = qs("#dashboardActiveJobsCount");
       if (count) count.textContent = String(total);
@@ -31827,3 +32016,678 @@ function on(selector, eventName, handler) {
   });
 })();
 
+
+/* ==========================================================================
+   FINAL PATCH: SINGLE EMPLOYEE NAME IN THE TIMESHEET "EMP NAME" CELL
+   --------------------------------------------------------------------------
+   The Emp Name cell used to stack two controls: the employee dropdown on top
+   and a free-text employee_name input underneath. Picking someone filled the
+   text box with the same name the dropdown was already showing, so the name
+   appeared twice in one box.
+
+   The dropdown is now the only visible control. employee_name stays in the
+   DOM as a hidden input because saving, PDF export, and reloading a saved
+   sheet all read that field - only its visibility changes.
+
+   Rows are built by several different code paths (addTsRow, addEmployeeRow,
+   the add-row button, and the saved-sheet loader), so a MutationObserver
+   normalizes every row instead of patching each builder.
+   ========================================================================== */
+(function singleEmployeeNamePerTimesheetRow() {
+  const ROWS_SELECTOR = "#timesheetEmployeeRows";
+  const NAME_SELECTOR = '[data-ts-field="employee_name"]';
+
+  function nameInputFor(row) {
+    return row?.querySelector?.(NAME_SELECTOR) || null;
+  }
+
+  function selectFor(row) {
+    return row?.querySelector?.('[data-ts-field="employee_id"]') || null;
+  }
+
+  // A saved row can carry a name whose employee no longer exists in the
+  // dropdown (deleted employee, or a name typed by hand before this patch).
+  // Showing that name on the row's own placeholder option keeps it visible
+  // exactly once, and leaves employee_id empty just as it was saved.
+  function keepUnmatchedNameVisible(row) {
+    const select = selectFor(row);
+    const nameInput = nameInputFor(row);
+    if (!select || !nameInput) return;
+
+    const savedName = String(nameInput.value || "").trim();
+    const placeholder = select.querySelector('option[value=""]');
+    if (!placeholder) return;
+
+    if (!select.value && savedName) {
+      if (placeholder.dataset.pimpOriginalLabel === undefined) {
+        placeholder.dataset.pimpOriginalLabel = placeholder.textContent || "";
+      }
+      placeholder.textContent = savedName;
+    } else if (placeholder.dataset.pimpOriginalLabel !== undefined) {
+      placeholder.textContent = placeholder.dataset.pimpOriginalLabel;
+      delete placeholder.dataset.pimpOriginalLabel;
+    }
+  }
+
+  function normalizeRow(row) {
+    const nameInput = nameInputFor(row);
+    if (!nameInput) return;
+    if (nameInput.type !== "hidden") {
+      nameInput.type = "hidden";
+      nameInput.removeAttribute("placeholder");
+    }
+    keepUnmatchedNameVisible(row);
+  }
+
+  function normalizeAllRows() {
+    try {
+      document.querySelectorAll(`${ROWS_SELECTOR} .timesheet-employee-row`).forEach(normalizeRow);
+    } catch {}
+  }
+
+  // Runs after the existing capture-phase handler that fills the name, so it
+  // only has to cover the case that handler skips: clearing the row back to
+  // "Select employee..." must clear the hidden name too, otherwise a stale
+  // name would be saved with no way to see it.
+  document.addEventListener("change", (event) => {
+    const select = event.target;
+    if (!select?.matches?.("#timesheetForm .timesheet-employee-select")) return;
+    const row = select.closest(".timesheet-employee-row");
+    if (!row) return;
+
+    const nameInput = nameInputFor(row);
+    if (nameInput && !select.value) nameInput.value = "";
+    normalizeRow(row);
+  });
+
+  const target = document.getElementById("timesheetEmployeeRows");
+  if (target) {
+    new MutationObserver(normalizeAllRows).observe(target, { childList: true, subtree: true });
+  }
+  document.addEventListener("DOMContentLoaded", normalizeAllRows);
+  setTimeout(normalizeAllRows, 0);
+})();
+
+/* ==========================================================================
+   COMPANIES TAB
+   --------------------------------------------------------------------------
+   A shared registry of companies (name, address, terms) stored in the
+   Supabase "companies" table. Mirrors the Employees tab: a form on the left,
+   a searchable table on the right, with add / edit / delete.
+
+   Self-contained so it does not depend on the heavily-wrapped renderAll /
+   loadAllData chain: it fetches companies itself when the session is ready,
+   when the Refresh button is pressed, and when the Companies tab is opened.
+
+   Requires a "companies" table in Supabase. If it is missing, loads return
+   empty and saves surface a clear "table does not exist yet" message.
+   ========================================================================== */
+(function companiesTab() {
+  const TABLE = "companies";
+
+  function q(sel, root) { return (root || document).querySelector(sel); }
+
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+
+  function companies() {
+    if (!state.data) state.data = {};
+    if (!Array.isArray(state.data.companies)) state.data.companies = [];
+    return state.data.companies;
+  }
+
+  function toast(message, isError) {
+    try { if (typeof showToast === "function") showToast(message, Boolean(isError)); } catch {}
+  }
+
+  function tableMissing(message) {
+    return /relation .* does not exist|could not find the table|schema cache|does not exist/i.test(String(message || ""));
+  }
+
+  // --- Rendering -----------------------------------------------------------
+  function renderCompanies() {
+    const table = q("#companiesTable");
+    if (!table) return;
+    const count = q("#companiesCount");
+
+    const term = (q("#companiesSearch")?.value || "").trim().toLowerCase();
+    const rows = companies().filter((row) => {
+      if (!term) return true;
+      return [row.company_name, row.address, row.terms].join(" ").toLowerCase().includes(term);
+    });
+
+    if (count) count.textContent = String(rows.length);
+
+    table.innerHTML = rows.map((row) => `
+      <tr>
+        <td data-label="Company"><strong>${esc(row.company_name || "-")}</strong></td>
+        <td data-label="Address">${esc(row.address || "-").replace(/\n/g, "<br>")}</td>
+        <td data-label="Terms">${esc(row.terms || "-")}</td>
+        <td data-label="Actions" class="table-actions">
+          <button class="link-btn" data-edit-company="${esc(row.id)}" type="button">Edit</button>
+          <button class="link-btn danger-text" data-delete-company="${esc(row.id)}" type="button">Delete</button>
+        </td>
+      </tr>
+    `).join("") || `<tr><td colspan="4" class="muted">No companies yet. Add one on the left.</td></tr>`;
+  }
+  window.renderCompanies = renderCompanies;
+
+  // --- Load ----------------------------------------------------------------
+  let loadingCompanies = false;
+  async function loadCompanies() {
+    if (!state?.supabase || !state?.session || loadingCompanies) return;
+    loadingCompanies = true;
+    try {
+      let response = await state.supabase.from(TABLE).select("*").order("company_name", { ascending: true }).limit(1000);
+      if (response.error) {
+        const message = String(response.error.message || "").toLowerCase();
+        if (message.includes("column") || message.includes("pgrst") || message.includes("schema cache")) {
+          response = await state.supabase.from(TABLE).select("*").limit(1000);
+        }
+      }
+      if (response.error) {
+        console.warn("Could not load companies (is the table created?):", response.error.message || response.error);
+        state.data.companies = [];
+      } else {
+        state.data.companies = response.data || [];
+      }
+    } catch (error) {
+      console.warn("Could not load companies:", error);
+      state.data.companies = [];
+    } finally {
+      loadingCompanies = false;
+      renderCompanies();
+    }
+  }
+  window.loadCompanies = loadCompanies;
+
+  // --- Form mode -----------------------------------------------------------
+  function setFormMode(isEditing) {
+    const title = q("#companyFormTitle");
+    const submit = q("#companySubmitBtn");
+    const cancel = q("#cancelCompanyEditBtn");
+    if (title) title.textContent = isEditing ? "Edit Company" : "Add Company";
+    if (submit) submit.textContent = isEditing ? "Update Company" : "Add Company";
+    if (cancel) cancel.classList.toggle("hidden", !isEditing);
+  }
+
+  function resetForm() {
+    const form = q("#companyForm");
+    if (form) {
+      form.reset();
+      const record = form.querySelector('[name="record_id"]');
+      if (record) record.value = "";
+    }
+    setFormMode(false);
+  }
+
+  function loadIntoForm(row) {
+    const form = q("#companyForm");
+    if (!form || !row) return;
+    const set = (name, value) => { const field = form.querySelector(`[name="${name}"]`); if (field) field.value = value || ""; };
+    set("record_id", row.id);
+    set("company_name", row.company_name);
+    set("address", row.address);
+    set("terms", row.terms);
+    setFormMode(true);
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+    toast("Company loaded. Make changes and click Update Company.");
+  }
+
+  // --- Save ----------------------------------------------------------------
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!state?.supabase || !state?.session) {
+      toast("Sign in before saving companies.", true);
+      return;
+    }
+    const form = event.currentTarget || event.target;
+    const value = (name) => (form.querySelector(`[name="${name}"]`)?.value || "").trim();
+    const editingId = value("record_id");
+    const payload = {
+      company_name: value("company_name"),
+      address: value("address") || null,
+      terms: value("terms") || null
+    };
+    if (!payload.company_name) { toast("Company name is required.", true); return; }
+
+    try {
+      const response = editingId
+        ? await state.supabase.from(TABLE).update(payload).eq("id", editingId).select().single()
+        : await state.supabase.from(TABLE).insert(payload).select().single();
+      if (response.error) throw response.error;
+      resetForm();
+      await loadCompanies();
+      toast(editingId ? "Company updated." : "Company added.");
+    } catch (error) {
+      const message = String(error?.message || error);
+      toast(tableMissing(message)
+        ? "The companies table does not exist in Supabase yet. Create it, then try again."
+        : message, true);
+    }
+  }
+
+  // --- Delete --------------------------------------------------------------
+  async function deleteCompany(id) {
+    if (!id) return;
+    if (!state?.supabase || !state?.session) { toast("Sign in before deleting.", true); return; }
+    const row = companies().find((company) => company.id === id);
+    const name = row?.company_name || "company";
+    if (!window.confirm(`Delete this company: ${name}?\n\nThis cannot be undone.`)) return;
+    try {
+      const { error } = await state.supabase.from(TABLE).delete().eq("id", id);
+      if (error) throw error;
+      state.data.companies = companies().filter((company) => company.id !== id);
+      renderCompanies();
+      toast("Company deleted.");
+    } catch (error) {
+      toast(String(error?.message || error), true);
+    }
+  }
+
+  // --- Wiring --------------------------------------------------------------
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id === "companyForm") handleSubmit(event);
+  });
+
+  document.addEventListener("click", (event) => {
+    const editId = event.target.closest?.("[data-edit-company]")?.dataset.editCompany;
+    if (editId) { event.preventDefault(); loadIntoForm(companies().find((company) => company.id === editId)); return; }
+
+    const deleteId = event.target.closest?.("[data-delete-company]")?.dataset.deleteCompany;
+    if (deleteId) { event.preventDefault(); deleteCompany(deleteId); return; }
+
+    if (event.target.closest?.("#cancelCompanyEditBtn")) { event.preventDefault(); resetForm(); return; }
+
+    if (event.target.closest?.("#refreshBtn")) { setTimeout(loadCompanies, 200); return; }
+
+    // Opening the Companies tab: the shared showView has no title for this
+    // view, so set the header and refresh the list here.
+    if (event.target.closest?.('.nav-btn[data-view="companies"]')) {
+      setTimeout(() => {
+        const title = q("#viewTitle");
+        if (title) title.textContent = "Companies";
+        loadCompanies();
+      }, 0);
+    }
+  });
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.id === "companiesSearch") renderCompanies();
+  });
+
+  // Load once the Supabase session is ready (the app shell only appears after
+  // sign-in, so this simply waits for state.session to be populated).
+  let readyTries = 0;
+  (function waitForSession() {
+    if (state?.supabase && state?.session) { loadCompanies(); return; }
+    if (readyTries++ > 120) return; // stop after ~60s if never signed in
+    setTimeout(waitForSession, 500);
+  })();
+})();
+
+/* ==========================================================================
+   FINANCES: COLLAPSIBLE EXPENSE CATEGORY GROUPS
+   --------------------------------------------------------------------------
+   renderFinances() groups the expenses table by category and renders each as
+   a collapsible header row. Categories are collapsed by default so the tab
+   stays short; a category is remembered as expanded (in localStorage) once
+   the user opens it. Clicking or pressing Enter/Space on a category header
+   toggles it and re-renders the Finances view.
+   ========================================================================== */
+(function financeExpenseCategoryGrouping() {
+  const KEY = "pimp_finance_expanded_cats";
+
+  function expandedSet() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(KEY) || "[]");
+      return new Set(Array.isArray(raw) ? raw.map((value) => String(value).toLowerCase()) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function saveExpanded(set) {
+    try { localStorage.setItem(KEY, JSON.stringify(Array.from(set))); } catch {}
+  }
+
+  // Default state is collapsed: a category is only open if the user expanded it.
+  window.PIMP_isExpenseCatCollapsed = function isExpenseCatCollapsed(category) {
+    return !expandedSet().has(String(category || "other").toLowerCase());
+  };
+
+  function toggle(category) {
+    const key = String(category || "other").toLowerCase();
+    const set = expandedSet();
+    if (set.has(key)) set.delete(key);
+    else set.add(key);
+    saveExpanded(set);
+    try { if (typeof renderFinances === "function") renderFinances(); } catch {}
+  }
+
+  function headerFrom(target) {
+    return target && target.closest ? target.closest(".finance-expense-group-header") : null;
+  }
+
+  document.addEventListener("click", (event) => {
+    const header = headerFrom(event.target);
+    if (!header) return;
+    event.preventDefault();
+    toggle(header.dataset.expenseCat);
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+    const header = headerFrom(event.target);
+    if (!header) return;
+    event.preventDefault();
+    toggle(header.dataset.expenseCat);
+  });
+})();
+
+/* ==========================================================================
+   EMPLOYEE DOCUMENTS
+   --------------------------------------------------------------------------
+   Per-employee document uploads, stored in the Supabase "employee_documents"
+   table (separate from job documents so the two never interfere). Files go to
+   the existing "job-documents" storage bucket under an employees/<id>/ path,
+   with a base64-in-table fallback for small files when storage is unavailable.
+
+   The panel follows the employee currently loaded in the employee form: click
+   Edit on an employee to upload / view / download / delete their documents.
+
+   Requires an "employee_documents" table in Supabase (see the SQL shared with
+   this build). If it is missing, the list stays empty and uploads surface a
+   clear "table does not exist yet" message.
+   ========================================================================== */
+(function employeeDocumentsFeature() {
+  const TABLE = "employee_documents";
+  const BUCKET = "job-documents"; // reuse the bucket jobs already upload to
+  const MAX_INLINE_BYTES = 5 * 1024 * 1024; // 5 MB cap for the base64 fallback
+
+  function q(sel, root) { return (root || document).querySelector(sel); }
+
+  function esc(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+      { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+    ));
+  }
+
+  function toast(message, isError) {
+    try { if (typeof showToast === "function") showToast(message, Boolean(isError)); } catch {}
+  }
+
+  function currentEmployee() {
+    const form = q("#employeeForm");
+    return {
+      id: (form?.querySelector('[name="record_id"]')?.value || "").trim(),
+      name: (form?.querySelector('[name="full_name"]')?.value || "").trim()
+    };
+  }
+
+  function cleanFileName(name) {
+    return (String(name || "file").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(-120)) || "file";
+  }
+
+  function formatBytes(bytes) {
+    const n = Number(bytes || 0);
+    if (!n) return "-";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  function fileTypeLabel(row) {
+    const ext = (String(row.file_name || "").split(".").pop() || "").toUpperCase();
+    return ext && ext.length <= 5 ? ext : (row.mime_type || "File");
+  }
+
+  function formatDateSafe(value) {
+    try { if (typeof formatDate === "function") { const s = formatDate(value); if (s) return s; } } catch {}
+    if (!value) return "-";
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? String(value).slice(0, 10) : d.toLocaleDateString();
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("Could not read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Documents for the employee currently shown in the panel.
+  let currentDocs = [];
+
+  async function fetchDocuments(employeeId) {
+    if (!state?.supabase || !state?.session || !employeeId) return [];
+    let response = await state.supabase.from(TABLE).select("*").eq("employee_id", employeeId)
+      .order("uploaded_at", { ascending: false }).limit(500);
+    if (response.error) {
+      const message = String(response.error.message || "").toLowerCase();
+      if (message.includes("column") || message.includes("pgrst") || message.includes("schema cache")) {
+        response = await state.supabase.from(TABLE).select("*").eq("employee_id", employeeId).limit(500);
+      }
+    }
+    if (response.error) {
+      console.warn("Could not load employee documents (is the table created?):", response.error.message || response.error);
+      return [];
+    }
+    return response.data || [];
+  }
+
+  function renderList() {
+    const list = q("#employeeDocumentsList");
+    if (!list) return;
+    const count = q("#employeeDocumentsCount");
+    if (count) count.textContent = String(currentDocs.length);
+
+    if (!currentDocs.length) {
+      list.innerHTML = '<li class="employee-doc-empty">No documents saved for this employee yet.</li>';
+      return;
+    }
+
+    list.innerHTML = currentDocs.map((row) => {
+      const id = esc(row.id);
+      const label = row.label ? `${esc(row.label)} &mdash; ` : "";
+      const meta = [fileTypeLabel(row), formatBytes(row.file_size), formatDateSafe(row.uploaded_at)]
+        .map((part) => esc(part))
+        .filter((part) => part && part !== "-")
+        .join(" &middot; ");
+      return `<li class="employee-doc-item">
+        <span class="employee-doc-name">${label}${esc(row.file_name || "document")}</span>
+        <span class="employee-doc-meta">${meta}</span>
+        <span class="employee-doc-actions">
+          <button class="link-btn" type="button" data-employee-doc-download="${id}">Download</button>
+          <button class="link-btn danger-text" type="button" data-employee-doc-delete="${id}">Delete</button>
+        </span>
+      </li>`;
+    }).join("");
+  }
+
+  async function refresh() {
+    // The saved-documents list only makes sense for an existing employee; the
+    // file input itself stays visible so a document can be attached while a new
+    // employee is being added.
+    const inline = q("#employeeDocumentsInline");
+    const { id } = currentEmployee();
+
+    if (!id) {
+      currentDocs = [];
+      if (inline) inline.hidden = true;
+      renderList();
+      return;
+    }
+
+    if (inline) inline.hidden = false;
+    currentDocs = await fetchDocuments(id);
+    renderList();
+  }
+  window.PIMP_refreshEmployeeDocuments = refresh;
+
+  // Lightweight index of which employees have at least one document, so the
+  // employees table can show a document indicator on every row without
+  // fetching each employee's documents one by one.
+  const employeesWithDocs = new Set();
+  let loadingDocIndex = false;
+
+  window.PIMP_employeeHasDocument = function (employeeId) {
+    return employeesWithDocs.has(String(employeeId || ""));
+  };
+
+  function rerenderEmployees() {
+    try { if (typeof renderEmployees === "function") renderEmployees(); } catch {}
+  }
+
+  async function loadEmployeeDocIndex() {
+    if (!state?.supabase || !state?.session || loadingDocIndex) return;
+    loadingDocIndex = true;
+    try {
+      const response = await state.supabase.from(TABLE).select("employee_id").limit(5000);
+      if (response.error) {
+        console.warn("Could not load employee document index (is the table created?):", response.error.message || response.error);
+      } else {
+        employeesWithDocs.clear();
+        (response.data || []).forEach((row) => { if (row.employee_id) employeesWithDocs.add(String(row.employee_id)); });
+      }
+    } catch (error) {
+      console.warn("Could not load employee document index:", error);
+    } finally {
+      loadingDocIndex = false;
+      rerenderEmployees();
+    }
+  }
+  window.PIMP_loadEmployeeDocIndex = loadEmployeeDocIndex;
+
+  async function insertDocRow(payload) {
+    const response = await state.supabase.from(TABLE).insert(payload).select().single();
+    if (response.error) throw response.error;
+    return response.data;
+  }
+
+  async function uploadEmployeeDocument(file, employeeId, label) {
+    const safeName = cleanFileName(file.name);
+    const path = `employees/${employeeId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+    const base = {
+      employee_id: employeeId,
+      label: label || null,
+      file_name: file.name,
+      mime_type: file.type || "application/octet-stream",
+      file_size: file.size || 0
+    };
+
+    try {
+      const { error: uploadError } = await state.supabase.storage.from(BUCKET).upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || "application/octet-stream"
+      });
+      if (uploadError) throw uploadError;
+      return await insertDocRow({ ...base, storage_bucket: BUCKET, storage_path: path });
+    } catch (storageError) {
+      console.warn("Employee doc storage upload failed; trying inline fallback:", storageError?.message || storageError);
+      if ((file.size || 0) > MAX_INLINE_BYTES) {
+        throw new Error(`Storage upload failed and this file is too large (${formatBytes(file.size)}) for the database fallback. Make sure the "${BUCKET}" storage bucket exists, then try again.`);
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      const base64 = dataUrl.includes(",") ? dataUrl.split(",").pop() : dataUrl;
+      return await insertDocRow({ ...base, storage_bucket: null, storage_path: null, file_data_base64: base64 });
+    }
+  }
+
+  // Called by the employee form's save handler (handleCreateEmployee) so a
+  // document attached while adding/updating an employee is uploaded once the
+  // record has been saved and has an id to attach to.
+  window.PIMP_uploadEmployeeDocumentForId = async function (employeeId, file, label) {
+    if (!employeeId || !file) return null;
+    const record = await uploadEmployeeDocument(file, employeeId, label || null);
+    employeesWithDocs.add(String(employeeId));
+    rerenderEmployees();
+    return record;
+  };
+
+  async function downloadDocument(id) {
+    const row = currentDocs.find((doc) => doc.id === id);
+    if (!row) return;
+    try {
+      if (row.file_data_base64) {
+        const link = document.createElement("a");
+        link.href = `data:${row.mime_type || "application/octet-stream"};base64,${row.file_data_base64}`;
+        link.download = row.file_name || "document";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        return;
+      }
+      if (row.storage_path) {
+        const { data, error } = await state.supabase.storage.from(row.storage_bucket || BUCKET)
+          .createSignedUrl(row.storage_path, 60 * 60, { download: row.file_name || true });
+        if (error) throw error;
+        if (data?.signedUrl) { window.open(data.signedUrl, "_blank", "noopener"); return; }
+      }
+      toast("This document has no downloadable file.", true);
+    } catch (error) {
+      toast(String(error?.message || error), true);
+    }
+  }
+
+  async function deleteDocument(id) {
+    const row = currentDocs.find((doc) => doc.id === id);
+    if (!row) return;
+    if (!window.confirm(`Delete "${row.file_name || "this document"}"?\n\nThis cannot be undone.`)) return;
+    try {
+      if (row.storage_path) {
+        try { await state.supabase.storage.from(row.storage_bucket || BUCKET).remove([row.storage_path]); }
+        catch (storageError) { console.warn("Could not remove file from storage:", storageError); }
+      }
+      const { error } = await state.supabase.from(TABLE).delete().eq("id", id);
+      if (error) throw error;
+      currentDocs = currentDocs.filter((doc) => doc.id !== id);
+      renderList();
+      // Keep the employees-table indicator in sync: currentDocs only ever holds
+      // the selected employee's documents, so an empty list means none remain.
+      const affectedEmployeeId = String(row.employee_id || currentEmployee().id || "");
+      if (affectedEmployeeId && currentDocs.length === 0) {
+        employeesWithDocs.delete(affectedEmployeeId);
+        rerenderEmployees();
+      }
+      toast("Document deleted.");
+    } catch (error) {
+      toast(String(error?.message || error), true);
+    }
+  }
+
+  // --- Wiring --------------------------------------------------------------
+  document.addEventListener("click", (event) => {
+    const downloadId = event.target.closest?.("[data-employee-doc-download]")?.dataset.employeeDocDownload;
+    if (downloadId) { event.preventDefault(); downloadDocument(downloadId); return; }
+
+    const deleteId = event.target.closest?.("[data-employee-doc-delete]")?.dataset.employeeDocDelete;
+    if (deleteId) { event.preventDefault(); deleteDocument(deleteId); return; }
+
+    // Re-sync the panel and the table indicators whenever Employees is opened.
+    if (event.target.closest?.('.nav-btn[data-view="employees"]')) {
+      setTimeout(refresh, 0);
+      setTimeout(loadEmployeeDocIndex, 0);
+    }
+
+    // The global Refresh button reloads the document index too.
+    if (event.target.closest?.("#refreshBtn")) setTimeout(loadEmployeeDocIndex, 200);
+  });
+
+  // Load the document index once the Supabase session is ready so the employees
+  // table shows document status on first view.
+  let docIndexTries = 0;
+  (function waitForSessionThenIndex() {
+    if (state?.supabase && state?.session) { loadEmployeeDocIndex(); return; }
+    if (docIndexTries++ > 120) return; // stop after ~60s if never signed in
+    setTimeout(waitForSessionThenIndex, 500);
+  })();
+
+  setTimeout(refresh, 0);
+})();

@@ -1280,6 +1280,20 @@ tr:hover td {
   display: block;
 }
 
+/* Fixed company rate/cost cells: visibly locked and not editable (readonly). */
+.sheet-table .sheet-input.locked-rate,
+.sheet-input.locked-rate {
+  background: #eef2f7 !important;
+  color: #475569;
+  cursor: not-allowed;
+  font-weight: 600;
+}
+
+.sheet-input.locked-rate:focus {
+  outline: none;
+  box-shadow: none;
+}
+
 .sheet-table .red-head {
   background: #ff0d0d;
   text-align: right;
@@ -3459,15 +3473,17 @@ td[data-label="Actions"].table-actions .link-btn,
   accent-color: #111;
 }
 
+/* The Emp Name cell shows the picked employee once: the dropdown is the only
+   visible control and fills the cell. The employee_name field is kept in the
+   DOM as a hidden input so saving, PDF export, and reload still read it. */
 .timesheet-employee-grid .timesheet-employee-select {
   display: block;
-  height: 45%;
-  border-bottom: 1px solid #cbd5e1;
-  font-size: 9px;
+  height: 100%;
+  font-size: 10px;
 }
 
-.timesheet-employee-grid [data-ts-field="employee_name"] {
-  height: 55%;
+.timesheet-employee-grid [data-ts-field="employee_name"][type="hidden"] {
+  display: none;
 }
 
 .timesheet-row-actions .icon-btn {
@@ -12767,6 +12783,139 @@ input[type="search"] {
 
 .expenses-table .table-actions .link-btn + .link-btn {
   margin-left: 10px;
+}
+
+/* --- Compact, collapsible expense category groups (Finances tab) --- */
+.expenses-table th,
+.expenses-table td {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.finance-expense-group-header {
+  cursor: pointer;
+  background: var(--panel-soft);
+  border-top: 1px solid var(--line-strong);
+  user-select: none;
+}
+
+.finance-expense-group-header:hover {
+  background: var(--brand-soft);
+}
+
+.finance-expense-group-header:focus-visible {
+  outline: 2px solid var(--brand-dark);
+  outline-offset: -2px;
+}
+
+.finance-cat-headrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.finance-cat-caret {
+  width: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.finance-cat-count {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.finance-cat-subtotal {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* --- Employee documents (inside the add-employee form) --- */
+.employee-doc-block {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.employee-doc-block input[type="file"] {
+  width: 100%;
+  padding: 8px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  font-size: 0.85rem;
+}
+
+.employee-doc-inline {
+  margin-top: 12px;
+}
+
+.employee-doc-inline-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.employee-doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.employee-doc-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.employee-doc-name {
+  flex: 1 1 auto;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.employee-doc-meta {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.employee-doc-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.employee-doc-empty {
+  list-style: none;
+  padding: 6px 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Employees-table indicator: does this employee have a document on file? */
+.doc-flag {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.doc-flag.yes {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
 }
 
 /* --- Responsive --- */
