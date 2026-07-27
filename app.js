@@ -3667,6 +3667,8 @@ async function handleCreateEmployee(event) {
     } else {
       showToast(editingId ? "Employee updated and saved to Supabase." : "Employee added to the website table and saved to Supabase.");
     }
+
+    try { window.PIMP_closeEmployeeModal?.(); } catch {}
   } catch (error) {
     showToast(error.message || String(error), true);
   }
@@ -28115,6 +28117,26 @@ ${docs.length ? `
   document.addEventListener("click", (event) => {
     const newJobButton = event.target?.closest?.("#quickCreateJobBtn, #openJobModalBtn");
     if (!newJobButton) return;
+
+    // On the Companies / Employees pages this same button is "+ New Company" /
+    // "+ New Employee": open that entity's popup and stay on the current page
+    // instead of switching to Open Jobs and opening the job popup.
+    const activeView = document.querySelector(".view.active")?.id;
+    if (activeView === "companiesView" && typeof window.PIMP_openCompanyModalForNew === "function") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      window.PIMP_openCompanyModalForNew();
+      return false;
+    }
+    if (activeView === "employeesView" && typeof window.PIMP_openEmployeeModalForNew === "function") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
+      window.PIMP_openEmployeeModalForNew();
+      return false;
+    }
+
     event.preventDefault();
     event.stopPropagation();
     if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
@@ -32262,6 +32284,7 @@ function on(selector, eventName, handler) {
       resetForm();
       await loadCompanies();
       toast(editingId ? "Company updated." : "Company added.");
+      try { window.PIMP_closeCompanyModal?.(); } catch {}
     } catch (error) {
       const message = String(error?.message || error);
       toast(tableMissing(message)
@@ -32690,4 +32713,161 @@ function on(selector, eventName, handler) {
   })();
 
   setTimeout(refresh, 0);
+})();
+
+/* ==========================================================================
+   COMPANY / EMPLOYEE FORM MODALS + CONTEXT-AWARE "+ New" BUTTON
+   --------------------------------------------------------------------------
+   The Companies and Employees pages show their table full-width; the add/edit
+   form lives in a pop-up modal (reusing the .job-modal-* styling). The topbar
+   "+ New Job" button relabels itself to "+ New Company" / "+ New Employee" on
+   those pages and opens the matching modal instead of the job modal.
+
+   Editing (the row "Edit" buttons) is handled by the existing companies /
+   employees code, which populates the form; here we just open the modal. The
+   save handlers close their modal on success (see PIMP_closeCompanyModal /
+   PIMP_closeEmployeeModal, called from handleCreateEmployee and the companies
+   submit handler).
+   ========================================================================== */
+(function entityFormModals() {
+  function qs(sel, root) { return (root || document).querySelector(sel); }
+
+  const COMPANIES = {
+    viewId: "companiesView", overlay: "#companyModalOverlay", form: "#companyForm",
+    title: "#companyFormTitle", submit: "#companySubmitBtn", cancel: "#cancelCompanyEditBtn",
+    editAttr: "[data-edit-company]", closeBtn: "#closeCompanyModalBtn",
+    addLabel: "Add Company", newBtnLabel: "+ New Company"
+  };
+  const EMPLOYEES = {
+    viewId: "employeesView", overlay: "#employeeModalOverlay", form: "#employeeForm",
+    title: "#employeeFormTitle", submit: "#employeeSubmitBtn", cancel: "#cancelEmployeeEditBtn",
+    editAttr: "[data-edit-employee]", closeBtn: "#closeEmployeeModalBtn",
+    addLabel: "Add Employee", newBtnLabel: "+ New Employee"
+  };
+
+  function currentViewId() {
+    return qs(".view.active")?.id || "";
+  }
+
+  function openModal(cfg) {
+    const overlay = qs(cfg.overlay);
+    const form = qs(cfg.form);
+    if (!overlay || !form) return;
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("job-modal-open");
+    const focusTarget = form.querySelector("input:not([type='hidden']):not([type='file']), select, textarea");
+    if (focusTarget) setTimeout(() => { try { focusTarget.focus({ preventScroll: true }); } catch {} }, 30);
+  }
+
+  function closeModal(cfg) {
+    const overlay = qs(cfg.overlay);
+    if (!overlay) return;
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+    // Only release the body scroll lock once no entity modal remains open.
+    if (!qs("#companyModalOverlay:not(.hidden), #employeeModalOverlay:not(.hidden), .job-modal-overlay:not(.hidden)")) {
+      document.body.classList.remove("job-modal-open");
+    }
+  }
+
+  function resetForNew(cfg) {
+    const form = qs(cfg.form);
+    if (!form) return;
+
+    // Employees have a shared reset that also clears the documents panel.
+    if (cfg === EMPLOYEES && typeof resetEmployeeFormMode === "function") {
+      try { resetEmployeeFormMode(); return; } catch {}
+    }
+
+    form.reset();
+    const record = form.querySelector('[name="record_id"]');
+    if (record) record.value = "";
+    const title = qs(cfg.title);
+    if (title) title.textContent = cfg.addLabel;
+    const submit = qs(cfg.submit);
+    if (submit) submit.textContent = cfg.addLabel;
+    const cancel = qs(cfg.cancel);
+    if (cancel) cancel.classList.add("hidden");
+    if (cfg === EMPLOYEES) { try { window.PIMP_refreshEmployeeDocuments?.(); } catch {} }
+  }
+
+  function openForNew(cfg) {
+    resetForNew(cfg);
+    openModal(cfg);
+  }
+
+  window.PIMP_closeCompanyModal = () => closeModal(COMPANIES);
+  window.PIMP_closeEmployeeModal = () => closeModal(EMPLOYEES);
+
+  // Opening the "+ New" popup is routed by the job button's existing capture
+  // handler (openNewJobFromOpenJobs' listener), which wins the click and stays
+  // on the current page; it calls these when on the Companies / Employees page.
+  window.PIMP_openCompanyModalForNew = () => openForNew(COMPANIES);
+  window.PIMP_openEmployeeModalForNew = () => openForNew(EMPLOYEES);
+
+  // --- Topbar "+ New ..." button --------------------------------------------
+  // Accepts an optional view key (a view id like "companiesView" or a nav
+  // data-view like "companies") so the label can be set the instant a nav button
+  // is clicked — in the same event, before the page renders — instead of a
+  // frame later, which is what made the button visibly lag a page behind.
+  function labelForView(key) {
+    if (key === COMPANIES.viewId || key === "companies") return COMPANIES.newBtnLabel;
+    if (key === EMPLOYEES.viewId || key === "employees") return EMPLOYEES.newBtnLabel;
+    return "+ New Job";
+  }
+
+  function updateNewButtonLabel(key) {
+    const button = qs("#quickCreateJobBtn");
+    if (!button) return;
+    const label = labelForView(key != null ? key : currentViewId());
+    if (button.textContent !== label) button.textContent = label;
+  }
+
+  document.addEventListener("click", (event) => {
+    // Edit buttons: the existing code populates the form; just open the modal.
+    if (event.target.closest?.(COMPANIES.editAttr)) { setTimeout(() => openModal(COMPANIES), 0); return; }
+    if (event.target.closest?.(EMPLOYEES.editAttr)) { setTimeout(() => openModal(EMPLOYEES), 0); return; }
+
+    // Close / cancel buttons.
+    if (event.target.closest?.(`${COMPANIES.closeBtn}, ${COMPANIES.cancel}`)) { closeModal(COMPANIES); return; }
+    if (event.target.closest?.(`${EMPLOYEES.closeBtn}, ${EMPLOYEES.cancel}`)) { closeModal(EMPLOYEES); return; }
+
+    // Backdrop click (on the overlay itself, not the card) closes.
+    if (event.target === qs(COMPANIES.overlay)) { closeModal(COMPANIES); return; }
+    if (event.target === qs(EMPLOYEES.overlay)) { closeModal(EMPLOYEES); return; }
+
+    // Navigating: relabel immediately from the click target's destination so the
+    // button never lags a page behind, and dismiss any open entity modal.
+    const navButton = event.target.closest?.("[data-view], [data-view-jump]");
+    if (navButton) {
+      updateNewButtonLabel(navButton.dataset.view || navButton.dataset.viewJump);
+      closeModal(COMPANIES);
+      closeModal(EMPLOYEES);
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (!qs(COMPANIES.overlay)?.classList.contains("hidden")) closeModal(COMPANIES);
+    if (!qs(EMPLOYEES.overlay)?.classList.contains("hidden")) closeModal(EMPLOYEES);
+  });
+
+  // Catch-all: any view switch (including programmatic ones that don't come from
+  // a nav click) toggles ".active" on a .view. Relabel from the observer's
+  // microtask, which runs before the next paint — so the button stays in sync
+  // however the view changed.
+  function initRelabel() {
+    updateNewButtonLabel();
+    const observer = new MutationObserver(() => updateNewButtonLabel());
+    document.querySelectorAll(".view").forEach((view) => {
+      observer.observe(view, { attributes: true, attributeFilter: ["class"] });
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initRelabel);
+  } else {
+    initRelabel();
+  }
 })();

@@ -668,116 +668,132 @@ Account # __________</textarea>
       </section>
 
       <section id="employeesView" class="view">
-        <div class="split">
-          <form id="employeeForm" class="panel form-panel">
-            <h3 id="employeeFormTitle">Add Employee</h3>
-            <input type="hidden" name="record_id" />
-            <div class="form-grid">
-              <label>Full Name<input name="full_name" required /></label>
-              <label>Email<input name="email" type="email" /></label>
-              <label>Phone<input name="phone" /></label>
-              <label>Role
-                <select name="role">
-                  <option value="Insulator">Insulator</option>
-                  <option value="Foreman">Foreman</option>
-                  <option value="Helper">Helper</option>
-                  <option value="Supervisor">Supervisor</option>
-                  <option value="Office">Office</option>
-                </select>
-              </label>
-              <label>Status
-                <select name="status">
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
-              </label>
-              <label>Pay Rate ($/hr)<input name="pay_rate" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00" /></label>
+        <section class="panel table-panel">
+          <div class="panel-header table-panel-header">
+            <h3>Employees</h3>
+            <div class="table-toolbar-inline">
+              <input id="employeesSearch" class="table-search" type="search" placeholder="Search employees..." />
+              <span id="employeesCount" class="pill">0</span>
             </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table employees-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Pay Rate</th>
+                  <th>Document</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="employeesTable"></tbody>
+            </table>
+          </div>
+        </section>
 
-            <div class="employee-doc-block">
+        <div id="employeeModalOverlay" class="job-modal-overlay hidden" aria-hidden="true">
+          <div class="job-modal-card" role="dialog" aria-modal="true" aria-labelledby="employeeFormTitle">
+            <div class="job-modal-header">
+              <div>
+                <p class="eyebrow">Employee</p>
+                <h3 id="employeeFormTitle">Add Employee</h3>
+              </div>
+              <button class="icon-btn job-modal-close" id="closeEmployeeModalBtn" type="button" aria-label="Close employee popup">×</button>
+            </div>
+            <form id="employeeForm" class="job-modal-form">
+              <input type="hidden" name="record_id" />
               <div class="form-grid">
-                <label class="wide">Attach Document<input type="file" id="employeeDocumentFile" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.xls,.xlsx" /></label>
-                <label class="wide">Document Label (optional)<input type="text" id="employeeDocumentLabel" placeholder="e.g. Driver's License" autocomplete="off" /></label>
+                <label>Full Name<input name="full_name" required /></label>
+                <label>Email<input name="email" type="email" /></label>
+                <label>Phone<input name="phone" /></label>
+                <label>Role
+                  <select name="role">
+                    <option value="Insulator">Insulator</option>
+                    <option value="Foreman">Foreman</option>
+                    <option value="Helper">Helper</option>
+                    <option value="Supervisor">Supervisor</option>
+                    <option value="Office">Office</option>
+                  </select>
+                </label>
+                <label>Status
+                  <select name="status">
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </label>
+                <label>Pay Rate ($/hr)<input name="pay_rate" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0.00" /></label>
               </div>
-              <div id="employeeDocumentsInline" class="employee-doc-inline" hidden>
-                <p class="tiny employee-doc-inline-title">Saved documents <span id="employeeDocumentsCount" class="pill">0</span></p>
-                <ul id="employeeDocumentsList" class="employee-doc-list"></ul>
-              </div>
-            </div>
 
-            <div class="form-actions">
-              <button class="btn ghost hidden" id="cancelEmployeeEditBtn" type="button">Cancel Edit</button>
-              <button class="btn primary" id="employeeSubmitBtn" type="submit">Add Employee</button>
-            </div>
-          </form>
-
-          <section class="panel table-panel">
-            <div class="panel-header table-panel-header">
-              <h3>Employees</h3>
-              <div class="table-toolbar-inline">
-                <input id="employeesSearch" class="table-search" type="search" placeholder="Search employees..." />
-                <span id="employeesCount" class="pill">0</span>
+              <div class="employee-doc-block">
+                <div class="form-grid">
+                  <label class="wide">Attach Document<input type="file" id="employeeDocumentFile" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.xls,.xlsx" /></label>
+                  <label class="wide">Document Label (optional)<input type="text" id="employeeDocumentLabel" placeholder="e.g. Driver's License" autocomplete="off" /></label>
+                </div>
+                <div id="employeeDocumentsInline" class="employee-doc-inline" hidden>
+                  <p class="tiny employee-doc-inline-title">Saved documents <span id="employeeDocumentsCount" class="pill">0</span></p>
+                  <ul id="employeeDocumentsList" class="employee-doc-list"></ul>
+                </div>
               </div>
-            </div>
-            <div class="table-wrap">
-              <table class="data-table employees-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Role</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Pay Rate</th>
-                    <th>Document</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="employeesTable"></tbody>
-              </table>
-            </div>
-          </section>
+
+              <div class="form-actions">
+                <button class="btn ghost hidden" id="cancelEmployeeEditBtn" type="button">Cancel Edit</button>
+                <button class="btn primary" id="employeeSubmitBtn" type="submit">Add Employee</button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
 
       <section id="companiesView" class="view">
-        <div class="split">
-          <form id="companyForm" class="panel form-panel">
-            <h3 id="companyFormTitle">Add Company</h3>
-            <input type="hidden" name="record_id" />
-            <div class="form-grid">
-              <label>Company Name<input name="company_name" required /></label>
-              <label class="wide">Address<textarea name="address" rows="3" placeholder="Street&#10;City, State ZIP"></textarea></label>
-              <label>Terms<input name="terms" placeholder="e.g. Net 30" /></label>
+        <section class="panel table-panel">
+          <div class="panel-header table-panel-header">
+            <h3>Companies</h3>
+            <div class="table-toolbar-inline">
+              <input id="companiesSearch" class="table-search" type="search" placeholder="Search companies..." />
+              <span id="companiesCount" class="pill">0</span>
             </div>
-            <div class="form-actions">
-              <button class="btn ghost hidden" id="cancelCompanyEditBtn" type="button">Cancel Edit</button>
-              <button class="btn primary" id="companySubmitBtn" type="submit">Add Company</button>
-            </div>
-          </form>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table companies-table">
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Address</th>
+                  <th>Terms</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="companiesTable"></tbody>
+            </table>
+          </div>
+        </section>
 
-          <section class="panel table-panel">
-            <div class="panel-header table-panel-header">
-              <h3>Companies</h3>
-              <div class="table-toolbar-inline">
-                <input id="companiesSearch" class="table-search" type="search" placeholder="Search companies..." />
-                <span id="companiesCount" class="pill">0</span>
+        <div id="companyModalOverlay" class="job-modal-overlay hidden" aria-hidden="true">
+          <div class="job-modal-card" role="dialog" aria-modal="true" aria-labelledby="companyFormTitle">
+            <div class="job-modal-header">
+              <div>
+                <p class="eyebrow">Company</p>
+                <h3 id="companyFormTitle">Add Company</h3>
               </div>
+              <button class="icon-btn job-modal-close" id="closeCompanyModalBtn" type="button" aria-label="Close company popup">×</button>
             </div>
-            <div class="table-wrap">
-              <table class="data-table companies-table">
-                <thead>
-                  <tr>
-                    <th>Company</th>
-                    <th>Address</th>
-                    <th>Terms</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="companiesTable"></tbody>
-              </table>
-            </div>
-          </section>
+            <form id="companyForm" class="job-modal-form">
+              <input type="hidden" name="record_id" />
+              <div class="form-grid">
+                <label>Company Name<input name="company_name" required /></label>
+                <label class="wide">Address<textarea name="address" rows="3" placeholder="Street&#10;City, State ZIP"></textarea></label>
+                <label>Terms<input name="terms" placeholder="e.g. Net 30" /></label>
+              </div>
+              <div class="form-actions">
+                <button class="btn ghost hidden" id="cancelCompanyEditBtn" type="button">Cancel Edit</button>
+                <button class="btn primary" id="companySubmitBtn" type="submit">Add Company</button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
 
