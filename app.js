@@ -2609,7 +2609,8 @@ function loadEmployeeIntoForm(employee) {
   setEmployeeFormMode(true);
   try { window.PIMP_refreshEmployeeDocuments?.(); } catch {}
   form.scrollIntoView({ behavior: "smooth", block: "start" });
-  showToast("Employee loaded. Make changes and click Update Employee.");
+  // No "employee loaded" toast: the popup opening with the record filled in is
+  // signal enough, and the toast got in the way of editing.
 }
 
 function setEmployeeFormMode(isEditing) {
@@ -3649,13 +3650,23 @@ async function handleCreateEmployee(event) {
       }
     }
 
+    // Close the popup before anything else touches it. resetEmployeeFormMode()
+    // relabels it "Add Employee", and it used to stay on screen through the
+    // reload below — which is why an add-new window appeared a moment after
+    // finishing an edit.
+    try { window.PIMP_closeEmployeeModal?.(); } catch {}
+
     mergeStateRow("employees", employee);
-    hydrateSelects();
-    refreshWebsiteLists();
     form.reset();
     resetEmployeeFormMode();
-    await loadAllData({ silent: true, only: "employees" });
     refreshWebsiteLists();
+
+    // The saved row is already merged into state and drawn by the render above,
+    // so reconcile with the server in the background rather than making the
+    // save sit and wait for a full reload.
+    Promise.resolve(loadAllData({ silent: true, only: "employees" }))
+      .then(() => { try { refreshWebsiteLists(); } catch {} })
+      .catch((error) => console.warn("Background employee refresh failed:", error));
 
     if (docUploadError) {
       const message = String(docUploadError.message || docUploadError);
@@ -3667,8 +3678,6 @@ async function handleCreateEmployee(event) {
     } else {
       showToast(editingId ? "Employee updated and saved to Supabase." : "Employee added to the website table and saved to Supabase.");
     }
-
-    try { window.PIMP_closeEmployeeModal?.(); } catch {}
   } catch (error) {
     showToast(error.message || String(error), true);
   }
@@ -32161,12 +32170,99 @@ function on(selector, eventName, handler) {
     return state.data.companies;
   }
 
+  // Drop a just-saved row into the list so the table shows it without waiting
+  // for a round trip. Kept in the order loadCompanies() uses.
+  function mergeCompanyRow(row) {
+    if (!row?.id) return;
+    const list = companies();
+    const index = list.findIndex((company) => String(company.id) === String(row.id));
+    if (index >= 0) list[index] = row; else list.push(row);
+    list.sort((a, b) => String(a.company_name || "").localeCompare(String(b.company_name || "")));
+  }
+
   function toast(message, isError) {
     try { if (typeof showToast === "function") showToast(message, Boolean(isError)); } catch {}
   }
 
   function tableMissing(message) {
-    return /relation .* does not exist|could not find the table|schema cache|does not exist/i.test(String(message || ""));
+    const text = String(message || "");
+    // A missing *column* also says "does not exist" — don't report that as a
+    // missing table, or the real reason a save failed stays hidden.
+    if (/column/i.test(text)) return false;
+    return /relation .* does not exist|could not find the table|schema cache/i.test(text);
+  }
+
+  /* --- Editable fields -------------------------------------------------------
+     The popup has hand-written fields for Company Name / Address / Terms. Any
+     other column on the companies table is discovered from the loaded rows and
+     given its own input, so every piece of a company's information can be
+     edited from the Edit button — not just the three the table happens to show.
+     Columns the database owns (id, timestamps, ownership) stay out of it. */
+  const BUILT_IN_FIELDS = ["record_id", "company_name", "address", "terms"];
+  const SYSTEM_COLUMNS = ["id", "user_id", "owner_id", "created_by", "org_id", "organization_id"];
+  const columnTypes = new Map();
+
+  function isEditableColumn(column) {
+    if (BUILT_IN_FIELDS.includes(column) || SYSTEM_COLUMNS.includes(column)) return false;
+    return !/_at$/.test(column); // created_at / updated_at and friends
+  }
+
+  function extraColumns(row) {
+    const sample = Object.assign({}, companies()[0] || {}, row || {});
+    return Object.keys(sample).filter(isEditableColumn);
+  }
+
+  function learnColumnTypes(rows) {
+    (rows || []).forEach((row) => {
+      Object.entries(row || {}).forEach(([column, value]) => {
+        if (value == null || columnTypes.has(column)) return;
+        if (typeof value === "number") columnTypes.set(column, "number");
+        else if (typeof value === "boolean") columnTypes.set(column, "boolean");
+        else if (typeof value === "object") columnTypes.set(column, "json");
+        else columnTypes.set(column, "text");
+      });
+    });
+  }
+
+  function labelFor(column) {
+    return column.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  // Add an input for every extra column, and drop any left over from a table
+  // whose shape has changed. Idempotent — safe to call on every render.
+  function syncExtraFields(row) {
+    const form = q("#companyForm");
+    const grid = form?.querySelector(".form-grid");
+    if (!grid) return;
+
+    const columns = extraColumns(row);
+    Array.from(grid.querySelectorAll("[data-company-extra]")).forEach((node) => {
+      if (!columns.includes(node.dataset.companyExtra)) node.remove();
+    });
+
+    columns.forEach((column) => {
+      if (grid.querySelector(`[data-company-extra="${CSS.escape(column)}"]`)) return;
+      const type = columnTypes.get(column) || "text";
+      const multiline = type === "json" || /address|notes|description|comments?$/i.test(column);
+      const label = document.createElement("label");
+      label.dataset.companyExtra = column;
+      if (multiline) label.className = "wide";
+
+      let control;
+      if (type === "boolean") {
+        control = document.createElement("input");
+        control.type = "checkbox";
+      } else if (multiline) {
+        control = document.createElement("textarea");
+        control.rows = 3;
+      } else {
+        control = document.createElement("input");
+        if (type === "number") { control.type = "number"; control.step = "any"; }
+      }
+      control.name = column;
+      label.append(labelFor(column), control);
+      grid.appendChild(label);
+    });
   }
 
   // --- Rendering -----------------------------------------------------------
@@ -32194,6 +32290,10 @@ function on(selector, eventName, handler) {
         </td>
       </tr>
     `).join("") || `<tr><td colspan="4" class="muted">No companies yet. Add one on the left.</td></tr>`;
+
+    // Keep the popup's fields matching the table's shape, so "+ New Company"
+    // offers the same fields the Edit button does.
+    syncExtraFields();
   }
   window.renderCompanies = renderCompanies;
 
@@ -32215,6 +32315,7 @@ function on(selector, eventName, handler) {
         state.data.companies = [];
       } else {
         state.data.companies = response.data || [];
+        learnColumnTypes(state.data.companies);
       }
     } catch (error) {
       console.warn("Could not load companies:", error);
@@ -32242,55 +32343,149 @@ function on(selector, eventName, handler) {
       form.reset();
       const record = form.querySelector('[name="record_id"]');
       if (record) record.value = "";
+      delete form.dataset.editingCompanyId;
     }
     setFormMode(false);
   }
+  window.PIMP_resetCompanyForm = resetForm;
 
   function loadIntoForm(row) {
     const form = q("#companyForm");
     if (!form || !row) return;
-    const set = (name, value) => { const field = form.querySelector(`[name="${name}"]`); if (field) field.value = value || ""; };
+
+    // Give this row's columns their inputs before filling anything in.
+    learnColumnTypes([row]);
+    syncExtraFields(row);
+
+    const set = (name, value) => {
+      const field = form.querySelector(`[name="${CSS.escape(name)}"]`);
+      if (!field) return;
+      if (field.type === "checkbox") { field.checked = Boolean(value); return; }
+      if (value != null && typeof value === "object") { field.value = JSON.stringify(value, null, 2); return; }
+      // Not `value || ""` — that would blank out a legitimate 0.
+      field.value = value == null ? "" : String(value);
+    };
+
     set("record_id", row.id);
-    set("company_name", row.company_name);
-    set("address", row.address);
-    set("terms", row.terms);
+    Object.keys(row).forEach((column) => { if (column !== "id") set(column, row[column]); });
+    // The hidden record_id can be wiped by a stray form.reset() between opening
+    // the popup and saving, which used to turn an edit into a second copy of the
+    // company. Keep the id on the form itself as a backup.
+    form.dataset.editingCompanyId = String(row.id || "");
     setFormMode(true);
     form.scrollIntoView({ behavior: "smooth", block: "start" });
-    toast("Company loaded. Make changes and click Update Company.");
+    // No "company loaded" toast: the popup opening with the record filled in is
+    // signal enough, and the toast got in the way of editing.
   }
 
   // --- Save ----------------------------------------------------------------
+  // Every field in the popup goes to Supabase, including the ones discovered
+  // from the table's own columns, so an edit can change any of them.
+  function buildPayload(form) {
+    const payload = {};
+    Array.from(form.querySelectorAll("input[name], textarea[name], select[name]")).forEach((field) => {
+      const column = field.name;
+      if (!column || column === "record_id") return;
+
+      if (field.type === "checkbox") { payload[column] = field.checked; return; }
+
+      const raw = String(field.value ?? "").trim();
+      const type = columnTypes.get(column) || "text";
+
+      if (type === "number") {
+        const number = raw === "" ? null : Number(raw);
+        payload[column] = Number.isFinite(number) ? number : null;
+        return;
+      }
+      if (type === "json") {
+        if (raw === "") { payload[column] = null; return; }
+        try {
+          payload[column] = JSON.parse(raw);
+        } catch {
+          // Leave the column untouched rather than write malformed JSON over it.
+          console.warn(`Company field "${column}" is not valid JSON — leaving it unchanged.`);
+        }
+        return;
+      }
+      payload[column] = raw === "" ? null : raw;
+    });
+
+    payload.company_name = String(payload.company_name || "").trim();
+    return payload;
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     if (!state?.supabase || !state?.session) {
       toast("Sign in before saving companies.", true);
       return;
     }
-    const form = event.currentTarget || event.target;
-    const value = (name) => (form.querySelector(`[name="${name}"]`)?.value || "").trim();
-    const editingId = value("record_id");
-    const payload = {
-      company_name: value("company_name"),
-      address: value("address") || null,
-      terms: value("terms") || null
-    };
+    // The listener is on document, so event.currentTarget is the *document* —
+    // reading fields off it picked up the first [name="record_id"] anywhere on
+    // the page (a different form's, always empty), which is what silently
+    // turned every company edit into a second copy. Resolve the real form.
+    const form = event.target?.closest?.("#companyForm") || q("#companyForm");
+    if (!form) return;
+    const value = (name) => (form.querySelector(`[name="${CSS.escape(name)}"]`)?.value || "").trim();
+    const payload = buildPayload(form);
     if (!payload.company_name) { toast("Company name is required.", true); return; }
 
+    // Which row are we saving over? The hidden record_id, or the id stashed on
+    // the form when the Edit button loaded it.
+    const editingId = value("record_id") || form.dataset.editingCompanyId || "";
+
     try {
-      const response = editingId
-        ? await state.supabase.from(TABLE).update(payload).eq("id", editingId).select().single()
-        : await state.supabase.from(TABLE).insert(payload).select().single();
-      if (response.error) throw response.error;
-      resetForm();
-      await loadCompanies();
-      toast(editingId ? "Company updated." : "Company added.");
+      let savedRow;
+      if (editingId) {
+        const result = await saveExistingCompany(editingId, payload);
+        if (!result.ok) { toast(result.message, true); return; }
+        savedRow = result.row;
+      } else {
+        const inserted = await state.supabase.from(TABLE).insert(payload).select();
+        if (inserted.error) throw inserted.error;
+        savedRow = inserted.data?.[0];
+      }
+
+      // Close the popup before resetForm() relabels it "Add Company". It used
+      // to stay open through the reload below, which is why an add-new window
+      // appeared a moment after finishing an edit.
       try { window.PIMP_closeCompanyModal?.(); } catch {}
+      resetForm();
+      toast(editingId ? "Company updated." : "Company added.");
+
+      // Draw the saved row straight away, then reconcile with the server in the
+      // background instead of making the save wait for a full reload.
+      mergeCompanyRow(savedRow);
+      renderCompanies();
+      Promise.resolve(loadCompanies()).catch((error) => console.warn("Background company refresh failed:", error));
     } catch (error) {
+      console.error("Company save failed:", error);
       const message = String(error?.message || error);
       toast(tableMissing(message)
         ? "The companies table does not exist in Supabase yet. Create it, then try again."
-        : message, true);
+        : `Company could not be saved: ${message}`, true);
     }
+  }
+
+  const RLS_UPDATE_HELP = "Supabase would not change this company. The companies table needs an UPDATE row-level-security policy — add one in the Supabase SQL editor, then try again.";
+
+  // Saving over an existing company. Supabase does not raise an error when
+  // row-level security forbids an update — it changes nothing and returns no
+  // rows — so check what came back rather than assume the save landed.
+  async function saveExistingCompany(editingId, payload) {
+    const updated = await state.supabase.from(TABLE).update(payload).eq("id", editingId).select();
+    if (updated.error) throw updated.error;
+    if (updated.data?.length) return { ok: true, row: updated.data[0] };
+
+    console.warn("Company UPDATE changed no rows", { id: editingId, payload });
+    await loadCompanies();
+    const stillThere = companies().some((company) => String(company.id) === String(editingId));
+    return {
+      ok: false,
+      message: stillThere
+        ? RLS_UPDATE_HELP
+        : "That company is no longer in Supabase, so there was nothing to update. The list has been refreshed."
+    };
   }
 
   // --- Delete --------------------------------------------------------------
@@ -32318,7 +32513,10 @@ function on(selector, eventName, handler) {
 
   document.addEventListener("click", (event) => {
     const editId = event.target.closest?.("[data-edit-company]")?.dataset.editCompany;
-    if (editId) { event.preventDefault(); loadIntoForm(companies().find((company) => company.id === editId)); return; }
+    // Compare as strings: dataset values are always strings, so a numeric id
+    // column would never match with === and the popup would open blank (which
+    // then saved as a new company instead of updating this one).
+    if (editId) { event.preventDefault(); loadIntoForm(companies().find((company) => String(company.id) === String(editId))); return; }
 
     const deleteId = event.target.closest?.("[data-delete-company]")?.dataset.deleteCompany;
     if (deleteId) { event.preventDefault(); deleteCompany(deleteId); return; }
@@ -32783,6 +32981,7 @@ function on(selector, eventName, handler) {
     form.reset();
     const record = form.querySelector('[name="record_id"]');
     if (record) record.value = "";
+    delete form.dataset.editingCompanyId;
     const title = qs(cfg.title);
     if (title) title.textContent = cfg.addLabel;
     const submit = qs(cfg.submit);
