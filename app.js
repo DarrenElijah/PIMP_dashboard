@@ -1530,14 +1530,14 @@ const COST_CONTAINER_BY_CATEGORY = {
 
 const DEFAULT_COST_LINES = {
   labor: [
-    { description: "Superintendant", cost_rate: 42.24, ot_cost_rate: 54, bill_rate: 65, ot_bill_rate: 97.5 },
-    { description: "Foreman", cost_rate: 38.28, ot_cost_rate: 49.95, bill_rate: 59.5, ot_bill_rate: 89.25 },
-    { description: "Metal Technician", cost_rate: 34.32, ot_cost_rate: 45, bill_rate: 53, ot_bill_rate: 79.5 },
-    { description: "Laborer", cost_rate: 30.36, ot_cost_rate: 40.5, bill_rate: 47, ot_bill_rate: 70.5 },
-    { description: "Truck Driver", cost_rate: 39.6, ot_cost_rate: 60, bill_rate: 62, ot_bill_rate: 93 }
+    { description: "Superintendant", cost_rate: 39, ot_cost_rate: 58.5, bill_rate: 65, ot_bill_rate: 97.5 },
+    { description: "Foreman", cost_rate: 34, ot_cost_rate: 51, bill_rate: 60, ot_bill_rate: 90 },
+    { description: "Metal Technician", cost_rate: 31, ot_cost_rate: 46.5, bill_rate: 57, ot_bill_rate: 85.5 },
+    { description: "Laborer", cost_rate: 29, ot_cost_rate: 43.5, bill_rate: 55, ot_bill_rate: 82.5 },
+    { description: "Truck Driver", cost_rate: 40, ot_cost_rate: 60, bill_rate: 66, ot_bill_rate: 99 }
   ],
   equipment: [
-    { description: "Pick-up", cost_rate: 17, day_cost: 136, bill_rate: 25, day_rate: 200 },
+    { description: "Pick-up", cost_rate: 17, day_cost: 136, bill_rate: 25, day_rate: 225 },
     { description: "Utility Trailer", cost_rate: 1.5, day_cost: 12, bill_rate: 15, day_rate: 120 },
     { description: "Enclosed Trailer w tools", cost_rate: 6, day_cost: 48, bill_rate: 25, day_rate: 200 },
     { description: "1-ton w/trailer", cost_rate: 18.5, day_cost: 148, bill_rate: 65, day_rate: 520 },
@@ -1550,7 +1550,7 @@ const DEFAULT_COST_LINES = {
   materials: [{ description: "Materials", cost: 0, markup_percent: 25 }],
   subcontractors: [{ description: "Subcontractor", cost: 0, markup_percent: 10 }],
   misc: [
-    { description: "Full Per Diem", qty: "", cost: 100, markup_percent: 0 },
+    { description: "Full Per Diem", qty: "", cost: 125, markup_percent: 0 },
     { description: "Partial Per Diem", qty: "", cost: 50, markup_percent: 0 }
   ]
 };
@@ -23763,6 +23763,25 @@ ${docs.length ? `
     return Object.values(rateObject || {}).some((value) => value !== "" && value !== null && value !== undefined);
   }
 
+  // Company rate card. The values hard-coded in DEFAULT_COST_LINES are the
+  // authoritative rates for the standard line items, so snapshot them before
+  // applyReferenceRatesToDefaultConstants() gets a chance to mutate the
+  // constant in place. Without this snapshot a stale saved tracker can
+  // overwrite a rate we ship in the code, and the code value never takes hold.
+  const COMPANY_RATE_CARD = (() => {
+    try {
+      return JSON.parse(JSON.stringify(DEFAULT_COST_LINES));
+    } catch {
+      return null;
+    }
+  })();
+
+  function companyRateCardLine(category, description) {
+    const rows = COMPANY_RATE_CARD?.[category];
+    if (!Array.isArray(rows)) return null;
+    return rows.find((row) => descriptionsMatch(row?.description, description)) || null;
+  }
+
   function makeReferenceKey(tracker) {
     if (!tracker) return "";
     const job = findJobForTracker(tracker);
@@ -23832,8 +23851,20 @@ ${docs.length ? `
 
     const reference = categoryRates[matchKey] || {};
     const output = { ...(line || {}) };
+    const companyLine = companyRateCardLine(category, lineDescription);
 
     Object.entries(reference).forEach(([field, value]) => {
+      if (value !== "" && value !== null && value !== undefined) output[field] = value;
+    });
+
+    // A rate published in the company rate card always beats whatever a
+    // previously saved tracker happened to store, and is applied rather than
+    // merely skipped: template rows arrive with a description only, so the rate
+    // card has to populate them or they render blank. Reference rates survive
+    // only for fields the card does not define (custom equipment lines, or
+    // rates deliberately left blank).
+    Object.entries(companyLine || {}).forEach(([field, value]) => {
+      if (field === "description") return;
       if (value !== "" && value !== null && value !== undefined) output[field] = value;
     });
 
@@ -33069,4 +33100,501 @@ function on(selector, eventName, handler) {
   } else {
     initRelabel();
   }
+})();
+
+/* ==========================================================================
+   INVOICES: BILL TO FROM THE COMPANIES PAGE
+   --------------------------------------------------------------------------
+   The invoice form gets a company picker fed by the same Supabase "companies"
+   table the Companies page manages. Choosing a company fills Bill To with its
+   name and address, and copies its terms into the Terms box.
+
+   The picker deliberately has no name attribute: invoice payloads are built
+   from an explicit field list, and an unnamed control cannot leak into
+   formToObject() or a FormData payload either way.
+
+   The option list is rebuilt whenever the picker is opened and whenever the
+   Invoices tab is opened, so it always matches the Companies page without
+   polling or reaching into that module's internals.
+   ========================================================================== */
+(function invoiceBillToCompanyPicker() {
+  const SELECT_ID = "invoiceBillToCompany";
+  const PLACEHOLDER = "Select a company...";
+
+  function qs(selector, root) { return (root || document).querySelector(selector); }
+  function picker() { return qs(`#${SELECT_ID}`); }
+
+  function companies() {
+    const list = state?.data?.companies;
+    return Array.isArray(list) ? list : [];
+  }
+
+  function esc(value) {
+    return typeof escapeHtml === "function"
+      ? escapeHtml(value)
+      : String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+        ));
+  }
+
+  function populate() {
+    const select = picker();
+    if (!select) return;
+
+    const previous = select.value;
+    const rows = companies().slice().sort((a, b) =>
+      String(a.company_name || "").localeCompare(String(b.company_name || "")));
+
+    select.innerHTML = `<option value="">${esc(PLACEHOLDER)}</option>` + rows.map((row) =>
+      `<option value="${esc(row.id)}">${esc(row.company_name || "(unnamed company)")}</option>`).join("");
+
+    // Keep the user's choice across a rebuild.
+    if (previous && Array.from(select.options).some((option) => option.value === previous)) {
+      select.value = previous;
+    }
+  }
+
+  function refresh() {
+    populate();
+    // The Companies tab may never have been opened in this session.
+    if (!companies().length && typeof window.loadCompanies === "function") {
+      Promise.resolve(window.loadCompanies())
+        .then(populate)
+        .catch((error) => console.warn("Could not load companies for the invoice picker:", error));
+    }
+  }
+
+  // Let the invoice preview and any field listeners react as if it were typed.
+  function notify(field) {
+    ["input", "change"].forEach((type) => {
+      try { field.dispatchEvent(new Event(type, { bubbles: true })); } catch {}
+    });
+  }
+
+  function fillFromCompany(companyId) {
+    const company = companies().find((row) => String(row.id) === String(companyId));
+    const form = qs("#invoiceForm");
+    if (!company || !form) return;
+
+    const billTo = form.querySelector('[name="bill_to"]');
+    if (billTo) {
+      // Name first, then the address exactly as it is stored (it may be several
+      // lines already).
+      billTo.value = [company.company_name, company.address]
+        .map((part) => String(part == null ? "" : part).trim())
+        .filter(Boolean)
+        .join("\n");
+      notify(billTo);
+    }
+
+    const terms = form.querySelector('[name="terms"]');
+    if (terms) {
+      terms.value = String(company.terms == null ? "" : company.terms).trim();
+      notify(terms);
+    }
+
+    // No toast: the filled-in Bill To and Terms are visible on the invoice.
+  }
+
+  document.addEventListener("change", (event) => {
+    if (event.target?.id !== SELECT_ID) return;
+    if (event.target.value) fillFromCompany(event.target.value);
+  });
+
+  // Rebuild the list as the dropdown is opened, so a company added moments ago
+  // on the Companies page is already there.
+  document.addEventListener("mousedown", (event) => {
+    if (event.target?.id === SELECT_ID) refresh();
+  });
+  document.addEventListener("focusin", (event) => {
+    if (event.target?.id === SELECT_ID) refresh();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.('[data-view="invoices"], [data-view-jump="invoices"]')) {
+      setTimeout(refresh, 0);
+    }
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", populate, { once: true });
+  } else {
+    populate();
+  }
+})();
+
+/* ==========================================================================
+   JOBS: COMPANY NAME AS A DROPDOWN OF THE COMPANIES PAGE
+   --------------------------------------------------------------------------
+   The job popup's free-text "Company Name" input becomes a select listing the
+   companies from the Companies page. Its name stays "company_name" and its
+   option values are the company names, so every payload builder and reader
+   sees exactly what the text input used to produce.
+
+   Jobs saved before this change may name a company that is not on the
+   Companies page (or was renamed/deleted). Editing such a job injects its
+   stored name as an extra option, so old jobs still load and re-save
+   unchanged.
+   ========================================================================== */
+(function jobCompanyDropdown() {
+  const PLACEHOLDER = "Select a company...";
+
+  function qs(selector, root) { return (root || document).querySelector(selector); }
+
+  function companies() {
+    const list = state?.data?.companies;
+    return Array.isArray(list) ? list : [];
+  }
+
+  function esc(value) {
+    return typeof escapeHtml === "function"
+      ? escapeHtml(value)
+      : String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+        ));
+  }
+
+  // Swap the input for a select once; later calls just return the select.
+  function ensureSelect() {
+    const existing = qs('#jobForm [name="company_name"]');
+    if (!existing) return null;
+    if (existing.tagName === "SELECT") return existing;
+
+    const select = document.createElement("select");
+    select.name = "company_name";
+    select.required = existing.required;
+    select.dataset.jobCompanySelect = "1";
+    const current = existing.value || "";
+    existing.replaceWith(select);
+    rebuild(current, select);
+    return select;
+  }
+
+  function rebuild(valueToKeep, selectMaybe) {
+    const select = selectMaybe || ensureSelect();
+    if (!select) return;
+    const keep = String(valueToKeep != null ? valueToKeep : select.value || "").trim();
+
+    const names = new Set(
+      companies().map((row) => String(row.company_name || "").trim()).filter(Boolean)
+    );
+    if (keep) names.add(keep); // legacy job company not on the Companies page
+    const sorted = Array.from(names).sort((a, b) => a.localeCompare(b));
+
+    select.innerHTML = `<option value="">${esc(PLACEHOLDER)}</option>` +
+      sorted.map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
+    select.value = keep || "";
+  }
+
+  function refresh() {
+    rebuild();
+    if (!companies().length && typeof window.loadCompanies === "function") {
+      Promise.resolve(window.loadCompanies())
+        .then(() => rebuild())
+        .catch((error) => console.warn("Could not load companies for the job form:", error));
+    }
+  }
+
+  // Rebuild as the dropdown is opened so it always matches the Companies page.
+  ["mousedown", "focusin"].forEach((type) => {
+    document.addEventListener(type, (event) => {
+      if (event.target?.dataset?.jobCompanySelect) refresh();
+    });
+  });
+
+  // Opening the job popup (create or edit) converts and fills the list; the
+  // delays let the openers' own handlers run first.
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.("#quickCreateJobBtn, #openJobModalBtn, [data-edit-job], [data-dashboard-edit-job], [data-create-job-from-cost]")) {
+      [0, 100].forEach((delay) => setTimeout(refresh, delay));
+    }
+  });
+
+  // loadJobIntoForm sets company_name before our option list may include it;
+  // a select silently drops an assignment with no matching option. Re-assert
+  // the job's company after it runs. (Reassigning window.loadJobIntoForm also
+  // rebinds the global identifier — the same mechanism the codebase's other
+  // loadJobIntoForm wrappers rely on.)
+  const previousLoadJobIntoForm = typeof window.loadJobIntoForm === "function" ? window.loadJobIntoForm : null;
+  if (previousLoadJobIntoForm) {
+    window.loadJobIntoForm = function loadJobIntoFormWithCompanyDropdown(job) {
+      const result = previousLoadJobIntoForm.apply(this, arguments);
+      rebuild(String(job?.company_name || "").trim());
+      return result;
+    };
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => ensureSelect(), { once: true });
+  } else {
+    ensureSelect();
+  }
+})();
+
+/* ==========================================================================
+   INVOICES: BILL TO / TERMS FROM THE JOB'S COMPANY
+   --------------------------------------------------------------------------
+   Creating an invoice for a job (the Invoice button on a job row, or choosing
+   a Source Cost Tracker) looks the job's company up on the Companies page and
+   fills Bill To with the company name over its address, and Terms with the
+   company's terms. Runs after the existing prefill handlers so the company
+   record wins over the older company/contact/location guess.
+
+   Editing a saved invoice is untouched: none of these triggers fire on
+   [data-edit-invoice], so a stored bill_to is never rewritten.
+   ========================================================================== */
+(function invoiceBillToFromJobCompany() {
+  function qs(selector, root) { return (root || document).querySelector(selector); }
+
+  function companies() {
+    const list = state?.data?.companies;
+    return Array.isArray(list) ? list : [];
+  }
+
+  function normalize(name) {
+    return String(name == null ? "" : name).trim().toLowerCase();
+  }
+
+  function companyForName(name) {
+    const key = normalize(name);
+    if (!key) return null;
+    return companies().find((row) => normalize(row.company_name) === key) || null;
+  }
+
+  function lookupJob(jobId) {
+    if (!jobId) return null;
+    if (typeof findJob === "function") { try { const hit = findJob(jobId); if (hit) return hit; } catch {} }
+    return (state?.data?.jobs || []).find((row) => String(row.id) === String(jobId)) || null;
+  }
+
+  // The job the invoice is being made for: the hidden job_id if a handler has
+  // set it, otherwise the job of the selected Source Cost Tracker.
+  function jobForForm(form) {
+    const direct = lookupJob(form.querySelector('[name="job_id"]')?.value || "");
+    if (direct) return direct;
+    const trackerId = form.querySelector('[name="cost_tracker_id"]')?.value || "";
+    const tracker = trackerId
+      ? (state?.data?.costTrackers || []).find((row) => String(row.id) === String(trackerId))
+      : null;
+    return tracker?.job_id ? lookupJob(tracker.job_id) : null;
+  }
+
+  function notify(field) {
+    ["input", "change"].forEach((type) => {
+      try { field.dispatchEvent(new Event(type, { bubbles: true })); } catch {}
+    });
+  }
+
+  /* --- Flicker control ------------------------------------------------------
+     Four modules write Bill To, Terms and Invoice # on staggered timers spread
+     over 0-600ms, with contradictory intentions (one blanks the invoice number,
+     another generates it; one blanks Terms, this one fills it). That is what
+     made these boxes visibly alternate between old and new values.
+
+     So during a create-invoice action each field is pinned:
+       - the first write still shows immediately, so nothing sits blank;
+       - later writes are recorded but not displayed — no alternation;
+       - the company's details are asserted the moment the job resolves, and
+         any competing write is replaced with them for the rest of the window;
+       - whatever was recorded last is applied once when the window closes, so
+         fields this module does not own still end up where the app intends.
+     Typing releases a field's pin at once, and so does submitting the form, so
+     what gets saved is always what is on screen. */
+  const SETTLE_MS = 900;
+  const PINNED_FIELDS = ["bill_to", "terms", "invoice_number"];
+
+  function nativeValueDescriptor(field) {
+    return Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value");
+  }
+
+  function releasePin(field, finalValue) {
+    const pin = field?.__invoiceFieldPin;
+    if (!pin) return;
+    clearTimeout(pin.timer);
+    field.removeEventListener("input", pin.onInput, true);
+    delete field.__invoiceFieldPin;
+    delete field.value; // drop our accessor, back to the element's own
+    if (finalValue != null && field.value !== finalValue) {
+      pin.native.set.call(field, finalValue);
+      notify(field);
+    }
+  }
+
+  function pinField(field, mode, intended) {
+    if (!field) return;
+    const native = nativeValueDescriptor(field);
+    if (!native?.set || !native?.get) return;
+
+    // Carry over what a defer pin already saw when upgrading it to an assert.
+    const existing = field.__invoiceFieldPin;
+    const carried = existing ? { seen: existing.seen, pending: existing.pending } : { seen: false, pending: null };
+    releasePin(field);
+
+    const pin = { native, mode, intended, seen: carried.seen, pending: carried.pending, timer: null, onInput: null };
+    pin.onInput = (event) => { if (event.isTrusted) releasePin(field); };
+    field.addEventListener("input", pin.onInput, true);
+
+    Object.defineProperty(field, "value", {
+      configurable: true,
+      get() { return native.get.call(this); },
+      set(incoming) {
+        const next = String(incoming == null ? "" : incoming);
+        if (pin.mode === "assert") {
+          native.set.call(this, pin.intended); // a competing write: hold ours
+          return;
+        }
+        pin.pending = next;
+        if (!pin.seen) { pin.seen = true; native.set.call(this, next); } // first write shows
+      }
+    });
+
+    if (mode === "assert") {
+      pin.seen = true;
+      pin.pending = intended;
+      native.set.call(field, intended);
+    }
+
+    field.__invoiceFieldPin = pin;
+    pin.timer = setTimeout(() => {
+      releasePin(field, pin.mode === "assert" ? pin.intended : pin.pending);
+    }, SETTLE_MS);
+  }
+
+  function releaseAllPins() {
+    PINNED_FIELDS.forEach((name) => {
+      const field = qs(`#invoiceForm [name="${name}"]`);
+      const pin = field?.__invoiceFieldPin;
+      if (pin) releasePin(field, pin.mode === "assert" ? pin.intended : pin.pending);
+    });
+  }
+
+  // Any settle window belongs to the action that opened it. Opening a
+  // different invoice must end it, or a pin could swallow that invoice's own
+  // saved details — or worse, overwrite them when the window closed.
+  function endSettle() {
+    actionToken += 1; // invalidates the pending retries too
+    releaseAllPins();
+  }
+
+  let actionToken = 0;
+
+  function apply() {
+    const form = qs("#invoiceForm");
+    if (!form) return false;
+    const job = jobForForm(form);
+    const company = companyForName(job?.company_name);
+    if (!company) return false; // company not on the Companies page — leave the old prefill
+
+    const billToValue = [company.company_name, company.address]
+      .map((part) => String(part == null ? "" : part).trim())
+      .filter(Boolean)
+      .join("\n");
+    const termsValue = String(company.terms == null ? "" : company.terms).trim();
+
+    // Editing a saved invoice (record_id set): only fill blanks, never
+    // overwrite what was saved. A new invoice takes the company's details.
+    const editingSaved = Boolean(form.querySelector('[name="record_id"]')?.value);
+
+    const billTo = form.querySelector('[name="bill_to"]');
+    if (billTo && billToValue && !(editingSaved && billTo.value.trim())) {
+      pinField(billTo, "assert", billToValue);
+      notify(billTo);
+    }
+    // Only overwrite Terms when the company actually records terms.
+    const terms = form.querySelector('[name="terms"]');
+    if (terms && termsValue && !(editingSaved && terms.value.trim())) {
+      pinField(terms, "assert", termsValue);
+      notify(terms);
+    }
+    if (terms && terms.value) {
+      // The create-invoice window fix blanks Terms unless this flag says the
+      // value was deliberately set rather than a stale "Net 30" default.
+      terms.dataset.userTypedTerms = "1";
+    }
+
+    // Show the match in the Bill To Company picker (without firing its change
+    // handler, which would re-fill the fields a second time).
+    const picker = qs("#invoiceBillToCompany");
+    if (picker) {
+      const hasOption = () => Array.from(picker.options).some((option) => option.value === String(company.id));
+      if (!hasOption()) { try { picker.dispatchEvent(new Event("focusin", { bubbles: true })); } catch {} }
+      if (hasOption()) picker.value = String(company.id);
+    }
+
+    // No toast: the filled-in Bill To and Terms are visible on the invoice.
+    return true;
+  }
+
+  // Starts a settle window: hold the three fields steady, then assert the
+  // company's details as soon as the job is attached to the form. The retries
+  // only cover the gap before whichever handler sets job_id has run.
+  function applySoon() {
+    const form = qs("#invoiceForm");
+    if (!form) return;
+
+    actionToken += 1;
+    const token = actionToken;
+
+    PINNED_FIELDS.forEach((name) => {
+      const field = form.querySelector(`[name="${name}"]`);
+      if (!field) return;
+      releasePin(field);              // a fresh action starts a fresh window
+      pinField(field, "defer");
+    });
+
+    let resolved = false;
+    [0, 60, 150, 300].forEach((delay) => setTimeout(() => {
+      if (resolved || token !== actionToken) return;
+      if (apply()) resolved = true;
+    }, delay));
+  }
+
+  // Saving must persist what is on screen, not a value still waiting to settle.
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id === "invoiceForm") releaseAllPins();
+  }, true);
+
+  // Opening a saved invoice ends any window from a create action moments ago.
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.("[data-edit-invoice], [data-preview-invoice]")) endSettle();
+  }, true);
+
+  const previousLoadInvoiceIntoForm = typeof window.loadInvoiceIntoForm === "function" ? window.loadInvoiceIntoForm : null;
+  if (previousLoadInvoiceIntoForm && !previousLoadInvoiceIntoForm.__billToPinWrapped) {
+    const wrappedLoad = function loadInvoiceIntoFormEndingSettle() {
+      endSettle();
+      return previousLoadInvoiceIntoForm.apply(this, arguments);
+    };
+    wrappedLoad.__billToPinWrapped = true;
+    window.loadInvoiceIntoForm = wrappedLoad;
+  }
+
+  // Every "create invoice for this job" entry point funnels through these two,
+  // so wrapping them covers the job details button and any other caller
+  // regardless of which data attribute it uses.
+  ["loadInvoiceForJob", "fillInvoiceFromCostTracker"].forEach((name) => {
+    const previous = typeof window[name] === "function" ? window[name] : null;
+    if (!previous || previous.__billToFromCompanyWrapped) return;
+    const wrapped = function billToFromCompanyWrapper() {
+      const result = previous.apply(this, arguments);
+      applySoon();
+      return result;
+    };
+    wrapped.__billToFromCompanyWrapped = true;
+    // These are top-level function declarations, so they are properties of
+    // window — assigning here rebinds the bare identifier call sites use too.
+    window[name] = wrapped;
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target?.closest?.("[data-invoice-from-cost], [data-open-invoice-for-job], [data-job-details-create-invoice], #openSelectedJobInvoiceBtn, #newBlankInvoiceBtn")) {
+      applySoon();
+    }
+  });
+
+  document.addEventListener("change", (event) => {
+    if (event.target?.matches?.('#invoiceSourceCostTracker, #invoiceForm [name="job_id"], #invoiceForm [name="cost_tracker_id"], #invoicePageJobSelect')) {
+      applySoon();
+    }
+  });
 })();
