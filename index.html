@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
 
-  <link rel="stylesheet" href="styles.css?v=20260703-pro-fast" />
+  <link rel="stylesheet" href="styles.css?v=20260929-dashboard-load-fixes" />
 
   <!--
     Performance: Supabase is the only library needed for the app to start, so it
@@ -227,7 +227,7 @@
                     <input name="job_dates" type="hidden" value="T&amp;M" />
                   </div>
                 </label>
-                <label>Location<input name="location" /></label>
+                <label class="wide">Location<input name="location" /></label>
                 <label>Status
                   <select name="status">
                     <option value="active">Active</option>
@@ -235,9 +235,36 @@
                     <option value="cancelled">Cancelled</option>
                   </select>
                 </label>
-                <label>Start Date<input name="start_date" type="date" /></label>
-                <label>End Date<input name="end_date" type="date" /></label>
-                <label>Total Days<input name="total_job_days" type="number" min="0" step="1" readonly placeholder="Auto-calculated" /></label>
+                <!-- One field for the job's days: the date range, which weekends are
+                     worked, and the resulting Total Days. The field-order patches move
+                     it as a single unit (see moveJobField in app.js). -->
+                <div class="job-dates-field wide" role="group" aria-labelledby="jobDatesTitle">
+                  <span class="job-dates-title" id="jobDatesTitle">Job Dates</span>
+                  <div class="job-dates-range">
+                    <label>Start<input name="start_date" type="date" /></label>
+                    <label>End<input name="end_date" type="date" /></label>
+                    <label>Total Days<input name="total_job_days" type="number" min="0" step="1" readonly placeholder="Auto" /></label>
+                  </div>
+                  <div class="job-weekend-row">
+                    <span class="job-weekend-label" id="jobWeekendLabel">Weekends</span>
+                    <div class="job-weekend-options" role="radiogroup" aria-labelledby="jobWeekendLabel">
+                      <label><input type="radio" name="weekend_mode" value="none" checked />Not worked</label>
+                      <label><input type="radio" name="weekend_mode" value="all" />All worked</label>
+                      <label><input type="radio" name="weekend_mode" value="custom" />Pick days</label>
+                    </div>
+                  </div>
+                  <p class="tiny job-weekend-note" id="jobWeekendNote" aria-live="polite">Pick the start and end dates.</p>
+                  <div class="job-weekend-picker" id="jobWeekendPicker" hidden>
+                    <div class="job-weekend-quick">
+                      <span class="field-hint">Quick pick:</span>
+                      <button class="link-btn" type="button" data-weekend-quick="sat">All Saturdays</button>
+                      <button class="link-btn" type="button" data-weekend-quick="sun">All Sundays</button>
+                      <button class="link-btn" type="button" data-weekend-quick="clear">Clear</button>
+                    </div>
+                    <div class="job-weekend-dates" id="jobWeekendDates"></div>
+                  </div>
+                  <input type="hidden" name="weekend_days" value="" />
+                </div>
               </div>
               <div class="form-actions job-modal-actions">
                 <button class="btn ghost hidden" id="cancelJobEditBtn" type="button">Cancel Edit</button>
@@ -647,28 +674,49 @@ Account # __________</textarea>
           <section class="panel table-panel">
             <div class="panel-header table-panel-header">
               <h3>Saved Timesheets</h3>
+              <!-- The search box stays first: the toolbar's ::before magnifier overlaps the first item. -->
               <div class="table-toolbar-inline">
                 <input id="timesheetsSearch" class="table-search" type="search" placeholder="Search timesheets..." />
-                <span id="timesheetsCount" class="pill">0</span>
+                <span id="timesheetsCount" class="pill" title="Weeks shown">0</span>
+                <button class="btn ghost" id="uploadTimesheetPdfBtn" type="button">Upload Timesheet PDF</button>
               </div>
             </div>
-            <div class="table-wrap">
-              <table class="data-table timesheets-table">
-                <thead>
-                  <tr>
-                    <th>Folder / Date</th>
-                    <th>Customer</th>
-                    <th>Job / Dates</th>
-                    <th>Location</th>
-                    <th>Timesheets / Employees</th>
-                    <th>Total Hours</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="timesheetsTable"></tbody>
-              </table>
-            </div>
+            <p class="table-help">Timesheets are filed in weekly folders (Monday–Sunday), with a folder for each job inside. Upload a timesheet PDF to any week.</p>
+            <!-- Week and job folder cards; the id is kept from the old table because other code looks it up. -->
+            <div class="timesheet-weeks" id="timesheetsTable"></div>
           </section>
+        </div>
+
+        <div id="timesheetUploadModalOverlay" class="job-modal-overlay hidden" aria-hidden="true">
+          <div class="job-modal-card timesheet-upload-card" role="dialog" aria-modal="true" aria-labelledby="timesheetUploadTitle">
+            <div class="job-modal-header">
+              <div>
+                <p class="eyebrow">Timesheets</p>
+                <h3 id="timesheetUploadTitle">Upload Timesheet PDF</h3>
+              </div>
+              <button class="icon-btn job-modal-close" id="closeTimesheetUploadBtn" type="button" aria-label="Close upload popup">×</button>
+            </div>
+            <form id="timesheetUploadForm" class="job-modal-form">
+              <div class="form-grid">
+                <label>Week
+                  <input id="timesheetUploadWeek" type="date" required />
+                  <span class="field-hint" id="timesheetUploadWeekHint">Pick any day in the week.</span>
+                </label>
+                <label>Job
+                  <select id="timesheetUploadJob"></select>
+                  <span class="field-hint">Optional. Leave blank for a timesheet covering several jobs.</span>
+                </label>
+                <label class="wide">Timesheet PDF
+                  <input id="timesheetUploadFile" type="file" accept="application/pdf,.pdf" multiple required />
+                  <span class="field-hint">You can choose more than one PDF; each is filed under this week.</span>
+                </label>
+              </div>
+              <div class="form-actions job-modal-actions">
+                <button class="btn ghost" id="cancelTimesheetUploadBtn" type="button">Cancel</button>
+                <button class="btn primary" id="timesheetUploadSubmitBtn" type="submit">Upload</button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
 
@@ -1048,6 +1096,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script defer src="app.js?v=20260703-pro-fast"></script>
+  <script defer src="app.js?v=20260929-faster-startup"></script>
 </body>
 </html>

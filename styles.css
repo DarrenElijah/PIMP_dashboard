@@ -12942,3 +12942,444 @@ input[type="search"] {
     display: none;
   }
 }
+
+/* --- Job popup: Job Dates field (dates, weekends worked, Total Days) ---
+   It sits inside .form-grid, so the selectors below are prefixed with
+   .job-dates-field to outrank `.form-grid label { width: 100% }` and
+   `.job-modal-form input { min-height: 44px }` for the pills and chips. */
+.job-dates-field {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+}
+
+.job-dates-title {
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.job-dates-range {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.job-dates-field .job-dates-range input[readonly] {
+  background: #f1f5f9;
+  font-weight: 800;
+}
+
+.job-weekend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.job-weekend-label {
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.job-dates-field .job-weekend-options {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.job-dates-field .job-weekend-options label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  padding: 8px 14px;
+  border-left: 1px solid var(--line);
+  font-size: 0.84rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.job-dates-field .job-weekend-options label:first-child {
+  border-left: 0;
+}
+
+/* Real radios stay in place for keyboard use; the pill is what shows. */
+.job-dates-field .job-weekend-options input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+}
+
+.job-dates-field .job-weekend-options label:has(input:checked) {
+  background: var(--brand);
+  color: #ffffff;
+}
+
+.job-dates-field .job-weekend-options label:has(input:focus-visible) {
+  outline: 3px solid rgba(37, 99, 235, 0.45);
+  outline-offset: -3px;
+}
+
+.job-weekend-note {
+  margin: -4px 0 0;
+}
+
+@media (max-width: 560px) {
+  .job-dates-range {
+    grid-template-columns: 1fr;
+  }
+}
+
+.job-weekend-picker {
+  display: grid;
+  gap: 10px;
+}
+
+.job-weekend-picker[hidden] {
+  display: none;
+}
+
+.job-weekend-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.job-weekend-quick .link-btn {
+  padding: 2px 0;
+  font-size: 0.84rem;
+}
+
+.job-weekend-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.job-weekend-pair {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.job-dates-field .job-weekend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 6px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  font-size: 0.82rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.job-dates-field .job-weekend-chip input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--brand);
+}
+
+.job-weekend-chip:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+}
+
+.job-weekend-chip:has(input:focus-visible) {
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+/* --- Timesheets: week cards > job cards > sheets and PDFs ---
+   Each level looks different at a glance: a week has a blue title bar, a job
+   inside it is a white card with a blue left edge, and an open job lists its
+   sheets and PDFs as plain rows. */
+.timesheet-weeks {
+  display: grid;
+  gap: 14px;
+}
+
+.ts-week {
+  border: 1px solid #c9d8ee;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.ts-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  padding: 10px 16px;
+}
+
+.ts-week > .ts-head {
+  background: linear-gradient(180deg, #f2f7ff 0%, #e8f0fe 100%);
+}
+
+.ts-week.is-open > .ts-head {
+  border-bottom: 1px solid #c9d8ee;
+}
+
+.ts-toggle {
+  flex: 1 1 340px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ts-toggle:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 3px;
+  border-radius: 10px;
+}
+
+.ts-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px #c9d8ee;
+  font-size: 1.2rem;
+}
+
+.ts-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.ts-title strong {
+  color: var(--ink);
+  font-size: 1.02rem;
+  overflow-wrap: anywhere;
+}
+
+.ts-title small {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.ts-hours {
+  flex: 0 0 auto;
+  display: grid;
+  justify-items: end;
+  line-height: 1.1;
+}
+
+.ts-hours strong {
+  color: var(--ink);
+  font-size: 1.15rem;
+}
+
+.ts-hours small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ts-chevron::before {
+  content: "▾";
+  display: inline-block;
+  color: var(--muted);
+  font-size: 1.1rem;
+  transition: transform 0.15s ease;
+}
+
+.ts-toggle[aria-expanded="true"] .ts-chevron::before {
+  transform: rotate(180deg);
+}
+
+.ts-head-actions.table-actions,
+.ts-item-actions.table-actions {
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+/* The shared pill spacing is sized for table cells; the card's gap does it here. */
+.ts-head-actions.table-actions .link-btn,
+.ts-item-actions.table-actions .link-btn {
+  margin: 0;
+}
+
+/* The default pill tint matches the week's blue title bar; make it stand out. */
+.ts-week > .ts-head .table-actions .link-btn {
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px #c9d8ee;
+}
+
+.ts-week-body {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
+  background: #f6f8fb;
+}
+
+.ts-job {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brand);
+  border-radius: 14px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.ts-job > .ts-head {
+  padding: 8px 14px;
+}
+
+.ts-job.is-open > .ts-head {
+  border-bottom: 1px solid var(--line);
+  background: #fbfdff;
+}
+
+.ts-job .ts-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  box-shadow: none;
+  font-size: 1.05rem;
+}
+
+.ts-job .ts-title strong {
+  font-size: 0.95rem;
+}
+
+.ts-job .ts-hours strong {
+  font-size: 1rem;
+}
+
+.ts-job-body,
+.ts-week-files {
+  display: grid;
+  gap: 2px;
+  padding: 4px 0 8px;
+}
+
+.ts-week-files {
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.ts-items-label {
+  margin: 8px 16px 2px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ts-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 16px;
+}
+
+.ts-item + .ts-item {
+  border-top: 1px solid #eef2f7;
+}
+
+.ts-item:hover {
+  background: #f8fbff;
+}
+
+.ts-item-icon {
+  font-size: 1.05rem;
+}
+
+.ts-item-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ts-item-main strong {
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.ts-item-main small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.ts-item-actions.table-actions {
+  justify-content: flex-end;
+}
+
+.ts-empty {
+  margin: 0;
+  padding: 28px 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 16px;
+  background: #ffffff;
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .ts-head {
+    padding: 10px 12px;
+  }
+
+  .ts-week-body {
+    padding: 10px;
+  }
+
+  .ts-item {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 8px 12px;
+  }
+
+  .ts-item-actions.table-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+.timesheet-upload-card {
+  width: min(620px, calc(100vw - 32px));
+}
+
+/* Hints of different lengths sit under their fields; keep the fields level. */
+.timesheet-upload-card .form-grid {
+  align-items: start;
+}

@@ -11,6 +11,18 @@
    4. Users will only see the email/password login form.
    ========================================================================== */
 
+// Registered before every other click handler so it runs first: a click that
+// needs data the dashboard skips at startup (a saved invoice's HTML copy, a
+// file kept inside its documents row) waits for that data, then replays. See
+// PIMP_holdClickForDeferredData in installFinalDataTableLoadingSafetyPatch.
+window.addEventListener("click", (event) => {
+  try {
+    if (typeof window.PIMP_holdClickForDeferredData === "function") window.PIMP_holdClickForDeferredData(event);
+  } catch (error) {
+    console.warn("Deferred data check failed:", error);
+  }
+}, true);
+
 const CONFIG_STORAGE_KEY = "pimp_dashboard_supabase_config_v1";
 
 // Locked Supabase connection for GitHub Pages.
@@ -263,16 +275,16 @@ else prewarmExportLibraries();
     } catch {}
   }
 
-  function refreshCurrentTablesSafely(status) {
+  function refreshCurrentTablesSafely() {
     // Keep the current layout. Do not call renderAll() or older Open Jobs renderers.
+    // Both job tables redraw: a job moves to Closed Jobs when marked Paid, and
+    // back to Open Jobs when a Paid invoice is changed to anything else.
     window.setTimeout(() => {
       try { if (typeof renderStats === "function") renderStats(); } catch {}
       try { if (typeof renderInvoices === "function") renderInvoices(); } catch {}
       try { if (typeof window.PIMP_renderOpenJobsGroupedByInvoiceStatus === "function") window.PIMP_renderOpenJobsGroupedByInvoiceStatus(); } catch {}
       try { if (typeof window.PIMP_cleanupSubmittedLabelsAndClasses === "function") window.PIMP_cleanupSubmittedLabelsAndClasses(); } catch {}
-      if (status === "paid") {
-        try { if (typeof window.renderJobs === "function") window.renderJobs(); } catch {}
-      }
+      try { if (typeof window.renderJobs === "function") window.renderJobs(); } catch {}
     }, 0);
   }
 
@@ -306,7 +318,7 @@ else prewarmExportLibraries();
 
       updateLocalInvoice(invoiceId, status);
       updateMatchingInvoiceControls(invoiceId, status);
-      refreshCurrentTablesSafely(status);
+      refreshCurrentTablesSafely();
       safeToast(status === "paid" ? "Invoice marked Paid." : `Invoice status changed to ${invoiceStatusLabelEarly(status)}.`);
     } catch (error) {
       updateLocalInvoice(invoiceId, previousStatus);
@@ -409,10 +421,14 @@ async function checkSession() {
   }
 
   state.supabase.auth.onAuthStateChange(async (_event, session) => {
+    // Supabase also reports the session it already has (straight after this
+    // subscribes, and on every token refresh). That data was loaded above, so
+    // only a sign-in by someone new needs a full reload.
+    const sameUser = Boolean(session?.user?.id && session.user.id === state.session?.user?.id);
     state.session = session;
     showCorrectScreen();
 
-    if (session) {
+    if (session && !sameUser) {
       await loadAllData();
     }
   });
@@ -1206,10 +1222,13 @@ function findEmployee(id) {
 }
 
 function money(value) {
-  return number(value).toLocaleString("en-US", {
+  // One shared formatter: toLocaleString with options builds a new one on
+  // every call, which made money() the slowest part of drawing the tables.
+  money.formatter = money.formatter || new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD"
   });
+  return money.formatter.format(number(value));
 }
 
 function number(value) {
@@ -1457,7 +1476,20 @@ function showToast(message, isError = false) {
     tbody.appendChild(row);
   }
 
+  // The Saved Timesheets list is a folder tree (weeks > jobs > sheets), not
+  // table rows, so that search redraws just its own list, which keeps the
+  // matching folders and opens them. It holds only buttons, so a redraw
+  // loses nothing.
+  function rendersOwnSearchResults(input) {
+    return input?.id === "timesheetsSearch" && typeof window.renderTimesheets === "function";
+  }
+
   function applyTableSearchOnly(input) {
+    if (rendersOwnSearchResults(input)) {
+      window.renderTimesheets();
+      return;
+    }
+
     const tbody = tableBodyForSearch(input);
     if (!tbody) return;
 
@@ -1491,7 +1523,8 @@ function showToast(message, isError = false) {
   function applyAllActiveTableSearches() {
     qsa(".table-search, #dashboardActiveJobsSearch, #jobsSearch, #costTrackersSearch, #invoicesSearch, #timesheetsSearch, #employeesSearch, #assignmentsSearch, #documentsSearch")
       .forEach((input) => {
-        if (input?.value) applyTableSearchOnly(input);
+        // A full render already drew the timesheet folders for the search term.
+        if (input?.value && !rendersOwnSearchResults(input)) applyTableSearchOnly(input);
       });
   }
 
@@ -2882,7 +2915,8 @@ function syncJobTotalDaysField() {
 function bindEvents() {
   on("#loginForm", "submit", handleLogin);
   on("#signOutBtn", "click", handleSignOut);
-  on("#refreshBtn", "click", loadAllData);
+  // Refresh Data is handled by installFinalDataTableLoadingSafetyPatch; binding
+  // it here too made every click download all the data twice.
   on("#quickCreateJobBtn", "click", () => {
     resetJobFormMode();
     showView("jobs");
@@ -3267,15 +3301,38 @@ function ensureEditableFormFields() {
   ensureHiddenInput("#costTrackerForm", "record_id");
 }
 
-function buildInlineJobAssignmentControl(tracker) {
-  const options = [
+function jobAssignmentOptionsHtml(selectedJobId, jobs) {
+  return [
     `<option value="">Unassigned</option>`,
-    ...state.data.jobs.map((job) => {
-      const selected = job.id === tracker.job_id ? " selected" : "";
+    ...jobs.map((job) => {
+      const selected = job.id === selectedJobId ? " selected" : "";
       const label = `${job.job_number || "No #"} — ${job.job_name || "Untitled"}`;
       return `<option value="${escapeAttr(job.id)}"${selected}>${escapeHtml(label)}</option>`;
     })
   ].join("");
+}
+
+// The Cost Trackers table renders each row's job dropdown with only its
+// current choice and fills in every job when the dropdown is first used.
+// Listing every job in every row made the table trackers × jobs elements,
+// the slowest part of loading the dashboard.
+function fillJobAssignmentOptions(select) {
+  if (!select || select.dataset.jobOptionsPending !== "true") return;
+  delete select.dataset.jobOptionsPending;
+  const value = select.value;
+  select.innerHTML = jobAssignmentOptionsHtml(value, state.data.jobs || []);
+  select.value = value;
+}
+
+["pointerdown", "mousedown", "touchstart", "focusin", "keydown"].forEach((type) => {
+  document.addEventListener(type, (event) => {
+    fillJobAssignmentOptions(event.target?.closest?.("select[data-job-options-pending]"));
+  }, { capture: true, passive: true });
+});
+
+function buildInlineJobAssignmentControl(tracker) {
+  const currentJob = tracker.job_id ? (state.data.jobs || []).find((job) => job.id === tracker.job_id) : null;
+  const options = jobAssignmentOptionsHtml(tracker.job_id, currentJob ? [currentJob] : []);
 
   const assignText = tracker.job_id ? "Update Job" : "Assign Job";
   const createJobButton = !tracker.job_id
@@ -3284,7 +3341,7 @@ function buildInlineJobAssignmentControl(tracker) {
 
   return `
     <div class="inline-assign-control">
-      <select class="assign-job-select" data-assign-job-select="${escapeAttr(tracker.id)}" aria-label="Assign job to ${escapeAttr(getTrackerName(tracker))}">
+      <select class="assign-job-select" data-assign-job-select="${escapeAttr(tracker.id)}" data-job-options-pending="true" aria-label="Assign job to ${escapeAttr(getTrackerName(tracker))}">
         ${options}
       </select>
       <div class="inline-assign-actions">
@@ -16383,11 +16440,12 @@ This removes it from the job documents list.`)) return;
 
 
 /* ========================================================================
-   FINAL TIMESHEET JOB FOLDERS + EDIT PATCH
+   FINAL TIMESHEET WEEK + JOB FOLDERS + EDIT PATCH
    ------------------------------------------------------------------------
-   - The Saved Timesheets table now condenses all sheets for the same job into
-     one folder row.
-   - Opening a folder shows the daily sheets for that job.
+   - The Saved Timesheets list is a folder tree: one card per work week,
+     and inside it one card per job holding that week's daily sheets and
+     uploaded timesheet PDFs. (Uploads are added by the "TIMESHEETS: WEEKLY
+     PDF UPLOADS" module at the end of this file.)
    - Edit loads a saved daily sheet back into the timesheet form; saving it
      replaces the old rows for that same timesheet group.
    ======================================================================== */
@@ -16550,69 +16608,158 @@ This removes it from the job documents list.`)) return;
     return daily.jobId || `job-number:${daily.jobNumber || "unassigned"}`;
   }
 
-  function savedTimesheetJobFolders() {
-    const folders = new Map();
-    savedDailyTimesheetGroups().forEach((daily) => {
-      const key = jobFolderKey(daily);
-      if (!folders.has(key)) {
-        folders.set(key, {
-          id: key,
-          job: daily.job,
-          jobId: daily.jobId,
-          jobNumber: daily.jobNumber,
-          jobName: daily.jobName,
-          customer: daily.customer,
-          location: daily.location,
-          dailySheets: []
-        });
-      }
+  /* --- Week folders ---------------------------------------------------------
+     Weeks run Monday–Sunday, so a Saturday or Sunday shift is filed with the
+     work week it follows. A PDF uploaded on this page carries its week in its
+     external_id ("timesheet-week:<monday>:..."); any other timesheet file
+     (e.g. one uploaded from Job Details) is filed under the week it was
+     uploaded, since that is the only date it has. */
+  const WEEK_STARTS_ON = 1; // 0 = Sunday, 1 = Monday
+  const WEEK_UPLOAD_TAG = "timesheet-week:";
 
-      const folder = folders.get(key);
-      folder.dailySheets.push(daily);
-      folder.job = folder.job || daily.job;
-      folder.jobNumber = folder.jobNumber || daily.jobNumber;
-      folder.jobName = folder.jobName || daily.jobName;
-      folder.customer = folder.customer || daily.customer;
-      folder.location = folder.location || daily.location;
+  function localDay(value) {
+    if (!value) return null;
+    const plain = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+    // Date-only strings are read as local dates; new Date("2026-09-28") would
+    // be midnight UTC, which is the previous evening in Texas.
+    const date = plain ? new Date(Number(plain[1]), Number(plain[2]) - 1, Number(plain[3])) : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function isoDay(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  function weekStartOf(value) {
+    const date = localDay(value);
+    if (!date) return "";
+    date.setDate(date.getDate() - ((date.getDay() - WEEK_STARTS_ON + 7) % 7));
+    return isoDay(date);
+  }
+
+  function weekLabel(weekStart) {
+    const start = localDay(weekStart);
+    if (!start) return "No date";
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+    const startOptions = start.getFullYear() === end.getFullYear()
+      ? { month: "short", day: "numeric" }
+      : { month: "short", day: "numeric", year: "numeric" };
+    return `${start.toLocaleDateString("en-US", startOptions)} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+  }
+
+  function isTimesheetUpload(doc) {
+    return String(doc?.external_id || "").startsWith(WEEK_UPLOAD_TAG)
+      || /timesheet|time sheet|timecard|time card/i.test(`${doc?.document_type || ""} ${doc?.file_name || ""} ${doc?.original_file_name || ""}`);
+  }
+
+  function uploadWeekStart(doc) {
+    const externalId = String(doc?.external_id || "");
+    if (externalId.startsWith(WEEK_UPLOAD_TAG)) {
+      const tagged = weekStartOf(externalId.slice(WEEK_UPLOAD_TAG.length, WEEK_UPLOAD_TAG.length + 10));
+      if (tagged) return tagged;
+    }
+    return weekStartOf(doc?.created_at || doc?.uploaded_at || doc?.last_synced_at);
+  }
+
+  // Opens a week (and one job folder in it), so a just-uploaded file is in view.
+  function openWeekFolders(weekStart, jobId) {
+    if (!weekStart) return;
+    expandedFolders.add(`week:${weekStart}`);
+    if (jobId) expandedFolders.add(`week:${weekStart}|${jobId}`);
+  }
+
+  window.PIMP_timesheetWeeks = { WEEK_UPLOAD_TAG, weekStartOf, weekLabel, openWeekFolders };
+
+  function uploadName(doc) {
+    return doc?.file_name || doc?.original_file_name || "Uploaded timesheet";
+  }
+
+  function newJobFolder(id, seed) {
+    return {
+      id,
+      job: seed.job || null,
+      jobId: seed.jobId || "",
+      jobNumber: seed.jobNumber || "",
+      jobName: seed.jobName || "",
+      customer: seed.customer || "",
+      location: seed.location || "",
+      dailySheets: [],
+      uploads: []
+    };
+  }
+
+  // Totals and sort order for a week built from its job folders and job-less
+  // uploads — also used to re-total a week narrowed by search. Sheets run in
+  // calendar order (Mon → Sun) inside their week.
+  function summarizeWeek(week, jobFolders, uploads) {
+    const folders = jobFolders.map((folder) => ({
+      ...folder,
+      dailySheets: [...folder.dailySheets].sort((a, b) => String(a.date || "").localeCompare(String(b.date || ""))),
+      totalHours: folder.dailySheets.reduce((sum, daily) => sum + n(daily.totalHours), 0)
+    })).sort((a, b) => {
+      if (!a.jobNumber !== !b.jobNumber) return a.jobNumber ? -1 : 1; // unassigned last
+      return String(a.jobNumber).localeCompare(String(b.jobNumber), undefined, { numeric: true });
+    });
+    return {
+      ...week,
+      jobFolders: folders,
+      uploads,
+      sheetCount: folders.reduce((sum, folder) => sum + folder.dailySheets.length, 0),
+      uploadCount: uploads.length + folders.reduce((sum, folder) => sum + folder.uploads.length, 0),
+      totalHours: folders.reduce((sum, folder) => sum + folder.totalHours, 0)
+    };
+  }
+
+  function savedTimesheetWeekFolders() {
+    const weeks = new Map();
+    const weekFor = (weekStart) => {
+      const key = weekStart || "undated";
+      if (!weeks.has(key)) weeks.set(key, { id: `week:${key}`, weekStart, jobFolders: new Map(), uploads: [] });
+      return weeks.get(key);
+    };
+    const jobFolderFor = (week, key, seed) => {
+      if (!week.jobFolders.has(key)) week.jobFolders.set(key, newJobFolder(`${week.id}|${key}`, seed));
+      const folder = week.jobFolders.get(key);
+      ["job", "jobId", "jobNumber", "jobName", "customer", "location"].forEach((field) => {
+        if (!folder[field] && seed[field]) folder[field] = seed[field];
+      });
+      return folder;
+    };
+
+    savedDailyTimesheetGroups().forEach((daily) => {
+      jobFolderFor(weekFor(weekStartOf(daily.date)), jobFolderKey(daily), daily).dailySheets.push(daily);
     });
 
-    return Array.from(folders.values()).map((folder) => {
-      const dates = folder.dailySheets.map((daily) => daily.date).filter(Boolean).sort();
-      const totalHours = folder.dailySheets.reduce((sum, daily) => sum + n(daily.totalHours), 0);
-      const employeeCount = folder.dailySheets.reduce((sum, daily) => sum + n(daily.employeeCount), 0);
-      const latest = [...folder.dailySheets].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0] || {};
-      return {
-        ...folder,
-        dateStart: dates[0] || "",
-        dateEnd: dates[dates.length - 1] || "",
-        totalHours,
-        employeeCount,
-        latestTicket: latest.ticket || "",
-        latestDate: latest.date || ""
-      };
-    }).sort((a, b) => String(b.latestDate || "").localeCompare(String(a.latestDate || "")));
+    (state.data.documents || []).filter(isTimesheetUpload).forEach((doc) => {
+      const week = weekFor(uploadWeekStart(doc));
+      if (!doc.job_id) {
+        week.uploads.push(doc);
+        return;
+      }
+      const job = findJobSafe(doc.job_id);
+      jobFolderFor(week, doc.job_id, {
+        job,
+        jobId: doc.job_id,
+        jobNumber: job?.job_number,
+        jobName: job?.job_name,
+        customer: job?.company_name,
+        location: job?.location
+      }).uploads.push(doc);
+    });
+
+    return Array.from(weeks.values())
+      .map((week) => summarizeWeek(week, Array.from(week.jobFolders.values()), week.uploads))
+      .sort((a, b) => {
+        if (!a.weekStart !== !b.weekStart) return a.weekStart ? -1 : 1; // undated last
+        return String(b.weekStart).localeCompare(String(a.weekStart));
+      });
   }
 
-  function folderDateRange(folder) {
-    if (!folder.dateStart && !folder.dateEnd) return "-";
-    if (folder.dateStart === folder.dateEnd) return fmtDate(folder.dateStart);
-    return `${fmtDate(folder.dateStart)} to ${fmtDate(folder.dateEnd)}`;
-  }
-
-  function folderMatchesSearch(folder, term) {
-    if (!term) return true;
-    const folderText = [
-      folder.jobNumber,
-      folder.jobName,
-      folder.customer,
-      folder.location,
-      folder.latestTicket,
-      folderDateRange(folder)
-    ].join(" ").toLowerCase();
-    if (folderText.includes(term)) return true;
-
-    return folder.dailySheets.some((daily) => [
+  function dailySearchText(daily) {
+    return [
       daily.date,
+      fmtDate(daily.date),
       daily.customer,
       daily.jobNumber,
       daily.jobName,
@@ -16620,73 +16767,195 @@ This removes it from the job documents list.`)) return;
       daily.ticket,
       daily.description,
       daily.lines.map((line) => `${line.employee_name} ${line.classification} ${line.notes}`).join(" ")
-    ].join(" ").toLowerCase().includes(term));
+    ].join(" ").toLowerCase();
   }
 
-  function normalizeTimesheetHeader() {
-    const headerRow = qs(".timesheets-table thead tr");
-    if (!headerRow) return;
-    headerRow.innerHTML = `
-      <th>Folder / Date</th>
-      <th>Customer</th>
-      <th>Job / Dates</th>
-      <th>Location</th>
-      <th>Timesheets / Employees</th>
-      <th>Total Hours</th>
-      <th>Actions</th>
+  function jobFolderSearchText(folder) {
+    return [folder.jobNumber, folder.jobName, folder.customer, folder.location].join(" ").toLowerCase();
+  }
+
+  // Keeps only what matches: a matching week label keeps the whole week, a
+  // matching job keeps its whole folder, otherwise just the matching sheets
+  // and files (with their folders around them).
+  function weekMatchingSearch(week, term) {
+    if (!term || weekLabel(week.weekStart).toLowerCase().includes(term)) return week;
+    const jobFolders = week.jobFolders.map((folder) => {
+      if (jobFolderSearchText(folder).includes(term)) return folder;
+      return {
+        ...folder,
+        dailySheets: folder.dailySheets.filter((daily) => dailySearchText(daily).includes(term)),
+        uploads: folder.uploads.filter((doc) => uploadName(doc).toLowerCase().includes(term))
+      };
+    }).filter((folder) => folder.dailySheets.length || folder.uploads.length);
+    const uploads = week.uploads.filter((doc) => uploadName(doc).toLowerCase().includes(term));
+    return jobFolders.length || uploads.length ? summarizeWeek(week, jobFolders, uploads) : null;
+  }
+
+  function plural(count, word) {
+    return `${cleanNum(count)} ${word}${n(count) === 1 ? "" : "s"}`;
+  }
+
+  // "3 sheets · 1 PDF" — whichever of the two a folder actually holds.
+  function contentsText(sheetCount, uploadCount) {
+    const parts = [];
+    if (sheetCount || !uploadCount) parts.push(plural(sheetCount, "sheet"));
+    if (uploadCount) parts.push(plural(uploadCount, "PDF"));
+    return parts.join(" · ");
+  }
+
+  // "008-26, 012-26 +2 more" for the jobs in a week.
+  function listSummary(values, max = 3) {
+    const unique = Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+    return unique.length > max ? `${unique.slice(0, max).join(", ")} +${unique.length - max} more` : unique.join(", ");
+  }
+
+  function dayLabel(value) {
+    const date = localDay(value);
+    return date ? date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "No date";
+  }
+
+  function fileSizeText(bytes) {
+    const size = n(bytes);
+    if (!size) return "";
+    return size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  /* --- Folder cards -----------------------------------------------------------
+     Weeks are cards with a blue title bar; the job folders inside an open week
+     are white cards with a blue edge; an open job lists its sheets and PDFs.
+     A folder's whole title bar is its open/close button. The action buttons
+     sit beside it rather than inside it, so each stays its own button. */
+  function folderHead(folderId, isOpen, { icon, title, subtitle, hours }, actions) {
+    return `
+      <div class="ts-head">
+        <button class="ts-toggle" data-toggle-timesheet-folder="${escAttr(folderId)}" aria-expanded="${isOpen ? "true" : "false"}" type="button">
+          <span class="ts-icon" aria-hidden="true">${icon}</span>
+          <span class="ts-title"><strong>${esc(title)}</strong><small>${esc(subtitle)}</small></span>
+          <span class="ts-hours"><strong>${cleanNum(hours)}</strong><small>${n(hours) === 1 ? "hour" : "hours"}</small></span>
+          <span class="ts-chevron" aria-hidden="true"></span>
+        </button>
+        ${actions ? `<div class="ts-head-actions table-actions">${actions}</div>` : ""}
+      </div>
     `;
   }
 
-  window.renderTimesheets = function renderTimesheetsAsJobFolders() {
-    const table = qs("#timesheetsTable");
+  function sheetItemHtml(daily) {
+    const details = [plural(daily.employeeCount, "employee"), plural(daily.totalHours, "hour")];
+    if (daily.ticket) details.push(`Ticket ${daily.ticket}`);
+    return `
+      <div class="ts-item">
+        <span class="ts-item-icon" aria-hidden="true">📝</span>
+        <span class="ts-item-main"><strong>${esc(dayLabel(daily.date))}</strong><small>${esc(details.join(" · "))}</small></span>
+        <span class="ts-item-actions table-actions">
+          <button class="link-btn" data-edit-timesheet-daily="${escAttr(daily.id)}" type="button">Edit</button>
+          <button class="link-btn" data-view-timesheet-daily="${escAttr(daily.id)}" type="button">View</button>
+          <button class="link-btn" data-download-timesheet-daily="${escAttr(daily.id)}" type="button">Download</button>
+          <button class="link-btn danger-text" data-delete-timesheet-daily="${escAttr(daily.id)}" type="button">Delete</button>
+        </span>
+      </div>
+    `;
+  }
+
+  // Open / Download / Delete are the shared uploaded-document handlers.
+  function fileItemHtml(doc) {
+    const docKey = doc.id || doc.external_id || "";
+    const uploaded = localDay(doc.created_at || doc.uploaded_at || doc.last_synced_at);
+    const details = ["PDF", fileSizeText(doc.file_size), uploaded ? `Uploaded ${dayLabel(isoDay(uploaded))}` : ""].filter(Boolean);
+    return `
+      <div class="ts-item">
+        <span class="ts-item-icon" aria-hidden="true">📄</span>
+        <span class="ts-item-main"><strong>${esc(uploadName(doc))}</strong><small>${esc(details.join(" · "))}</small></span>
+        <span class="ts-item-actions table-actions">
+          <button class="link-btn" data-open-uploaded-doc="${escAttr(docKey)}" type="button">Open</button>
+          <button class="link-btn" data-download-uploaded-doc="${escAttr(docKey)}" type="button">Download</button>
+          <button class="link-btn danger-text" data-delete-type="documents" data-delete-id="${escAttr(docKey)}" type="button">Delete</button>
+        </span>
+      </div>
+    `;
+  }
+
+  function itemGroupHtml(label, items) {
+    return items.length ? `<div class="ts-items"><p class="ts-items-label">${esc(label)}</p>${items.join("")}</div>` : "";
+  }
+
+  function jobFolderHtml(folder, week, forceOpen) {
+    const isOpen = forceOpen || expandedFolders.has(folder.id);
+    const title = [folder.jobNumber || "Unassigned job", folder.jobName].filter(Boolean).join(" — ");
+    const subtitle = [folder.customer, folder.location, contentsText(folder.dailySheets.length, folder.uploads.length)].filter(Boolean).join(" · ");
+    const actions = [
+      folder.jobId ? `<button class="link-btn" data-new-timesheet-for-job="${escAttr(folder.jobId)}" type="button">New Sheet</button>` : "",
+      week.weekStart ? `<button class="link-btn" data-upload-timesheet-week="${escAttr(week.weekStart)}" data-upload-timesheet-job="${escAttr(folder.jobId)}" type="button">Upload PDF</button>` : ""
+    ].join("");
+    const body = isOpen ? `
+      <div class="ts-job-body">
+        ${itemGroupHtml(`Daily sheets (${folder.dailySheets.length})`, folder.dailySheets.map(sheetItemHtml))}
+        ${itemGroupHtml(`Uploaded PDFs (${folder.uploads.length})`, folder.uploads.map(fileItemHtml))}
+      </div>
+    ` : "";
+    return `
+      <article class="ts-job${isOpen ? " is-open" : ""}">
+        ${folderHead(folder.id, isOpen, { icon: "📁", title, subtitle, hours: folder.totalHours }, actions)}
+        ${body}
+      </article>
+    `;
+  }
+
+  function weekFolderHtml(week, forceOpen) {
+    const isOpen = forceOpen || expandedFolders.has(week.id);
+    const jobs = week.jobFolders;
+    const jobNumbers = listSummary(jobs.map((folder) => folder.jobNumber));
+    const subtitle = [
+      jobs.length ? `${plural(jobs.length, "job")}${jobNumbers ? ` (${jobNumbers})` : ""}` : "",
+      contentsText(week.sheetCount, week.uploadCount)
+    ].filter(Boolean).join(" · ");
+    const actions = week.weekStart
+      ? `<button class="link-btn" data-upload-timesheet-week="${escAttr(week.weekStart)}" type="button">Upload PDF</button>`
+      : "";
+    const wholeWeekFiles = week.uploads.length
+      ? `<div class="ts-week-files">${itemGroupHtml(`PDFs for the whole week, no job (${week.uploads.length})`, week.uploads.map(fileItemHtml))}</div>`
+      : "";
+    const body = isOpen
+      ? `<div class="ts-week-body">${jobs.map((folder) => jobFolderHtml(folder, week, forceOpen)).join("")}${wholeWeekFiles}</div>`
+      : "";
+    return `
+      <section class="ts-week${isOpen ? " is-open" : ""}">
+        ${folderHead(week.id, isOpen, { icon: "🗓️", title: week.weekStart ? `Week of ${weekLabel(week.weekStart)}` : "No date", subtitle, hours: week.totalHours }, actions)}
+        ${body}
+      </section>
+    `;
+  }
+
+  // The newest week starts open so this week's sheets are one click away;
+  // after that, weeks stay however the user left them.
+  let newestWeekOpened = false;
+
+  window.renderTimesheets = function renderTimesheetsAsWeekFolders() {
+    const list = qs("#timesheetsTable");
     const count = qs("#timesheetsCount");
-    if (!table || !count) return;
+    if (!list || !count) return;
 
-    normalizeTimesheetHeader();
     const term = currentTimesheetSearchTerm();
-    const folders = savedTimesheetJobFolders().filter((folder) => folderMatchesSearch(folder, term));
-    count.textContent = folders.length;
+    const weeks = savedTimesheetWeekFolders();
+    if (!newestWeekOpened && weeks.length) {
+      expandedFolders.add(weeks[0].id);
+      newestWeekOpened = true;
+    }
 
-    table.innerHTML = folders.map((folder) => {
-      const isOpen = expandedFolders.has(folder.id) || Boolean(term);
-      const dailyRows = isOpen ? folder.dailySheets.map((daily) => `
-        <tr class="timesheet-folder-child-row">
-          <td data-label="Date"><span class="timesheet-child-arrow">↳</span>${fmtDate(daily.date)}</td>
-          <td data-label="Customer">${esc(daily.customer || folder.customer || "-")}</td>
-          <td data-label="Job">${esc(daily.jobNumber || folder.jobNumber || "-")}<br><span class="muted">${esc(daily.jobName || folder.jobName || "Daily sheet")}</span></td>
-          <td data-label="Location">${esc(daily.location || folder.location || "-")}</td>
-          <td data-label="Employees" class="money-cell">${cleanNum(daily.employeeCount)}</td>
-          <td data-label="Total Hours" class="money-cell">${cleanNum(daily.totalHours)}</td>
-          <td data-label="Actions" class="table-actions timesheet-child-actions">
-            <button class="link-btn" data-edit-timesheet-daily="${escAttr(daily.id)}" type="button">Edit</button>
-            <button class="link-btn" data-view-timesheet-daily="${escAttr(daily.id)}" type="button">View</button>
-            <button class="link-btn" data-download-timesheet-daily="${escAttr(daily.id)}" type="button">Download</button>
-            <button class="link-btn danger-text" data-delete-timesheet-daily="${escAttr(daily.id)}" type="button">Delete</button>
-          </td>
-        </tr>
-      `).join("") : "";
+    const shown = weeks.map((week) => weekMatchingSearch(week, term)).filter(Boolean);
+    count.textContent = shown.length;
+    count.title = `${plural(shown.length, "week")} · ${plural(shown.reduce((sum, week) => sum + week.sheetCount, 0), "sheet")} · ${plural(shown.reduce((sum, week) => sum + week.uploadCount, 0), "PDF")}`;
 
-      const label = folder.jobNumber || "Unassigned Job";
-      const openText = isOpen ? "Close timesheets" : "Open timesheets";
-      return `
-        <tr class="timesheet-folder-row">
-          <td data-label="Folder / Date" class="title-cell">
-            <strong><span class="timesheet-folder-icon">📁</span>${esc(label)}</strong>
-            <br><span class="muted">${esc(folder.jobName || "Timesheet folder")}</span>
-          </td>
-          <td data-label="Customer">${esc(folder.customer || "-")}</td>
-          <td data-label="Job / Dates">${esc(folder.jobNumber || "-")}<br><span class="muted">${folderDateRange(folder)}</span></td>
-          <td data-label="Location">${esc(folder.location || "-")}</td>
-          <td data-label="Timesheets / Employees" class="money-cell">${folder.dailySheets.length} sheet${folder.dailySheets.length === 1 ? "" : "s"}<br><span class="muted">${cleanNum(folder.employeeCount)} employee line${folder.employeeCount === 1 ? "" : "s"}</span></td>
-          <td data-label="Total Hours" class="money-cell total-money">${cleanNum(folder.totalHours)}</td>
-          <td data-label="Actions" class="table-actions timesheet-folder-actions">
-            <button class="link-btn" data-toggle-timesheet-folder="${escAttr(folder.id)}" type="button">${openText}</button>
-            ${folder.jobId ? `<button class="link-btn" data-new-timesheet-for-job="${escAttr(folder.jobId)}" type="button">New Sheet</button>` : ""}
-          </td>
-        </tr>
-        ${dailyRows}
-      `;
-    }).join("") || (typeof emptyRow === "function" ? emptyRow(7) : '<tr><td colspan="7" class="muted">No records found.</td></tr>');
+    // Redrawing replaces every folder button; keep keyboard focus on the one
+    // that was just used to open or close a folder.
+    const focusedFolder = document.activeElement?.closest?.("#timesheetsTable [data-toggle-timesheet-folder]")?.dataset.toggleTimesheetFolder;
+
+    // Searching opens every folder that has a match.
+    list.innerHTML = shown.map((week) => weekFolderHtml(week, Boolean(term))).join("")
+      || `<p class="ts-empty">${term ? "No timesheets match this search." : "No timesheets yet. Save a daily sheet above, or upload a timesheet PDF for a week."}</p>`;
+
+    if (focusedFolder) {
+      qsa("[data-toggle-timesheet-folder]", list).find((button) => button.dataset.toggleTimesheetFolder === focusedFolder)?.focus();
+    }
   };
   try { renderTimesheets = window.renderTimesheets; } catch {}
 
@@ -17012,7 +17281,6 @@ This removes it from the job documents list.`)) return;
   }
 
   function bindTimesheetFolderPatch() {
-    normalizeTimesheetHeader();
     setTimesheetSubmitMode(Boolean(getField("timesheet_group_id")));
     try { window.renderTimesheets(); } catch {}
   }
@@ -18133,21 +18401,6 @@ This removes it from the job documents list.`)) return;
     `;
   }
 
-  function jobSummaryChips(job) {
-    const docs = uploadedDocsForJob(job.id);
-    const trackers = (state?.data?.costTrackers || []).filter((row) => row.job_id === job.id).length + docs.filter((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
-    const invoices = (state?.data?.invoices || []).filter((row) => row.job_id === job.id).length + docs.filter((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
-    const timesheets = groupTimesheetsForJob(job.id).length + docs.filter((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`)).length;
-    return `
-      <div class="job-document-chip-row">
-        <span class="job-doc-chip ${trackers ? "made" : "missing"}">Cost ${trackers ? "✓" : "—"}</span>
-        <span class="job-doc-chip ${invoices ? "made" : "missing"}">Invoice ${invoices ? "✓" : "—"}</span>
-        <span class="job-doc-chip ${timesheets ? "made" : "missing"}">Timesheets ${timesheets || "—"}</span>
-        <span class="job-doc-chip ${docs.length ? "made" : "missing"}">Files ${docs.length || "—"}</span>
-      </div>
-    `;
-  }
-
   function timesheetList(groups, jobId = "") {
     const list = Array.isArray(groups) ? groups : [];
     if (!list.length) {
@@ -18420,29 +18673,9 @@ ${docs.length ? `
   }
 
   function renderJobsAsModalRows() {
-    const rows = typeof filtered === "function"
-      ? filtered(state?.data?.jobs || [], ["job_number", "job_name", "company_name", "location", "status"])
-      : (state?.data?.jobs || []);
-    const count = qs("#jobsCount");
-    const table = qs("#jobsTable");
-    if (count) count.textContent = rows.length;
-    if (!table) return;
-    window.__pimpExpandedJobId = null;
-    table.innerHTML = rows.map((job) => `
-      <tr class="job-main-row" data-job-row-id="${safeAttr(job.id)}">
-        <td data-label="Job #"><strong>${safeHtml(job.job_number || "-")}</strong><br><button class="link-btn job-row-open-btn" data-open-job-details-modal="${safeAttr(job.id)}" type="button">View Details</button></td>
-        <td data-label="Project Name">${safeHtml(job.job_name || "-")}${jobSummaryChips(job)}</td>
-        <td data-label="Company">${safeHtml(job.company_name || "-")}</td>
-        <td data-label="Location">${safeHtml(job.location || "-")}</td>
-        <td data-label="Status"><span class="status ${safeAttr(job.status || "")}">${safeHtml(job.status || "unknown")}</span></td>
-        <td data-label="Dates">${safeHtml(safeDate(job.start_date))}${job.end_date && job.end_date !== job.start_date ? ` to ${safeHtml(safeDate(job.end_date))}` : ""}</td>
-        <td data-label="Files"><button class="link-btn" data-open-job-details-modal="${safeAttr(job.id)}" type="button">View Job Documents</button></td>
-        <td data-label="Actions" class="actions-cell">
-          <button class="link-btn" data-edit-job="${safeAttr(job.id)}" type="button">Edit</button>
-          <button class="link-btn danger-text" data-delete-type="jobs" data-delete-id="${safeAttr(job.id)}" type="button">Delete</button>
-        </td>
-      </tr>
-    `).join("") || (typeof emptyRow === "function" ? emptyRow(8) : '<tr><td colspan="8" class="muted">No records found.</td></tr>');
+    /* optimized: superseded by renderClosedJobsFinal (the live Closed Jobs renderer).
+       No-op so legacy triggers don't rebuild the table with this old design —
+       it listed every job, open ones included, in the old 8-column layout. */
   }
 
   window.renderJobs = renderJobsAsModalRows;
@@ -18562,7 +18795,11 @@ ${docs.length ? `
     TEMPLATE_OVERLAY_SELECTORS.forEach((selector) => {
       const overlay = qs(selector);
       if (!overlay) return;
-      overlay.classList.add("template-modal-detached-over-job-details");
+      // This runs on every DOM change, and re-adding a class the element
+      // already has still counts as one, so only add it when it is missing.
+      if (!overlay.classList.contains("template-modal-detached-over-job-details")) {
+        overlay.classList.add("template-modal-detached-over-job-details");
+      }
       if (overlay.parentElement !== document.body) {
         document.body.appendChild(overlay);
       }
@@ -20175,9 +20412,10 @@ ${docs.length ? `
 /* ========================================================================
    ABSOLUTE FINAL JOB EDIT WORKDAYS + PROFESSIONAL JOB TABLE PATCH
    ------------------------------------------------------------------------
-   - Editing a job always recalculates Total Days as weekdays/workdays only.
-   - Saturdays and Sundays are never counted in the job form, job table,
-     or Cost Tracker Total Days.
+   - Editing a job always recalculates Total Days as workdays.
+   - Saturdays and Sundays are only counted when the job includes them
+     (jobs.weekend_days) — in the job form, job table, and Cost Tracker
+     Total Days alike. This is the one place that count is defined.
    - Keeps job row navigation intact while action buttons work independently.
    ======================================================================== */
 (function installJobEditWorkdaysAndProfessionalTableFinalPatch() {
@@ -20245,11 +20483,36 @@ ${docs.length ? `
     return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
   }
 
-  function countWorkdays(startValue, endValue) {
+  // Weekend days a job works, from jobs.weekend_days (see the job weekend-days
+  // module at the end of this file): null = weekdays only, { mode: "all" } =
+  // every Saturday and Sunday, { mode: "custom", dates: [...] } = just those.
+  function parseWeekendDays(value) {
+    if (!value) return null;
+    let parsed = value;
+    if (typeof value === "string") {
+      try { parsed = JSON.parse(value); } catch { return null; }
+    }
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.mode === "all") return { mode: "all" };
+    if (parsed.mode === "custom" && Array.isArray(parsed.dates)) {
+      return { mode: "custom", dates: parsed.dates.map(String) };
+    }
+    return null;
+  }
+
+  function isoDate(date) {
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${date.getFullYear()}-${month}-${day}`;
+  }
+
+  function countWorkdays(startValue, endValue, weekendDaysValue = null) {
     const start = parseLocalDate(startValue);
     const end = parseLocalDate(endValue || startValue);
     if (!start || !end) return 0;
 
+    const weekendDays = parseWeekendDays(weekendDaysValue);
+    const pickedWeekendDates = new Set(weekendDays?.mode === "custom" ? weekendDays.dates : []);
     const step = start <= end ? 1 : -1;
     const cursor = new Date(start.getTime());
     let total = 0;
@@ -20257,20 +20520,37 @@ ${docs.length ? `
     while ((step > 0 && cursor <= end) || (step < 0 && cursor >= end)) {
       const day = cursor.getDay();
       if (day !== 0 && day !== 6) total += 1;
+      else if (weekendDays?.mode === "all" || pickedWeekendDates.has(isoDate(cursor))) total += 1;
       cursor.setDate(cursor.getDate() + step);
     }
 
     return total;
   }
 
-  window.calculateJobDays = function calculateJobDaysWorkdaysFinal(startDate, endDate) {
-    return countWorkdays(startDate, endDate);
+  // What gets saved: custom picks trimmed to weekend dates inside the job's
+  // range, and an empty pick stored as null (weekdays only).
+  function weekendDaysForRange(value, startValue, endValue) {
+    const weekendDays = parseWeekendDays(value);
+    if (weekendDays?.mode !== "custom") return weekendDays;
+    const bounds = [String(startValue || ""), String(endValue || startValue || "")].sort();
+    const dates = Array.from(new Set(weekendDays.dates))
+      .filter((date) => {
+        const day = parseLocalDate(date)?.getDay();
+        return (day === 0 || day === 6) && date >= bounds[0] && date <= bounds[1];
+      })
+      .sort();
+    return dates.length ? { mode: "custom", dates } : null;
+  }
+
+  window.calculateJobDays = function calculateJobDaysWorkdaysFinal(startDate, endDate, weekendDays = null) {
+    return countWorkdays(startDate, endDate, weekendDays);
   };
   try { calculateJobDays = window.calculateJobDays; } catch {}
+  window.PIMP_parseJobWeekendDays = parseWeekendDays;
 
   function workdaysForJob(job) {
     if (!job) return 0;
-    const calculated = countWorkdays(job.start_date, job.end_date || job.start_date);
+    const calculated = countWorkdays(job.start_date, job.end_date || job.start_date, job.weekend_days);
     return calculated || asNumber(job.total_job_days);
   }
 
@@ -20281,16 +20561,22 @@ ${docs.length ? `
     if (field) field.value = value ?? "";
   }
 
-  function syncJobFormWorkdays(form = qs("#jobForm")) {
+  // bindEvents also registers this directly as the date inputs' listener, so
+  // the argument can be an input Event rather than the form.
+  function syncJobFormWorkdays(formArg) {
+    const form = typeof formArg?.querySelector === "function" ? formArg : qs("#jobForm");
     if (!form) return 0;
     const start = form.querySelector('[name="start_date"]')?.value || "";
     const end = form.querySelector('[name="end_date"]')?.value || start;
-    const total = countWorkdays(start, end);
+    const weekendDays = form.querySelector('[name="weekend_days"]')?.value || null;
+    const total = countWorkdays(start, end, weekendDays);
     setFormField(form, "total_job_days", total || "");
     const field = form.querySelector('[name="total_job_days"]');
     if (field) {
       field.readOnly = true;
-      field.title = "Auto-calculated total workdays. Saturdays and Sundays are not counted.";
+      field.title = parseWeekendDays(weekendDays)
+        ? "Auto-calculated total workdays, including the weekend days chosen below."
+        : "Auto-calculated total workdays. Saturdays and Sundays are not counted.";
     }
     return total;
   }
@@ -20316,7 +20602,7 @@ ${docs.length ? `
     const field = form.querySelector('[name="total_job_days"]');
     if (field) {
       field.value = total || "";
-      field.title = "Matches the selected job's total workdays. Weekends are not counted.";
+      field.title = "Matches the selected job's total workdays, including any weekend days the job works.";
     }
     return total;
   }
@@ -20344,12 +20630,14 @@ ${docs.length ? `
     const wrappedBuildJobPayload = function buildJobPayloadWorkdaysEditFinal(values, client) {
       const start = values?.start_date || "";
       const end = values?.end_date || start;
-      const total = countWorkdays(start, end);
+      const weekendDays = weekendDaysForRange(values?.weekend_days, start, end);
+      const total = countWorkdays(start, end, weekendDays);
       const nextValues = { ...(values || {}), total_job_days: total || "" };
       const payload = previousBuildJobPayload.call(this, nextValues, client) || {};
       payload.start_date = start || null;
       payload.end_date = end || null;
       payload.total_job_days = total || null;
+      payload.weekend_days = weekendDays;
       return payload;
     };
     wrappedBuildJobPayload.__workdaysEditFinalWrapped = true;
@@ -22816,38 +23104,10 @@ ${docs.length ? `
     refreshDashboardDataWhenUserReturns.running = true;
 
     try {
-      const [
-        clients,
-        jobs,
-        costTrackers,
-        invoices,
-        employees,
-        assignments,
-        timesheets,
-        documents
-      ] = await Promise.all([
-        selectTable("clients", "*", "company_name", true),
-        selectTable("jobs", "*", "last_synced_at", false),
-        selectTable("cost_trackers", "*", "last_synced_at", false),
-        selectTable("invoices", "*", "invoice_date", false),
-        selectTable("employees", "*", "full_name", true),
-        selectTable("job_assignments", "*", "created_at", false),
-        selectTable("timesheets", "*", "work_date", false),
-        selectTable("documents", "*", "last_synced_at", false)
-      ]);
-
-      state.data.clients = clients || [];
-      state.data.jobs = jobs || [];
-      state.data.costTrackers = costTrackers || [];
-      state.data.invoices = invoices || [];
-      state.data.employees = employees || [];
-      state.data.assignments = assignments || [];
-      state.data.timesheets = timesheets || [];
-      state.data.documents = documents || [];
-
-      if (typeof hydrateSelects === "function") hydrateSelects();
+      // Through the shared loader, which renders when done and merges this
+      // with any load already running instead of downloading everything twice.
+      if (typeof loadAllData === "function") await loadAllData({ silent: true });
       normalizeInvoiceFormStatusSelect();
-      if (typeof renderAll === "function") renderAll();
 
       window.PIMP_LAST_AUTO_REFRESH_AT = Date.now();
       window.PIMP_LAST_AUTO_REFRESH_REASON = reason;
@@ -22866,8 +23126,10 @@ ${docs.length ? `
     if (document.visibilityState && document.visibilityState !== "visible") return;
 
     // Throttle: switching tabs quickly should not trigger a full reload+render
-    // every time. Only auto-refresh if it has been a while since the last one.
-    const lastAt = Number(window.PIMP_LAST_AUTO_REFRESH_AT || 0);
+    // every time. Only auto-refresh if it has been a while since the data was
+    // last loaded — by this refresh or by any other full load, including the
+    // one sign-in starts (which is why startup no longer loads everything twice).
+    const lastAt = Math.max(Number(window.PIMP_LAST_AUTO_REFRESH_AT || 0), Number(window.PIMP_LAST_FULL_LOAD_AT || 0));
     if (lastAt && Date.now() - lastAt < RETURN_REFRESH_MIN_INTERVAL_MS) return;
 
     window.clearTimeout(requestReturnRefresh.timer);
@@ -23311,8 +23573,10 @@ ${docs.length ? `
     textNode.nodeValue = text;
   }
 
+  // The date inputs sit inside the combined Job Dates field, which moves as one.
   function moveJobField(grid, inputName) {
-    const field = document.querySelector(`#jobForm [name="${inputName}"]`)?.closest("label");
+    const input = document.querySelector(`#jobForm [name="${inputName}"]`);
+    const field = input?.closest(".job-dates-field") || input?.closest("label");
     if (grid && field) grid.appendChild(field);
   }
 
@@ -23330,8 +23594,8 @@ ${docs.length ? `
       "job_name",
       "job_number",
       "tm_afe_mode",
+      "status", // pairs with T&M; the full-width Location and Job Dates follow
       "location",
-      "status",
       "start_date",
       "end_date",
       "total_job_days"
@@ -23551,17 +23815,19 @@ ${docs.length ? `
   function qs(selector, root = document) { return root.querySelector(selector); }
   function qsa(selector, root = document) { return Array.from(root.querySelectorAll(selector)); }
 
+  // Runs after every DOM change, so it only clears cells that have text:
+  // clearing an empty cell again would itself count as a change.
   function blankEquipmentNonCostTotals(root = document) {
     ["#sheetEquipmentQty", "#sheetEquipmentHours", "#sheetEquipmentDays"].forEach((selector) => {
       const cell = qs(selector, root);
-      if (cell) cell.textContent = "";
+      if (cell?.textContent) cell.textContent = "";
     });
 
     qsa(".equipment-table tfoot .total-row", root).forEach((row) => {
       const cells = Array.from(row.children);
       // Columns: label, QTY, HOURS, COST, DAYS, DAY COST, COST TOTAL, HR RATE, DAY RATE, RATE TOTAL, actions
       [1, 2, 4].forEach((index) => {
-        if (cells[index]) cells[index].textContent = "";
+        if (cells[index]?.textContent) cells[index].textContent = "";
       });
     });
   }
@@ -24540,8 +24806,10 @@ ${docs.length ? `
 (function () {
   function qs(selector, root = document) { return root.querySelector(selector); }
 
+  // The date inputs sit inside the combined Job Dates field, which moves as one.
   function moveJobField(grid, inputName) {
-    const field = qs(`#jobForm [name="${inputName}"]`)?.closest("label");
+    const input = qs(`#jobForm [name="${inputName}"]`);
+    const field = input?.closest(".job-dates-field") || input?.closest("label");
     if (grid && field) grid.appendChild(field);
   }
 
@@ -24571,8 +24839,8 @@ ${docs.length ? `
       "job_name",
       "job_number",
       "tm_afe_mode",
+      "status", // pairs with T&M; the full-width Location and Job Dates follow
       "location",
-      "status",
       "start_date",
       "end_date",
       "total_job_days"
@@ -26296,10 +26564,16 @@ ${docs.length ? `
       .join("");
   }
 
+  // Which invoice decides a job's page is defined once, by the Open Jobs
+  // renderer (installNoFlickerOpenJobsAndProjectDatesLock, later in this file),
+  // so a job is always listed on exactly one of the two pages. Before that
+  // renderer has loaded there is no data to show anyway.
   function latestInvoiceForJob(jobId) {
-    return (state?.data?.invoices || [])
-      .filter((invoice) => String(invoice.job_id || "") === String(jobId || ""))
-      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+    return typeof window.PIMP_latestInvoiceForJob === "function" ? window.PIMP_latestInvoiceForJob(jobId) : null;
+  }
+
+  function isClosedJob(job) {
+    return typeof window.PIMP_jobInvoiceSection === "function" && window.PIMP_jobInvoiceSection(job) === "paid";
   }
 
   function latestCostTrackerForJob(jobId) {
@@ -26426,18 +26700,10 @@ ${docs.length ? `
     return terms.join(" ").toLowerCase().includes(term);
   }
 
-  function openJobs() {
-    const term = String(qs("#dashboardActiveJobsSearch")?.value || "").toLowerCase().trim();
-    return (state?.data?.jobs || [])
-      .filter((job) => normalizeInvoiceStatus(latestInvoiceForJob(job.id)?.status) !== "paid")
-      .filter((job) => matchesTerm(job, latestInvoiceForJob(job.id), term))
-      .sort(compareOpenJobs);
-  }
-
   function closedJobs() {
     const term = String(qs("#jobsSearch")?.value || "").toLowerCase().trim();
     return (state?.data?.jobs || [])
-      .filter((job) => normalizeInvoiceStatus(latestInvoiceForJob(job.id)?.status) === "paid")
+      .filter(isClosedJob)
       .filter((job) => matchesTerm(job, latestInvoiceForJob(job.id), term))
       .sort(compareOpenJobs);
   }
@@ -26563,7 +26829,7 @@ ${docs.length ? `
           <td data-label="Rate Total" class="dashboard-rate-total-cell oj-rate-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
         </tr>
       `;
-    }).join("") || `<tr><td colspan="5" class="muted">No closed jobs found.</td></tr>`;
+    }).join("") || `<tr><td colspan="5" class="muted">${window.PIMP_DATA_LOADED ? "No closed jobs found." : "Loading closed jobs…"}</td></tr>`;
 
     // Show the combined total of every closed job's Rate Total to the right of
     // the "Rate Total" header text.
@@ -26823,8 +27089,8 @@ ${docs.length ? `
         card.innerHTML = '<input type="hidden" name="cost_tracker_name" value="" />';
         card.dataset.finalHiddenNameOnly = "true";
       }
-      card.classList.add("hidden");
-      card.setAttribute("aria-hidden", "true");
+      if (!card.classList.contains("hidden")) card.classList.add("hidden");
+      if (card.getAttribute("aria-hidden") !== "true") card.setAttribute("aria-hidden", "true");
       hidden = qs('input[name="cost_tracker_name"]', card);
     }
 
@@ -26835,8 +27101,8 @@ ${docs.length ? `
       form.prepend(hidden);
     }
 
-    hidden.type = "hidden";
-    hidden.required = false;
+    if (hidden.type !== "hidden") hidden.type = "hidden";
+    if (hidden.required) hidden.required = false;
     if (!hidden.value) hidden.value = text(existingValue) || trackerNameForJob(selectedCostTrackerJob());
     return hidden;
   }
@@ -26846,9 +27112,9 @@ ${docs.length ? `
     if (!hidden) return;
     const job = selectedCostTrackerJob();
     const name = trackerNameForJob(job);
-    if (job || !text(hidden.value)) hidden.value = name;
+    if ((job || !text(hidden.value)) && hidden.value !== name) hidden.value = name;
     const display = qs("#sheetTrackerNameDisplay");
-    if (display && name) display.textContent = name;
+    if (display && name && display.textContent !== name) display.textContent = name;
   }
 
   function syncProjectDates(job = null) {
@@ -26857,10 +27123,10 @@ ${docs.length ? `
     if (!input) return;
     const activeJob = job || selectedCostTrackerJob();
     const range = projectDateRange(activeJob);
-    try { input.type = "text"; } catch {}
-    input.readOnly = true;
-    input.placeholder = "Project dates";
-    input.value = range || "";
+    if (input.type !== "text") { try { input.type = "text"; } catch {} }
+    if (!input.readOnly) input.readOnly = true;
+    if (input.placeholder !== "Project dates") input.placeholder = "Project dates";
+    if (input.value !== (range || "")) input.value = range || "";
   }
 
   function ensureInternalCommentsTemplate() {
@@ -26879,14 +27145,18 @@ ${docs.length ? `
       else grid.appendChild(label);
     }
 
-    label.classList.add("internal-comments-field");
+    if (!label.classList.contains("internal-comments-field")) label.classList.add("internal-comments-field");
     const area = qs('[name="internal_comments"]', label);
     if (!area) return;
-    area.placeholder = INTERNAL_TEMPLATE;
+    if (area.placeholder !== INTERNAL_TEMPLATE) area.placeholder = INTERNAL_TEMPLATE;
     const current = String(area.value || "").trim();
     if (!current) area.value = INTERNAL_TEMPLATE;
   }
 
+  // Its own observer re-runs this after every change inside the form, so the
+  // helpers above only write values that differ. Writing a value that is
+  // already there still counts as a change, and used to retrigger this every
+  // 40ms forever, keeping the whole page busy.
   function finalizeCostTrackerWindow(job = null) {
     const form = qs("#costTrackerForm");
     if (!form) return;
@@ -27014,33 +27284,260 @@ ${docs.length ? `
     } catch {}
   }
 
+  /* --- Heavy columns stay out of the startup download ----------------------
+     Saved invoices, cost trackers and timesheet rows each keep a full HTML copy
+     (html_snapshot), and the invoice and timesheet copies embed the ~500 KB
+     logo, so "select *" pulled tens of MB before the dashboard could draw.
+     Startup now reads every other column:
+     - cost tracker and timesheet screens rebuild a copy from the row's own
+       fields (they always did when a row had none);
+     - View / Download on a saved invoice fetches that invoice's copy first;
+     - files kept inside documents rows (file_data_base64, used when storage
+       refused an upload) download right after the dashboard has drawn, and
+       Open / Download on such a file waits for its data.
+     PostgREST cannot select "every column except", so each table's columns
+     are learned from one row and remembered in localStorage (names only). */
+  const DEFERRED_COLUMNS = {
+    invoices: ["html_snapshot"],
+    cost_trackers: ["html_snapshot"],
+    timesheets: ["html_snapshot"],
+    documents: ["file_data_base64"]
+  };
+  const COLUMN_CACHE_KEY = "pimp_dashboard_table_columns_v1";
+  const COLUMN_CACHE_REFRESH_MS = 24 * 60 * 60 * 1000;
+  // A deploy bumps app.js?v=..., which relearns the columns.
+  const APP_BUILD = (() => {
+    try { return new URL(document.currentScript.src).search; } catch { return ""; }
+  })();
+
+  function readColumnCache() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COLUMN_CACHE_KEY) || "null");
+      if (saved && saved.build === APP_BUILD && saved.tables && typeof saved.tables === "object") return saved;
+    } catch {}
+    return { build: APP_BUILD, tables: {} };
+  }
+
+  function rememberColumns(table, columns) {
+    try {
+      const cache = readColumnCache();
+      if (columns) cache.tables[table] = { at: Date.now(), columns };
+      else delete cache.tables[table];
+      localStorage.setItem(COLUMN_CACHE_KEY, JSON.stringify(cache));
+    } catch {}
+  }
+
+  function isMissingColumnError(error) {
+    const text = `${error?.code || ""} ${error?.message || ""}`.toLowerCase();
+    return text.includes("42703") || (text.includes("column") && (text.includes("does not exist") || text.includes("schema cache")));
+  }
+
+  // Reads one row to learn the table's columns, preferring a row without the
+  // heavy data. Returns the columns to load at startup, or "*" when there is
+  // nothing to leave out (no such column) or nothing to learn from yet.
+  async function learnStartupColumns(table) {
+    const deferred = DEFERRED_COLUMNS[table];
+    let response = await state.supabase.from(table).select("*").is(deferred[0], null).limit(1);
+    if (response.error) {
+      if (isMissingColumnError(response.error)) rememberColumns(table, "*");
+      return "*";
+    }
+    let row = response.data?.[0];
+    if (!row) {
+      response = await state.supabase.from(table).select("*").limit(1);
+      row = response.error ? null : response.data?.[0];
+    }
+    if (!row) return "*";
+    const columns = Object.keys(row).filter((column) => !deferred.includes(column));
+    if (!columns.length) return "*";
+    rememberColumns(table, columns);
+    return columns;
+  }
+
+  const relearning = new Set();
+  async function startupColumns(table) {
+    if (!DEFERRED_COLUMNS[table]) return "*";
+    const entry = readColumnCache().tables[table];
+    const usable = entry && (entry.columns === "*" || (Array.isArray(entry.columns) && entry.columns.length));
+    if (!usable) return learnStartupColumns(table);
+    // Use what is remembered, and check the table again in the background
+    // once a day so a newly added column is picked up.
+    if (Date.now() - Number(entry.at || 0) > COLUMN_CACHE_REFRESH_MS && !relearning.has(table)) {
+      relearning.add(table);
+      window.setTimeout(() => {
+        learnStartupColumns(table).catch(() => {}).finally(() => relearning.delete(table));
+      }, 5000);
+    }
+    return entry.columns;
+  }
+
+  function selectList(columns) {
+    if (columns === "*" || !Array.isArray(columns) || !columns.length) return "*";
+    return columns
+      .map((column) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(column) ? column : `"${String(column).replace(/"/g, '""')}"`))
+      .join(",");
+  }
+
+  async function runSelect(config, columns) {
+    const list = selectList(columns);
+    let response = await state.supabase
+      .from(config.table)
+      .select(list)
+      .order(config.order, { ascending: config.ascending })
+      .limit(1000);
+
+    if (response.error) {
+      const message = String(response.error.message || "").toLowerCase();
+      const canRetryWithoutOrder = message.includes("column") || message.includes("pgrst") || message.includes("schema cache");
+      if (canRetryWithoutOrder) {
+        response = await state.supabase.from(config.table).select(list).limit(1000);
+      }
+    }
+    return response;
+  }
+
   async function selectTableSafely(config) {
     if (!state?.supabase) return { key: config.key, rows: [], error: null };
 
     try {
-      let query = state.supabase
-        .from(config.table)
-        .select("*")
-        .order(config.order, { ascending: config.ascending })
-        .limit(1000);
+      let columns = await startupColumns(config.table);
+      let response = await runSelect(config, columns);
 
-      let response = await query;
-
-      if (response.error) {
-        const message = String(response.error.message || "").toLowerCase();
-        const canRetryWithoutOrder = message.includes("column") || message.includes("pgrst") || message.includes("schema cache");
-        if (canRetryWithoutOrder) {
-          response = await state.supabase.from(config.table).select("*").limit(1000);
+      // A remembered column is gone (the table changed): relearn, and failing
+      // that, load every column as before.
+      if (response.error && columns !== "*" && isMissingColumnError(response.error)) {
+        rememberColumns(config.table, null);
+        columns = await learnStartupColumns(config.table);
+        response = await runSelect(config, columns);
+        if (response.error && columns !== "*") {
+          columns = "*";
+          response = await runSelect(config, "*");
         }
       }
 
       if (response.error) throw response.error;
-      return { key: config.key, rows: response.data || [], error: null };
+      return { key: config.key, table: config.table, rows: response.data || [], error: null, light: columns !== "*" };
     } catch (error) {
       console.warn(`Could not load ${config.table}:`, error);
       return { key: config.key, rows: [], error, required: Boolean(config.required), table: config.table };
     }
   }
+
+  // Tables whose rows came without their DEFERRED_COLUMNS in the latest load.
+  const lightTables = new Set();
+  function noteLightTables(results) {
+    results.forEach((result) => {
+      if (result.error || !result.table) return;
+      if (result.light) lightTables.add(result.table);
+      else lightTables.delete(result.table);
+    });
+  }
+
+  function rowIsMissingDeferred(table, row) {
+    return Boolean(row) && lightTables.has(table) && DEFERRED_COLUMNS[table].some((column) => !(column in row));
+  }
+
+  let documentFilesLoading = null;
+  function loadDeferredDocumentFiles() {
+    const loading = (async () => {
+      const { data, error } = await state.supabase
+        .from("documents")
+        .select("id,file_data_base64")
+        .not("file_data_base64", "is", null)
+        .limit(1000);
+      if (error) throw error;
+      const files = new Map((data || []).map((row) => [String(row.id), row.file_data_base64]));
+      (state?.data?.documents || []).forEach((row) => {
+        if (rowIsMissingDeferred("documents", row)) row.file_data_base64 = files.get(String(row.id)) ?? null;
+      });
+    })();
+    documentFilesLoading = loading;
+    loading
+      .catch((error) => console.warn("Could not load files stored in documents rows:", error))
+      .finally(() => { if (documentFilesLoading === loading) documentFilesLoading = null; });
+    return loading;
+  }
+
+  // Fetches one row's deferred columns and adds them to that row in state.
+  const deferredRequests = new Map();
+  function loadDeferredColumns(table, key, row) {
+    const id = String(row.id);
+    const token = `${table}:${id}`;
+    if (deferredRequests.has(token)) return deferredRequests.get(token);
+    const columns = DEFERRED_COLUMNS[table];
+    const matchingRows = () => [row, ...(state?.data?.[key] || []).filter((item) => item && item !== row && String(item.id) === id)];
+    const request = (async () => {
+      if (table === "documents" && documentFilesLoading) {
+        try { await documentFilesLoading; } catch {}
+        if (!matchingRows().some((item) => rowIsMissingDeferred(table, item))) return;
+      }
+      const { data, error } = await state.supabase.from(table).select(["id", ...columns].join(",")).eq("id", row.id).limit(1);
+      if (error) throw error;
+      const full = data?.[0] || {};
+      matchingRows().forEach((item) => {
+        columns.forEach((column) => { if (!(column in item)) item[column] = full[column] ?? null; });
+      });
+    })().finally(() => deferredRequests.delete(token));
+    deferredRequests.set(token, request);
+    return request;
+  }
+
+  const DEFERRED_CLICKS = [
+    { attributes: ["data-preview-invoice", "data-download-invoice"], table: "invoices", key: "invoices", label: "invoice" },
+    { attributes: ["data-open-uploaded-doc", "data-download-uploaded-doc"], table: "documents", key: "documents", label: "file" }
+  ];
+
+  function deferredClickTarget(event) {
+    for (const gate of DEFERRED_CLICKS) {
+      const el = event.target?.closest?.(gate.attributes.map((name) => `[${name}]`).join(","));
+      if (!el) continue;
+      const attribute = gate.attributes.find((name) => el.hasAttribute(name));
+      const id = String(el.getAttribute(attribute) || "");
+      const row = (state?.data?.[gate.key] || []).find((item) => item && (String(item.id) === id || String(item.external_id || "") === id));
+      return row && rowIsMissingDeferred(gate.table, row) ? { gate, el, row, attribute, id } : null;
+    }
+    return null;
+  }
+
+  // The clicked button, or the same button in a table redrawn meanwhile.
+  function currentButton(hit) {
+    if (hit.el.isConnected) return hit.el;
+    try {
+      return document.querySelector(`[${hit.attribute}="${CSS.escape(hit.id)}"]`);
+    } catch {
+      return null;
+    }
+  }
+
+  let replayingClick = false;
+  // Called for every click by the listener at the top of this file, which is
+  // registered before any other click handler.
+  window.PIMP_holdClickForDeferredData = function holdClickForDeferredData(event) {
+    if (replayingClick) return;
+    const hit = deferredClickTarget(event);
+    if (!hit) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const { gate, row } = hit;
+    const notice = window.setTimeout(() => toast(`Loading the saved ${gate.label}…`), 400);
+    loadDeferredColumns(gate.table, gate.key, row)
+      .catch((error) => console.warn(`Could not load the saved ${gate.label}:`, error))
+      .finally(() => {
+        window.clearTimeout(notice);
+        const button = currentButton(hit);
+        if (!button) return;
+        // Without the data (the request failed) the click still goes through,
+        // and invoices fall back to rebuilding from their fields.
+        replayingClick = true;
+        try { button.click(); } finally { replayingClick = false; }
+      });
+  };
+
+  // Start fetching as soon as the pointer reaches View / Download.
+  document.addEventListener("pointerover", (event) => {
+    const hit = deferredClickTarget(event);
+    if (hit) loadDeferredColumns(hit.gate.table, hit.gate.key, hit.row).catch(() => {});
+  }, { passive: true });
 
   function assignLoadedRows(results) {
     state.data = state.data || {};
@@ -27055,19 +27552,24 @@ ${docs.length ? `
   }
 
   function renderTablesSafely() {
-    try { if (typeof hydrateSelects === "function") hydrateSelects(); } catch (error) { console.warn("hydrateSelects failed:", error); }
+    // As one render burst (see installFinalRenderCoalescer): the safety-net
+    // calls below then only draw a table that renderAll did not get to.
+    const asOneBurst = typeof window.PIMP_renderAsOneBurst === "function" ? window.PIMP_renderAsOneBurst : (draw) => draw();
+    asOneBurst(() => {
+      try { if (typeof hydrateSelects === "function") hydrateSelects(); } catch (error) { console.warn("hydrateSelects failed:", error); }
 
-    try {
-      if (typeof renderAll === "function") renderAll();
-    } catch (error) {
-      console.warn("renderAll failed; rendering core tables directly:", error);
-    }
+      try {
+        if (typeof renderAll === "function") renderAll();
+      } catch (error) {
+        console.warn("renderAll failed; rendering core tables directly:", error);
+      }
 
-    // Always refresh the tables the user sees, even if an older renderAll wrapper failed.
-    try { if (typeof window.renderDashboardActiveJobs === "function") window.renderDashboardActiveJobs(); } catch (error) { console.warn("Open Jobs table render failed:", error); }
-    try { if (typeof window.renderJobs === "function") window.renderJobs(); } catch (error) { console.warn("Closed Jobs table render failed:", error); }
-    try { if (typeof renderInvoices === "function") renderInvoices(); } catch (error) { console.warn("Invoices table render failed:", error); }
-    try { if (typeof renderCostTrackers === "function") renderCostTrackers(); } catch (error) { console.warn("Cost trackers table render failed:", error); }
+      // Always refresh the tables the user sees, even if an older renderAll wrapper failed.
+      try { if (typeof window.renderDashboardActiveJobs === "function") window.renderDashboardActiveJobs(); } catch (error) { console.warn("Open Jobs table render failed:", error); }
+      try { if (typeof window.renderJobs === "function") window.renderJobs(); } catch (error) { console.warn("Closed Jobs table render failed:", error); }
+      try { if (typeof renderInvoices === "function") renderInvoices(); } catch (error) { console.warn("Invoices table render failed:", error); }
+      try { if (typeof renderCostTrackers === "function") renderCostTrackers(); } catch (error) { console.warn("Cost trackers table render failed:", error); }
+    });
   }
 
   async function loadAllDataSafely(options = {}) {
@@ -27084,10 +27586,17 @@ ${docs.length ? `
       const matched = TABLES_TO_LOAD.filter((c) => wanted.includes(c.key) || wanted.includes(c.table));
       if (matched.length === wanted.length) targets = matched;
     }
+    // Lets the return-to-tab refresh skip reloading data that was just requested.
+    if (targets === TABLES_TO_LOAD) window.PIMP_LAST_FULL_LOAD_AT = Date.now();
 
     const results = await Promise.all(targets.map(selectTableSafely));
     assignLoadedRows(results);
+    noteLightTables(results);
+    // Until the first load lands, the job tables say "Loading…" rather than
+    // "No jobs found".
+    window.PIMP_DATA_LOADED = true;
     renderTablesSafely();
+    if (results.some((result) => result.table === "documents" && result.light)) loadDeferredDocumentFiles();
 
     const requiredFailure = results.find((result) => result.required && result.error);
     if (requiredFailure) {
@@ -27109,9 +27618,11 @@ ${docs.length ? `
   try { globalThis.loadAllData = loadAllDataSafely; } catch {}
   try { eval('loadAllData = window.loadAllData'); } catch {}
 
+  // The one Refresh Data handler (bindEvents no longer binds its own), through
+  // window.loadAllData so it merges with any load already running.
   document.addEventListener("click", (event) => {
     if (!event.target?.closest?.("#refreshBtn")) return;
-    window.setTimeout(() => loadAllDataSafely({ manual: true }), 0);
+    window.setTimeout(() => window.loadAllData({ manual: true }), 0);
   }, true);
 })();
 
@@ -27205,6 +27716,10 @@ ${docs.length ? `
   }
 
   function isTimesheetDocument(doc) {
+    // Weekly uploads from the Timesheets page are tagged in external_id, which
+    // still identifies them if the database only accepted a generic type.
+    const weekTag = window.PIMP_timesheetWeeks?.WEEK_UPLOAD_TAG;
+    if (weekTag && String(doc?.external_id || "").startsWith(weekTag)) return true;
     return /timesheet|time sheet|timecard|time card/i.test(`${doc?.document_type || ""} ${doc?.file_name || ""} ${doc?.original_file_name || ""}`);
   }
 
@@ -28362,15 +28877,16 @@ ${docs.length ? `
 
 
 /* ========================================================================
-   FINAL INVOICE SUBMITTED LABEL + OPEN JOB STATUS SECTIONS PATCH
+   FINAL INVOICE SUBMITTED LABEL PATCH
    ------------------------------------------------------------------------
    - Keeps the saved database value as approved for compatibility, but shows it
      as Submitted everywhere in the dashboard UI.
    - Makes Submitted yellow in job tables.
-   - Groups Open Jobs into two status sections:
-       1) No Invoice / Unsent Invoices
-       2) Awaiting Approval / Submitted
-   - Each status group is sub-sorted by invoice number.
+   This patch used to draw its own Open Jobs table too, in an older 8-column
+   layout, on every page switch and on startup timers. Two renderers drawing
+   different layouts into one table is what made the old layout show up; the
+   status sections now come only from the live Open Jobs renderer
+   (installNoFlickerOpenJobsAndProjectDatesLock).
    ======================================================================== */
 (function installSubmittedInvoiceStatusAndOpenJobSectionsPatch() {
   const PATCH_FLAG = "__pimpSubmittedInvoiceStatusAndOpenJobSectionsPatch";
@@ -28384,48 +28900,6 @@ ${docs.length ? `
   const qsa = (selector, root = document) => {
     try { return Array.from(root.querySelectorAll(selector)); } catch { return []; }
   };
-
-  const html = (value) => String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-  const attr = html;
-
-  const toNumber = (value) => {
-    const parsed = Number(value || 0);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-
-  function parseJsonSafe(value) {
-    if (!value) return {};
-    if (typeof value === "object") return value || {};
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  function timeValue(row) {
-    const candidates = [
-      row?.last_synced_at,
-      row?.updated_at,
-      row?.created_at,
-      row?.invoice_date,
-      row?.due_date,
-      row?.start_date,
-      row?.work_date
-    ];
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      const parsed = Date.parse(candidate);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-    return 0;
-  }
 
   function normalizeInvoiceStatus(status) {
     const value = String(status || "unsent").toLowerCase().trim().replace(/[\s-]+/g, "_");
@@ -28444,11 +28918,6 @@ ${docs.length ? `
     }[normalizeInvoiceStatus(status)] || "Unsent";
   }
 
-  function invoiceStatusClass(status) {
-    const normalized = normalizeInvoiceStatus(status);
-    return normalized === "approved" ? "submitted" : normalized;
-  }
-
   function invoiceStatusOptions(current) {
     const selected = normalizeInvoiceStatus(current);
     return ["unsent", "awaiting_approval", "approved", "paid"]
@@ -28456,318 +28925,36 @@ ${docs.length ? `
       .join("");
   }
 
-  function latestInvoiceForJob(jobId) {
-    return (window.state?.data?.invoices || state?.data?.invoices || [])
-      .filter((invoice) => String(invoice.job_id || "") === String(jobId || ""))
-      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
+  function markSelectSubmitted(select) {
+    if (normalizeInvoiceStatus(select.value) !== "approved") return;
+    if (select.classList.contains("approved")) select.classList.remove("approved");
+    if (!select.classList.contains("submitted")) select.classList.add("submitted");
   }
 
-  function latestCostTrackerForJob(jobId) {
-    return (window.state?.data?.costTrackers || state?.data?.costTrackers || [])
-      .filter((tracker) => String(tracker.job_id || "") === String(jobId || ""))
-      .sort((a, b) => timeValue(b) - timeValue(a))[0] || null;
-  }
-
-  function allJobs() {
-    return window.state?.data?.jobs || state?.data?.jobs || [];
-  }
-
-  function allDocs() {
-    return window.state?.data?.documents || state?.data?.documents || [];
-  }
-
-  function allTimesheets() {
-    return window.state?.data?.timesheets || state?.data?.timesheets || [];
-  }
-
-  function moneyLabel(value) {
-    try { if (typeof money === "function") return money(value); } catch {}
-    return toNumber(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
-  }
-
-  function dateLabel(value) {
-    try { if (typeof formatDate === "function") return formatDate(value); } catch {}
-    if (!value) return "-";
-    const date = new Date(`${value}T00:00:00`);
-    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString("en-US");
-  }
-
-  function rateTotalForTracker(tracker) {
-    if (!tracker) return null;
-    try {
-      if (typeof costTrackerQuoted === "function") {
-        const quoted = toNumber(costTrackerQuoted(tracker));
-        if (quoted || tracker.quoted_price !== undefined) return quoted;
-      }
-    } catch {}
-    const summary = parseJsonSafe(tracker.summary);
-    const candidates = [
-      summary.rateTotal,
-      summary.rate_total,
-      summary.quotedTotal,
-      summary.quoted_total,
-      summary.quotedPrice,
-      summary.quoted_price,
-      tracker.rate_total,
-      tracker.quoted_price
-    ];
-    for (const candidate of candidates) {
-      if (candidate !== undefined && candidate !== null && candidate !== "") return toNumber(candidate);
-    }
-    return 0;
-  }
-
-  function workdaysForJob(job) {
-    try { if (typeof window.__pimpWeekdayCount === "function") return toNumber(window.__pimpWeekdayCount(job?.start_date, job?.end_date || job?.start_date)); } catch {}
-    try { if (typeof window.__pimpWorkdaysForJobFinal === "function") return toNumber(window.__pimpWorkdaysForJobFinal(job)); } catch {}
-    return toNumber(job?.total_job_days || job?.total_days || job?.job_days);
-  }
-
-  function uniqueDailyTimesheets(jobId) {
-    try { if (typeof window.__pimpUniqueDailyTimesheetsForJob === "function") return window.__pimpUniqueDailyTimesheetsForJob(jobId); } catch {}
-    const seen = new Set();
-    allTimesheets().forEach((entry) => {
-      if (String(entry.job_id || "") !== String(jobId || "")) return;
-      const summary = parseJsonSafe(entry.summary);
-      const key = summary.timesheetGroupId || summary.timesheet_group_id || summary.sheetId || summary.sheet_id || entry.timesheet_group_id || entry.group_id || entry.sheet_id || entry.work_date || entry.id;
-      if (key) seen.add(String(key));
-    });
-    return seen.size;
-  }
-
-  function uploadedDocsForJob(jobId) {
-    return allDocs().filter((doc) => String(doc.job_id || "") === String(jobId || ""));
-  }
-
-  function documentIndicators(job) {
-    const docs = uploadedDocsForJob(job.id);
-    const trackerMade = Boolean(latestCostTrackerForJob(job.id)) || docs.some((doc) => /cost|tracker|spreadsheet|excel/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
-    const invoiceMade = Boolean(latestInvoiceForJob(job.id)) || docs.some((doc) => /invoice/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
-    const timesheetsMade = uniqueDailyTimesheets(job.id) > 0 || docs.some((doc) => /timesheet|time sheet/i.test(`${doc.document_type || ""} ${doc.file_name || doc.original_file_name || ""}`));
-    return `
-      <div class="job-summary-chips professional-job-chips dashboard-job-chips dashboard-document-indicators" aria-label="Saved job documents">
-        <span class="job-doc-chip dashboard-doc-indicator ${trackerMade ? "made" : "missing"}">Cost Tracker</span>
-        <span class="job-doc-chip dashboard-doc-indicator ${invoiceMade ? "made" : "missing"}">Invoice</span>
-        <span class="job-doc-chip dashboard-doc-indicator ${timesheetsMade ? "made" : "missing"}">Timesheets</span>
-      </div>
-    `;
-  }
-
-  function firstJobNumber(job) {
-    const text = String(job?.job_number || "");
-    const match = text.match(/\d+/);
-    return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
-  }
-
-  function invoiceNumber(invoice) {
-    return String(invoice?.invoice_number || "").trim();
-  }
-
-  function compareInvoiceNumbers(aInvoice, bInvoice, aJob, bJob) {
-    const aNumber = invoiceNumber(aInvoice);
-    const bNumber = invoiceNumber(bInvoice);
-    if (aNumber || bNumber) {
-      const byInvoice = aNumber.localeCompare(bNumber, undefined, { numeric: true, sensitivity: "base" });
-      if (byInvoice) return byInvoice;
-    }
-    const byJobNumber = firstJobNumber(aJob) - firstJobNumber(bJob);
-    if (byJobNumber) return byJobNumber;
-    return String(aJob?.job_number || "").localeCompare(String(bJob?.job_number || ""), undefined, { numeric: true, sensitivity: "base" });
-  }
-
-  function openStatusBucket(job) {
-    const invoice = latestInvoiceForJob(job.id);
-    if (!invoice) return "no_invoice";
-    const status = normalizeInvoiceStatus(invoice.status);
-    if (status === "paid") return "paid";
-    if (status === "approved") return "submitted";
-    return status;
-  }
-
-  function openSection(job) {
-    const bucket = openStatusBucket(job);
-    return ["no_invoice", "unsent"].includes(bucket) ? "needs_invoice" : "review";
-  }
-
-  function jobYearValue(job) {
-    const text = String(job?.job_number || "");
-    const dashed = text.match(/(?:^|[-\s])(\d{2,4})\s*$/);
-    if (dashed) {
-      const raw = Number(dashed[1]);
-      if (Number.isFinite(raw)) return raw < 100 ? 2000 + raw : raw;
-    }
-    return 0;
-  }
-
-  function compareOpenJobsBySectionAndInvoice(a, b) {
-    // Decreasing job number order: greater job number on top. Kept identical to
-    // the stable renderer's compareJobNumber so both renderers agree on order.
-    const numberDiff = firstJobNumber(b) - firstJobNumber(a);
-    if (numberDiff) return numberDiff;
-    return String(b.job_number || "").localeCompare(String(a.job_number || ""), undefined, { numeric: true, sensitivity: "base" });
-  }
-
-  function openJobsForSection(section) {
-    return allJobs()
-      .filter((job) => openStatusBucket(job) !== "paid")
-      .filter((job) => openSection(job) === section)
-      .sort(compareOpenJobsBySectionAndInvoice);
-  }
-
-  function openJobsSorted() {
-    return allJobs()
-      .filter((job) => openStatusBucket(job) !== "paid")
-      .sort(compareOpenJobsBySectionAndInvoice);
-  }
-
-  function jobDateMarkup(job) {
-    const days = workdaysForJob(job);
-    const dateRange = `${dateLabel(job.start_date)}${job.end_date && job.end_date !== job.start_date ? ` to ${dateLabel(job.end_date)}` : ""}`;
-    const daysText = days ? `${days} workday${toNumber(days) === 1 ? "" : "s"}` : "Auto-calculated";
-    return `
-      <span class="job-date-range">${html(dateRange)}</span>
-      <span class="job-workday-count">${html(daysText)}</span>
-    `;
-  }
-
-  function invoiceStatusControl(invoice, title, context) {
-    if (!invoice) return `<span class="status unsent dashboard-no-invoice" title="No invoice is attached yet">No Invoice</span>`;
-    const status = normalizeInvoiceStatus(invoice.status);
-    const statusClass = invoiceStatusClass(status);
-    return `
-      <select class="dashboard-inline-status-select invoice-status-workflow-select status ${attr(statusClass)}"
-        data-${context}-invoice-status-id="${attr(invoice.id)}"
-        aria-label="Change invoice status for ${attr(invoice.invoice_number || title)}">
-        ${invoiceStatusOptions(status)}
-      </select>
-    `;
-  }
-
-  function normalizeDashboardHeader() {
-    const headerRow = qs(".dashboard-active-jobs-table thead tr");
-    if (!headerRow) return;
-    headerRow.innerHTML = ["Job", "Client", "Schedule", "Invoice Status", "Rate Total", "Actions"]
-      .map((label) => `<th>${html(label)}</th>`)
-      .join("");
-  }
-
-  function sectionHeader(title, count) {
-    return `
-      <tr class="open-jobs-section-row pimp-open-section-row" data-open-job-section="${attr(title)}">
-        <td colspan="8">
-          <div class="open-jobs-section-title">
-            <span>${html(title)}</span>
-            <strong>${html(count)} job${count === 1 ? "" : "s"}</strong>
-          </div>
-        </td>
-      </tr>
-    `;
-  }
-
-  function renderOpenJobRow(job) {
-    const tracker = latestCostTrackerForJob(job.id);
-    const invoice = latestInvoiceForJob(job.id);
-    const title = `${job.job_number || "-"} ${job.job_name || ""}`.trim();
-    const invoiceSearchText = invoice ? `${invoice.invoice_number || ""} ${invoiceStatusLabel(invoice.status)}` : "No Invoice Unsent";
-    return `
-      <tr class="job-main-row professional-job-row dashboard-active-job-row open-job-row" data-dashboard-job-row-id="${attr(job.id)}" data-invoice-search-text="${attr(invoiceSearchText)}" title="Open job details for ${attr(title)}">
-        <td data-label="Job #" class="job-number-cell"><strong class="job-number-plain-final">${html(job.job_number || "-")}</strong></td>
-        <td data-label="Project Name" class="job-name-cell">
-          <div class="job-name-stack dashboard-project-stack">
-            <strong>${html(job.job_name || "-")}</strong>
-            ${documentIndicators(job)}
-          </div>
-        </td>
-        <td data-label="Company" class="job-company-cell">${html(job.company_name || "-")}</td>
-        <td data-label="Location" class="job-location-cell">${html(job.location || "-")}</td>
-        <td data-label="Invoice Status" class="dashboard-invoice-status-cell">${invoiceStatusControl(invoice, title, "open-jobs")}</td>
-        <td data-label="Dates" class="job-dates-cell">${jobDateMarkup(job)}</td>
-        <td data-label="Rate Total" class="dashboard-rate-total-cell"><strong>${tracker ? html(moneyLabel(rateTotalForTracker(tracker))) : "—"}</strong></td>
-        <td data-label="Actions" class="dashboard-actions-cell">
-          <div class="dashboard-actions-inline">
-            <button class="link-btn job-table-action edit" data-dashboard-edit-job="${attr(job.id)}" type="button" title="Edit this job">Edit</button>
-            <button class="link-btn job-table-action delete danger-text" data-dashboard-delete-job="${attr(job.id)}" type="button" title="Delete this job">Delete</button>
-          </div>
-        </td>
-      </tr>
-    `;
-  }
-
-  let renderingOpenJobs = false;
-
-  function renderOpenJobsGroupedByInvoiceStatus() {
-    const table = qs("#dashboardActiveJobsTable");
-    const count = qs("#dashboardActiveJobsCount");
-    if (!table) return;
-
-    renderingOpenJobs = true;
-    normalizeDashboardHeader();
-
-    // Two sections, each sorted by Job # with the greatest number on top. The
-    // section header rows (.pimp-open-section-row) are required: a watchdog
-    // observer re-renders this table whenever they are missing.
-    const needsInvoice = openJobsForSection("needs_invoice");
-    const review = openJobsForSection("review");
-    const total = needsInvoice.length + review.length;
-    if (count) count.textContent = String(total);
-
-    const pieces = [];
-    if (needsInvoice.length) {
-      pieces.push(sectionHeader("No Invoice / Unsent Invoices", needsInvoice.length));
-      pieces.push(needsInvoice.map(renderOpenJobRow).join(""));
-    }
-    if (review.length) {
-      pieces.push(sectionHeader("Awaiting Approval / Submitted", review.length));
-      pieces.push(review.map(renderOpenJobRow).join(""));
-    }
-
-    table.innerHTML = pieces.join("") || `<tr><td colspan="8" class="muted">No open jobs found.</td></tr>`;
-    table.dataset.pimpOpenJobsSubmittedGrouped = "true";
-
-    cleanupSubmittedLabelsAndClasses(table);
-    renderingOpenJobs = false;
-    reapplyDomOnlySearch();
-  }
-
+  // Runs after every DOM change (see the observer below), so it only writes
+  // what actually differs: rewriting an identical label or class still counts
+  // as a DOM change, and used to retrigger this and every other page-wide
+  // observer continuously.
   function cleanupSubmittedLabelsAndClasses(root = document) {
     qsa('option[value="approved"]', root).forEach((option) => {
-      option.textContent = "Submitted";
+      if (option.textContent !== "Submitted") option.textContent = "Submitted";
     });
 
-    qsa("select", root).forEach((select) => {
-      qsa('option[value="approved"]', select).forEach((option) => { option.textContent = "Submitted"; });
-      if (normalizeInvoiceStatus(select.value) === "approved") {
-        select.classList.remove("approved");
-        select.classList.add("submitted");
-      }
-    });
+    qsa("select", root).forEach(markSelectSubmitted);
 
     qsa(".status", root).forEach((node) => {
-      const visibleText = String(node.textContent || "").trim().toLowerCase();
-      if (visibleText === "approved") {
+      if (String(node.textContent || "").trim().toLowerCase() === "approved") {
         node.textContent = "Submitted";
-        node.classList.remove("approved");
-        node.classList.add("submitted");
+        if (node.classList.contains("approved")) node.classList.remove("approved");
+        if (!node.classList.contains("submitted")) node.classList.add("submitted");
       }
-      if (node.classList.contains("approved")) {
+      if (node.classList.contains("approved") && !node.classList.contains("submitted")) {
         node.classList.add("submitted");
       }
     });
   }
 
   window.PIMP_cleanupSubmittedLabelsAndClasses = cleanupSubmittedLabelsAndClasses;
-
-  function reapplyDomOnlySearch() {
-    const applyAll = window.PIMP_applyAllActiveTableSearchesOnly;
-    if (typeof applyAll !== "function") return;
-    window.setTimeout(applyAll, 0);
-    window.setTimeout(applyAll, 80);
-  }
-
-  function renderOpenJobsSoon() {
-    window.setTimeout(renderOpenJobsGroupedByInvoiceStatus, 0);
-    window.setTimeout(renderOpenJobsGroupedByInvoiceStatus, 80);
-  }
 
   function wrapFunction(name, after) {
     const previous = typeof window[name] === "function" ? window[name] : null;
@@ -28783,27 +28970,19 @@ ${docs.length ? `
     try { eval(`${name} = window["${name}"]`); } catch {}
   }
 
-  wrapFunction("renderAll", () => { renderOpenJobsGroupedByInvoiceStatus(); cleanupSubmittedLabelsAndClasses(); });
-  wrapFunction("renderDashboardLists", renderOpenJobsGroupedByInvoiceStatus);
-  wrapFunction("showView", () => { renderOpenJobsGroupedByInvoiceStatus(); cleanupSubmittedLabelsAndClasses(); });
+  wrapFunction("renderAll", () => cleanupSubmittedLabelsAndClasses());
+  wrapFunction("showView", () => cleanupSubmittedLabelsAndClasses());
   wrapFunction("renderInvoices", () => cleanupSubmittedLabelsAndClasses(qs("#invoicesTable") || document));
   wrapFunction("renderJobs", () => cleanupSubmittedLabelsAndClasses(qs("#jobsTable") || document));
 
-  window.renderDashboardActiveJobs = renderOpenJobsGroupedByInvoiceStatus;
-  try { renderDashboardActiveJobs = renderOpenJobsGroupedByInvoiceStatus; } catch {}
-  window.PIMP_renderOpenJobsGroupedByInvoiceStatus = renderOpenJobsGroupedByInvoiceStatus;
   window.PIMP_invoiceStatusLabelFinal = invoiceStatusLabel;
   window.PIMP_invoiceStatusOptionsFinal = invoiceStatusOptions;
 
   document.addEventListener("change", (event) => {
     const select = event.target?.closest?.('select[data-open-jobs-invoice-status-id], select[data-closed-jobs-invoice-status-id], select[data-dashboard-final-invoice-status-id], select[data-dashboard-invoice-status-id], select[data-invoice-status-id], select[data-job-details-invoice-status-id]');
     if (!select) return;
-    qsa('option[value="approved"]', select).forEach((option) => { option.textContent = "Submitted"; });
-    if (normalizeInvoiceStatus(select.value) === "approved") {
-      select.classList.remove("approved");
-      select.classList.add("submitted");
-    }
-    renderOpenJobsSoon();
+    cleanupSubmittedLabelsAndClasses(select);
+    markSelectSubmitted(select);
     window.setTimeout(() => cleanupSubmittedLabelsAndClasses(), 120);
     window.setTimeout(() => cleanupSubmittedLabelsAndClasses(), 500);
   }, true);
@@ -28817,28 +28996,17 @@ ${docs.length ? `
   }, true);
 
   const observer = new MutationObserver(() => {
-    if (renderingOpenJobs) return;
     window.clearTimeout(observer.__submittedTimer);
-    observer.__submittedTimer = window.setTimeout(() => {
-      cleanupSubmittedLabelsAndClasses();
-      const table = qs("#dashboardActiveJobsTable");
-      if (table && !table.querySelector(".pimp-open-section-row")) {
-        renderOpenJobsGroupedByInvoiceStatus();
-      }
-    }, 60);
+    observer.__submittedTimer = window.setTimeout(() => cleanupSubmittedLabelsAndClasses(), 60);
   });
 
   function initializeSubmittedStatusPatch() {
     cleanupSubmittedLabelsAndClasses();
-    renderOpenJobsGroupedByInvoiceStatus();
     try { observer.observe(document.body, { childList: true, subtree: true }); } catch {}
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initializeSubmittedStatusPatch);
   else initializeSubmittedStatusPatch();
-  window.setTimeout(initializeSubmittedStatusPatch, 0);
-  window.setTimeout(initializeSubmittedStatusPatch, 300);
-  window.setTimeout(initializeSubmittedStatusPatch, 1000);
 })();
 
 
@@ -28875,22 +29043,26 @@ ${docs.length ? `
     return value ? String(value) : "Unsent";
   }
 
+  // cleanupLegacyStatusLabels runs after every DOM change (see the observer
+  // below), so these fixes only write a label or class that is still wrong:
+  // rewriting an identical one counts as a change and retriggered it forever.
   function markSubmittedClass(element) {
     if (!element?.classList) return;
     if (element.classList.contains("approved") || normalizeStatusText(element.value || element.textContent) === "approved") {
-      element.classList.remove("approved");
-      element.classList.add("submitted");
-      element.dataset.invoiceStatusDisplay = "submitted";
+      if (element.classList.contains("approved")) element.classList.remove("approved");
+      if (!element.classList.contains("submitted")) element.classList.add("submitted");
+      if (element.dataset.invoiceStatusDisplay !== "submitted") element.dataset.invoiceStatusDisplay = "submitted";
     }
+  }
+
+  function fixOptionLabel(option) {
+    const isSubmitted = String(option.value || "").toLowerCase() === "approved" || isLegacySubmittedStatusText(option.textContent);
+    if (isSubmitted && option.textContent !== "Submitted") option.textContent = "Submitted";
   }
 
   function fixSelect(select) {
     if (!select) return;
-    qsa("option", select).forEach((option) => {
-      if (String(option.value || "").toLowerCase() === "approved" || isLegacySubmittedStatusText(option.textContent)) {
-        option.textContent = "Submitted";
-      }
-    });
+    qsa("option", select).forEach(fixOptionLabel);
     markSubmittedClass(select);
   }
 
@@ -28905,6 +29077,10 @@ ${docs.length ? `
   function fixExactLegacyStatusTextNodes(root) {
     const scope = root || document.body;
     if (!scope || !document.createTreeWalker) return;
+    // One native text read is far cheaper than walking every text node, and
+    // the current tables never print "approved", so the walk rarely runs. No
+    // \b here: textContent joins neighbouring nodes ("Submittedapproved").
+    if (!/approved/i.test(scope.textContent || "")) return;
     const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         const parent = node.parentElement;
@@ -28923,11 +29099,7 @@ ${docs.length ? `
   }
 
   function cleanupLegacyStatusLabels(root = document) {
-    qsa('option[value="approved"], option', root).forEach((option) => {
-      if (String(option.value || "").toLowerCase() === "approved" || isLegacySubmittedStatusText(option.textContent)) {
-        option.textContent = "Submitted";
-      }
-    });
+    qsa("option", root).forEach(fixOptionLabel);
 
     qsa('select, .status, [class*="invoice-status"], [data-label="Invoice Status"], .dashboard-invoice-status-cell', root).forEach((element) => {
       if (element.tagName === "SELECT") fixSelect(element);
@@ -28937,13 +29109,25 @@ ${docs.length ? `
     fixExactLegacyStatusTextNodes(root === document ? document.body : root);
   }
 
+  // Every render, change and DOM mutation asks for a pass; one pending pass
+  // serves them all. (Each render used to queue two whole-page passes, about
+  // twenty per data load, which held up the first paint of the dashboard.) The
+  // observer below requests another pass whenever the DOM changes afterwards.
+  let cleanupTimer = 0;
+  function requestCleanup(delay = 0) {
+    if (cleanupTimer) return;
+    cleanupTimer = setTimeout(() => {
+      cleanupTimer = 0;
+      cleanupLegacyStatusLabels();
+    }, delay);
+  }
+
   function wrap(name) {
     const previous = typeof window[name] === "function" ? window[name] : null;
     if (!previous || previous.__legacyStatusToSubmittedDisplayWrapped) return;
     const wrapped = function legacyStatusToSubmittedDisplayWrapped() {
       const result = previous.apply(this, arguments);
-      setTimeout(() => cleanupLegacyStatusLabels(), 0);
-      setTimeout(() => cleanupLegacyStatusLabels(), 80);
+      requestCleanup();
       return result;
     };
     wrapped.__legacyStatusToSubmittedDisplayWrapped = true;
@@ -28969,22 +29153,14 @@ ${docs.length ? `
 
   document.addEventListener("change", (event) => {
     const target = event.target;
-    if (target?.matches?.('select, [class*="invoice-status"]')) {
-      setTimeout(() => cleanupLegacyStatusLabels(), 0);
-      setTimeout(() => cleanupLegacyStatusLabels(), 120);
-    }
+    if (target?.matches?.('select, [class*="invoice-status"]')) requestCleanup();
   }, true);
 
   document.addEventListener("input", (event) => {
-    if (event.target?.matches?.('.table-search, input, select')) {
-      setTimeout(() => cleanupLegacyStatusLabels(), 0);
-    }
+    if (event.target?.matches?.('.table-search, input, select')) requestCleanup();
   }, true);
 
-  const observer = new MutationObserver(() => {
-    clearTimeout(observer.__legacyStatusToSubmittedTimer);
-    observer.__legacyStatusToSubmittedTimer = setTimeout(() => cleanupLegacyStatusLabels(), 40);
-  });
+  const observer = new MutationObserver(() => requestCleanup(40));
 
   function initLegacyStatusToSubmittedDisplayPatch() {
     cleanupLegacyStatusLabels();
@@ -29165,22 +29341,24 @@ ${docs.length ? `
     const table = qs("#invoiceTemplateLineItems", form || document) || qs("#invoiceTemplateLineItems");
     if (!editor || !table) return;
 
+    // Runs after every DOM change (see the observer below), so only write what
+    // differs: rewriting identical text or attributes still counts as a change.
     qsa(".invoice-template-lines th.qty-col", editor).forEach((header) => {
-      header.textContent = "Project Dates";
-      header.classList.add("project-dates-col");
+      if (header.textContent !== "Project Dates") header.textContent = "Project Dates";
+      if (!header.classList.contains("project-dates-col")) header.classList.add("project-dates-col");
     });
 
     const dates = currentProjectDates(form);
     qsa(".invoice-template-line", table).forEach((row, index) => {
       const firstCell = row.cells?.[0];
       if (!firstCell) return;
-      firstCell.classList.add("invoice-project-dates-cell");
+      if (!firstCell.classList.contains("invoice-project-dates-cell")) firstCell.classList.add("invoice-project-dates-cell");
       const qtyInput = qs('[data-field="quantity"]', firstCell);
       if (qtyInput) {
-        qtyInput.value = "1";
-        qtyInput.setAttribute("type", "hidden");
-        qtyInput.setAttribute("aria-hidden", "true");
-        qtyInput.tabIndex = -1;
+        if (qtyInput.value !== "1") qtyInput.value = "1";
+        if (qtyInput.getAttribute("type") !== "hidden") qtyInput.setAttribute("type", "hidden");
+        if (qtyInput.getAttribute("aria-hidden") !== "true") qtyInput.setAttribute("aria-hidden", "true");
+        if (qtyInput.tabIndex !== -1) qtyInput.tabIndex = -1;
       }
 
       let display = qs(".invoice-project-dates-display", firstCell);
@@ -29192,8 +29370,10 @@ ${docs.length ? `
         display.tabIndex = -1;
         firstCell.appendChild(display);
       }
-      display.value = index === 0 ? dates : "";
-      display.placeholder = index === 0 ? "Project dates" : "";
+      const displayValue = index === 0 ? dates : "";
+      const displayPlaceholder = index === 0 ? "Project dates" : "";
+      if (display.value !== displayValue) display.value = displayValue;
+      if (display.placeholder !== displayPlaceholder) display.placeholder = displayPlaceholder;
     });
   }
 
@@ -29365,27 +29545,10 @@ ${docs.length ? `
   });
 
   function sortAwaitingSubmittedSectionByJobNumber() {
-    const tbody = qs("#dashboardActiveJobsTable");
-    if (!tbody) return;
-    const headers = qsa("tr.pimp-open-section-row, tr.open-jobs-section-row", tbody);
-    const reviewHeader = headers.find((row) => /awaiting approval\s*\/\s*submitted/i.test(row.textContent || ""));
-    if (!reviewHeader) return;
-
-    const rows = [];
-    let node = reviewHeader.nextElementSibling;
-    while (node && !node.classList.contains("pimp-open-section-row") && !node.classList.contains("open-jobs-section-row")) {
-      const next = node.nextElementSibling;
-      if (node.matches?.("tr") && !node.dataset.searchEmptyRow) rows.push(node);
-      node = next;
-    }
-
-    rows.sort((a, b) => {
-      const aNum = text(a.querySelector?.(".job-number-plain-final")?.textContent || a.cells?.[0]?.textContent || "");
-      const bNum = text(b.querySelector?.(".job-number-plain-final")?.textContent || b.cells?.[0]?.textContent || "");
-      // Decreasing job number order (greater on top), consistent with the renderers.
-      return bNum.localeCompare(aNum, undefined, { numeric: true, sensitivity: "base" });
-    });
-    rows.forEach((row) => tbody.insertBefore(row, node));
+    /* optimized: superseded. The live Open Jobs renderer already orders each
+       section, and installAbsoluteFinalOpenJobsInvoiceModalLayoutFix re-sorts
+       with the same rule if anything moves rows. This copy re-inserted every
+       row after each DOM change, which retriggered its own observer forever. */
   }
 
   function runFinalInvoicePatchSoon() {
@@ -29424,7 +29587,7 @@ ${docs.length ? `
     if (!wrapper || !doc) return;
 
     if (overlay && !overlay.classList.contains("hidden")) {
-      overlay.classList.add("invoice-single-scroll-fit-mode");
+      if (!overlay.classList.contains("invoice-single-scroll-fit-mode")) overlay.classList.add("invoice-single-scroll-fit-mode");
       const available = Math.max(320, wrapper.clientWidth - 8);
       const naturalWidth = doc.scrollWidth || doc.offsetWidth || 794;
       const scale = Math.min(1, Math.max(0.58, available / naturalWidth));
@@ -29894,7 +30057,11 @@ ${docs.length ? `
     form.style.setProperty("--invoice-actions-reserved-space", `${stripHeight}px`);
     scroll.style.setProperty("--invoice-actions-reserved-space", `${stripHeight}px`);
 
-    if (overlay) overlay.classList.add("invoice-bottom-actions-reserved", "invoice-no-overlap-final");
+    if (overlay) {
+      ["invoice-bottom-actions-reserved", "invoice-no-overlap-final"].forEach((name) => {
+        if (!overlay.classList.contains(name)) overlay.classList.add(name);
+      });
+    }
 
     // In the popup the action row is kept in normal document flow. This is the
     // safest way to prevent the invoice page from ever covering the buttons.
@@ -29924,15 +30091,28 @@ ${docs.length ? `
     keepInvoiceBlocksSeparated(form);
   }
 
+  // A layout pass re-measures the description boxes (height auto, then px)
+  // and re-applies classes and styles inside the invoice form, which the
+  // invoiceObserver below reports as changes. Dropping the pass's own records
+  // stops it scheduling another pass every 40ms forever; edits made anywhere
+  // else still trigger one.
+  function runInvoiceLayoutPass() {
+    keepInvoiceBlocksSeparated();
+    reserveInvoiceBottomActionsSpace();
+    try { window.fitInvoiceTemplateToViewport?.(); } catch {}
+    try { window.autosizeAllInvoiceDescriptions?.(); } catch {}
+    invoiceObserver.takeRecords();
+  }
+
   function scheduleInvoiceLayoutFix() {
     [0, 50, 140, 320, 700].forEach((delay) => {
       window.setTimeout(() => {
-        keepInvoiceBlocksSeparated();
-        reserveInvoiceBottomActionsSpace();
-        try { window.fitInvoiceTemplateToViewport?.(); } catch {}
-        try { window.autosizeAllInvoiceDescriptions?.(); } catch {}
+        runInvoiceLayoutPass();
         // fitInvoiceTemplateToViewport can change the zoom, so reserve space again.
-        window.setTimeout(reserveInvoiceBottomActionsSpace, 20);
+        window.setTimeout(() => {
+          reserveInvoiceBottomActionsSpace();
+          invoiceObserver.takeRecords();
+        }, 20);
       }, delay);
     });
   }
@@ -30115,18 +30295,41 @@ ${docs.length ? `
     return { mode: "afe", number: text, hidden: `AFE ${text}` };
   }
 
+  // Everything below also runs after every DOM change (see the observer at the
+  // end), and writing a value that is already there still counts as a change,
+  // so these helpers only write what differs. Unconditional writes kept this
+  // patch re-running itself every 60ms.
+  function setAttr(element, name, value) {
+    if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+  }
+
+  function setProp(element, name, value) {
+    if (element[name] !== value) element[name] = value;
+  }
+
+  function setTextNodes(parent, text) {
+    Array.from(parent.childNodes).forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE && node.nodeValue !== text) node.nodeValue = text;
+    });
+  }
+
+  const TM_WO_PO_OPTIONS = [
+    ["tm", "T&M"],
+    ["afe", "AFE"],
+    ["wo", "WO"],
+    ["po", "PO"]
+  ];
+
   function ensureTmWoPoOptions(select) {
     if (!select) return;
     const current = select.value || "tm";
-    const options = [
-      ["tm", "T&M"],
-      ["afe", "AFE"],
-      ["wo", "WO"],
-      ["po", "PO"]
-    ];
-    select.innerHTML = options.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
-    select.value = ["tm", "afe", "wo", "po"].includes(current) ? current : "tm";
-    select.setAttribute("aria-label", "T&M, AFE, WO, or PO");
+    const hasOptions = select.options.length === TM_WO_PO_OPTIONS.length
+      && TM_WO_PO_OPTIONS.every(([value, label], index) => select.options[index].value === value && select.options[index].textContent === label);
+    if (!hasOptions) {
+      select.innerHTML = TM_WO_PO_OPTIONS.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+    }
+    setProp(select, "value", ["tm", "afe", "wo", "po"].includes(current) ? current : "tm");
+    setAttr(select, "aria-label", "T&M, AFE, WO, or PO");
   }
 
   function syncTmWoPoControls(form = qs("#jobForm"), keepNumber = true) {
@@ -30144,27 +30347,20 @@ ${docs.length ? `
 
     if (field) {
       const textNode = Array.from(field.childNodes).find((node) => node.nodeType === Node.TEXT_NODE);
-      if (textNode) textNode.nodeValue = `${LABEL} `;
+      if (textNode) setProp(textNode, "nodeValue", `${LABEL} `);
     }
     ensureTmWoPoOptions(select);
     if (!select || !number) return hidden.value || "T&M";
 
     if (!["tm", "afe", "wo", "po"].includes(select.value)) select.value = "tm";
-    if (select.value === "tm") {
-      if (!keepNumber) number.value = "";
-      number.disabled = true;
-      number.classList.add("hidden");
-      number.placeholder = "AFE/WO/PO number";
-      number.setAttribute("aria-label", "AFE, WO, or PO number");
-      hidden.value = "T&M";
-    } else {
-      const label = select.value.toUpperCase();
-      number.disabled = false;
-      number.classList.remove("hidden");
-      number.placeholder = `${label} number`;
-      number.setAttribute("aria-label", `${label} number`);
-      hidden.value = clean(number.value) ? `${label} ${clean(number.value)}` : label;
-    }
+    const isTm = select.value === "tm";
+    const label = select.value.toUpperCase();
+    if (isTm && !keepNumber) number.value = "";
+    setProp(number, "disabled", isTm);
+    number.classList.toggle("hidden", isTm); // toggle(name, force) is a no-op when already right
+    setProp(number, "placeholder", isTm ? "AFE/WO/PO number" : `${label} number`);
+    setAttr(number, "aria-label", isTm ? "AFE, WO, or PO number" : `${label} number`);
+    setProp(hidden, "value", isTm ? "T&M" : (clean(number.value) ? `${label} ${clean(number.value)}` : label));
     return hidden.value;
   }
 
@@ -30234,25 +30430,24 @@ ${docs.length ? `
   function normalizeCostTrackerHeaderLabels(root = document) {
     qsa("#costTrackerForm .sheet-job-picker", root).forEach((picker) => {
       const select = qs('select[name="job_id"]', picker);
-      Array.from(picker.childNodes).forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) node.nodeValue = `${LABEL} `;
-      });
+      setTextNodes(picker, `${LABEL} `);
       if (select && select.previousSibling?.nodeType !== Node.TEXT_NODE) picker.insertBefore(document.createTextNode(`${LABEL} `), select);
     });
 
     const tmCell = qs("#sheetJobNumber", root)?.closest?.(".sheet-meta-cell");
-    if (tmCell) Array.from(tmCell.childNodes).forEach((node) => { if (node.nodeType === Node.TEXT_NODE) node.nodeValue = LABEL; });
+    if (tmCell) setTextNodes(tmCell, LABEL);
 
     const clientCell = qs("#sheetClientName", root)?.closest?.(".sheet-meta-cell");
-    if (clientCell) Array.from(clientCell.childNodes).forEach((node) => { if (node.nodeType === Node.TEXT_NODE) node.nodeValue = "CLIENT Requestor:"; });
+    if (clientCell) setTextNodes(clientCell, "CLIENT Requestor:");
 
     const projectCell = qs("#sheetJobName", root)?.closest?.(".sheet-meta-cell");
-    if (projectCell) Array.from(projectCell.childNodes).forEach((node) => { if (node.nodeType === Node.TEXT_NODE) node.nodeValue = "PROJECT NAME:"; });
+    if (projectCell) setTextNodes(projectCell, "PROJECT NAME:");
   }
 
   function normalizeCostTrackerPreviewLabels(root = document) {
     qsa(".cost-tracker-preview-shell, .cost-sheet-preview, #costTrackerPreviewContent", root).forEach((scope) => {
-      scope.innerHTML = String(scope.innerHTML || "")
+      const current = String(scope.innerHTML || "");
+      const next = current
         .replace(/Job\/?AFE\s*#?/gi, LABEL_HTML)
         .replace(/T&amp;M\/AFE(?!\/WO\/PO)/gi, LABEL_HTML)
         .replace(/T&M\/AFE(?!\/WO\/PO)/gi, LABEL)
@@ -30260,6 +30455,8 @@ ${docs.length ? `
         .replace(/CLIENT:<\/strong>/gi, "CLIENT Requestor:</strong>")
         .replace(/JOB NAME:<strong>/gi, "PROJECT NAME:<strong>")
         .replace(/JOB NAME:<\/strong>/gi, "PROJECT NAME:</strong>");
+      // Re-parsing unchanged markup would still replace every node in it.
+      if (next !== current) scope.innerHTML = next;
     });
   }
 
@@ -30367,42 +30564,45 @@ ${docs.length ? `
     return start || end || "";
   }
 
+  // refreshCostTrackerProjectHeader runs after every change in the cost
+  // tracker (see its observer), so these only write what still differs:
+  // rewriting an identical value counts as a change and retriggered it forever.
+  function setTextNodes(parent, text) {
+    Array.from(parent.childNodes).forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE && node.nodeValue !== text) node.nodeValue = text;
+    });
+  }
+
   function setProjectDatesFromJob(job = selectedCostTrackerJob()) {
     const input = qs('#costTrackerForm [name="cost_tracker_date"]');
     if (!input) return;
 
     const range = realProjectDateRange(job);
-    try { input.type = "text"; } catch {}
-    input.readOnly = true;
-    input.placeholder = "Project dates";
+    if (input.type !== "text") { try { input.type = "text"; } catch {} }
+    if (!input.readOnly) input.readOnly = true;
+    if (input.placeholder !== "Project dates") input.placeholder = "Project dates";
     input.value = range || "";
-    input.dataset.projectDatesLocked = "true";
+    if (input.dataset.projectDatesLocked !== "true") input.dataset.projectDatesLocked = "true";
 
     const label = input.closest?.(".project-dates-cell, label");
     if (label) {
-      Array.from(label.childNodes).forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) node.nodeValue = "PROJECT DATES:";
-      });
-      label.classList.add("project-dates-cell");
+      setTextNodes(label, "PROJECT DATES:");
+      if (!label.classList.contains("project-dates-cell")) label.classList.add("project-dates-cell");
     }
   }
 
   function fitTmAfeWoPoHeader() {
     const tmCell = qs("#sheetJobNumber")?.closest?.(".sheet-meta-cell");
     if (tmCell) {
-      tmCell.classList.add("tm-afe-wo-po-header-cell");
-      Array.from(tmCell.childNodes).forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) node.nodeValue = LABEL;
-      });
-      tmCell.title = LABEL;
+      if (!tmCell.classList.contains("tm-afe-wo-po-header-cell")) tmCell.classList.add("tm-afe-wo-po-header-cell");
+      setTextNodes(tmCell, LABEL);
+      if (tmCell.title !== LABEL) tmCell.title = LABEL;
     }
 
     const picker = qs("#costTrackerForm .sheet-job-picker");
     if (picker) {
       const select = qs('select[name="job_id"]', picker);
-      Array.from(picker.childNodes).forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) node.nodeValue = `${LABEL} `;
-      });
+      setTextNodes(picker, `${LABEL} `);
       if (select && select.previousSibling?.nodeType !== Node.TEXT_NODE) {
         picker.insertBefore(document.createTextNode(`${LABEL} `), select);
       }
@@ -31279,7 +31479,7 @@ function on(selector, eventName, handler) {
         pieces.push(sectionHeader("Awaiting Approval / Submitted", review.length, sectionRateTotal(review)));
         pieces.push(review.map(renderJobRow).join(""));
       }
-      tbody.innerHTML = pieces.join("") || `<tr><td colspan="6" class="muted">No open jobs found.</td></tr>`;
+      tbody.innerHTML = pieces.join("") || `<tr><td colspan="6" class="muted">${window.PIMP_DATA_LOADED ? "No open jobs found." : "Loading open jobs…"}</td></tr>`;
       tbody.dataset.pimpOpenJobsSubmittedGrouped = "true";
       tbody.dataset.stableOpenJobsRenderer = "job-number-v1";
       try { if (typeof window.PIMP_cleanupSubmittedLabelsAndClasses === "function") window.PIMP_cleanupSubmittedLabelsAndClasses(tbody); } catch {}
@@ -31330,6 +31530,10 @@ function on(selector, eventName, handler) {
   window.PIMP_renderOpenJobsGroupedByInvoiceStatus = renderStableOpenJobs;
   window.renderDashboardActiveJobs = renderStableOpenJobs;
   try { renderDashboardActiveJobs = renderStableOpenJobs; } catch {}
+  // Closed Jobs (renderClosedJobsFinal) asks these too, so both pages use one
+  // rule for a job's latest invoice and every job is listed on exactly one.
+  window.PIMP_latestInvoiceForJob = latestInvoiceForJob;
+  window.PIMP_jobInvoiceSection = statusSection;
 
   wrapAfter("showView", renderStableOpenJobs);
   wrapAfter("renderAll", renderStableOpenJobs);
@@ -31407,10 +31611,12 @@ function on(selector, eventName, handler) {
     const input = qs('#costTrackerForm [name="cost_tracker_date"]');
     if (!input) return;
     const range = desiredProjectDates(job || selectedCostTrackerJob());
-    try { input.type = "text"; } catch {}
-    input.readOnly = true;
-    input.placeholder = "Project dates";
-    input.dataset.projectDatesLocked = "true";
+    // formObserver re-runs this after every change in the form, so write only
+    // what differs (an identical write still counts as a DOM change).
+    if (input.type !== "text") { try { input.type = "text"; } catch {} }
+    if (!input.readOnly) input.readOnly = true;
+    if (input.placeholder !== "Project dates") input.placeholder = "Project dates";
+    if (input.dataset.projectDatesLocked !== "true") input.dataset.projectDatesLocked = "true";
     const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
     if (desc && !input.__pimpProjectDateValueLocked) {
       input.__pimpProjectDateValueLocked = true;
@@ -31428,9 +31634,9 @@ function on(selector, eventName, handler) {
     input.value = range || "";
     const label = input.closest?.(".project-dates-cell, label");
     if (label) {
-      label.classList.add("project-dates-cell");
+      if (!label.classList.contains("project-dates-cell")) label.classList.add("project-dates-cell");
       Array.from(label.childNodes || []).forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) node.nodeValue = "PROJECT DATES:";
+        if (node.nodeType === Node.TEXT_NODE && node.nodeValue !== "PROJECT DATES:") node.nodeValue = "PROJECT DATES:";
       });
     }
   }
@@ -31634,6 +31840,26 @@ function on(selector, eventName, handler) {
   }
 
   ["renderAll", "renderDashboardActiveJobs", "renderJobs", "renderInvoices", "renderCostTrackers"].forEach(coalesce);
+
+  // Runs draw() as one burst, so each table above renders once however many
+  // renderers it calls. The data loader draws through this: it calls renderAll
+  // and then each table again as a safety net, which redrew every table twice.
+  window.PIMP_renderAsOneBurst = function renderAsOneBurst(draw) {
+    burstDepth++;
+    if (burstDepth === 1) {
+      renderedThisBurst = new Set();
+      window.__pimpRendering = true;
+    }
+    try {
+      return draw();
+    } finally {
+      burstDepth--;
+      if (burstDepth === 0) {
+        renderedThisBurst = null;
+        window.__pimpRendering = false;
+      }
+    }
+  };
 })();
 
 /* ============================================================================
@@ -33596,5 +33822,523 @@ function on(selector, eventName, handler) {
     if (event.target?.matches?.('#invoiceSourceCostTracker, #invoiceForm [name="job_id"], #invoiceForm [name="cost_tracker_id"], #invoicePageJobSelect')) {
       applySoon();
     }
+  });
+})();
+
+/* ==========================================================================
+   JOBS: WEEKEND WORK DAYS
+   --------------------------------------------------------------------------
+   Total Days counts Monday–Friday unless the job says otherwise. The job
+   popup's Job Dates field has a "Weekends" option: not worked, all worked
+   (every Saturday and Sunday in the date range), or pick days (only the
+   weekend dates ticked below it).
+
+   The choice lives in the hidden weekend_days input as JSON, in the same shape
+   saved to jobs.weekend_days, so formToObject() carries it into
+   buildJobPayload, where the workdays patch counts and stores it. That input
+   is the only state: the Weekends options and the date chips are redrawn from
+   it. Note that form.reset() does not clear a hidden input (its value *is* its
+   default), so the reset listener below clears it by hand.
+
+   Requires a weekend_days column on the Supabase jobs table:
+     alter table public.jobs add column if not exists weekend_days jsonb;
+   Until it exists, jobs still save — as weekdays only — and a toast says why.
+   ========================================================================== */
+(function jobWeekendDays() {
+  function qs(selector, root) { return (root || document).querySelector(selector); }
+
+  function esc(value) {
+    return typeof escapeHtml === "function"
+      ? escapeHtml(value)
+      : String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+        ));
+  }
+
+  function toast(message, isError) {
+    try { if (typeof showToast === "function") showToast(message, Boolean(isError)); } catch {}
+  }
+
+  function hiddenInput() { return qs('#jobForm [name="weekend_days"]'); }
+
+  function parse(value) {
+    return typeof window.PIMP_parseJobWeekendDays === "function" ? window.PIMP_parseJobWeekendDays(value) : null;
+  }
+
+  function readSelection() { return parse(hiddenInput()?.value); }
+
+  function writeSelection(selection) {
+    const input = hiddenInput();
+    if (input) input.value = selection ? JSON.stringify(selection) : "";
+  }
+
+  function parseDate(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ""));
+    return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null;
+  }
+
+  function isoDate(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  }
+
+  // The weekday count and the Saturday/Sunday dates from the start date
+  // through the end date, or null until a start date is picked.
+  function daysInRange() {
+    const form = qs("#jobForm");
+    const start = parseDate(form?.querySelector('[name="start_date"]')?.value);
+    const end = parseDate(form?.querySelector('[name="end_date"]')?.value) || start;
+    if (!start || !end) return null;
+    const [from, to] = start <= end ? [start, end] : [end, start];
+    const range = { weekdays: 0, weekends: [] };
+    for (const cursor = new Date(from.getTime()); cursor <= to; cursor.setDate(cursor.getDate() + 1)) {
+      const day = cursor.getDay();
+      if (day === 0 || day === 6) range.weekends.push(isoDate(cursor));
+      else range.weekdays += 1;
+    }
+    return range;
+  }
+
+  function weekendDatesInRange() { return daysInRange()?.weekends || []; }
+
+  function plural(count, word) { return `${count} ${word}${count === 1 ? "" : "s"}`; }
+
+  // Spells out what Total Days is made of.
+  function noteText(selection) {
+    const range = daysInRange();
+    if (!range) return "Pick the start and end dates.";
+    const weekdays = plural(range.weekdays, "weekday");
+    if (!selection) return `${weekdays}. Saturdays and Sundays are not counted.`;
+    if (!range.weekends.length) return `${weekdays}. There are no Saturdays or Sundays between these dates.`;
+    if (selection.mode === "all") return `${weekdays} + ${plural(range.weekends.length, "weekend day")}.`;
+    const picked = new Set(selection.dates);
+    const count = range.weekends.filter((date) => picked.has(date)).length;
+    return `${weekdays} + ${count} of ${plural(range.weekends.length, "weekend day")}. Tick the weekend days worked below.`;
+  }
+
+  // Saturday + Sunday pairs stay together so each weekend reads as one unit.
+  function chipsHtml(weekendDates, selection) {
+    const picked = new Set(selection?.mode === "custom" ? selection.dates : []);
+    const weekends = [];
+    weekendDates.forEach((iso) => {
+      const last = weekends[weekends.length - 1];
+      const followsSaturday = last && parseDate(iso).getDay() === 0 && parseDate(last[last.length - 1]).getDay() === 6;
+      if (followsSaturday) last.push(iso);
+      else weekends.push([iso]);
+    });
+    return weekends.map((dates) => `
+      <div class="job-weekend-pair">${dates.map((iso) => {
+        const label = parseDate(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+        return `<label class="job-weekend-chip"><input type="checkbox" data-weekend-date="${esc(iso)}"${picked.has(iso) ? " checked" : ""} /><span>${esc(label)}</span></label>`;
+      }).join("")}</div>
+    `).join("");
+  }
+
+  // Weekends options, note and Total Days — cheap enough to run on every tick
+  // of a box.
+  function renderSummary() {
+    const selection = readSelection();
+    const mode = selection?.mode || "none";
+    document.querySelectorAll('#jobForm [name="weekend_mode"]').forEach((radio) => {
+      radio.checked = radio.value === mode;
+    });
+    const note = qs("#jobWeekendNote");
+    if (note) note.textContent = noteText(selection);
+    try { if (typeof window.syncJobTotalDaysField === "function") window.syncJobTotalDaysField(); } catch {}
+  }
+
+  // Also rebuilds the chips, so it runs only when the dates or the mode change
+  // (rebuilding on every tick would drop keyboard focus from the box).
+  function render() {
+    const selection = readSelection();
+    const picker = qs("#jobWeekendPicker");
+    if (picker) picker.hidden = selection?.mode !== "custom";
+    const list = qs("#jobWeekendDates");
+    if (list) list.innerHTML = selection?.mode === "custom" ? chipsHtml(weekendDatesInRange(), selection) : "";
+    renderSummary();
+  }
+
+  function setMode(mode) {
+    const current = readSelection();
+    if (mode === "all") writeSelection({ mode: "all" });
+    else if (mode === "custom") {
+      // Start from whatever was already being counted, so switching to the
+      // picker never changes Total Days by itself.
+      const dates = current?.mode === "custom" ? current.dates
+        : current?.mode === "all" ? weekendDatesInRange()
+        : [];
+      writeSelection({ mode: "custom", dates });
+    } else writeSelection(null);
+    render();
+  }
+
+  function setDatePicked(iso, picked) {
+    const selection = readSelection();
+    const dates = new Set(selection?.mode === "custom" ? selection.dates : []);
+    if (picked) dates.add(iso);
+    else dates.delete(iso);
+    writeSelection({ mode: "custom", dates: Array.from(dates).sort() });
+    renderSummary();
+  }
+
+  function quickPick(kind) {
+    const weekendDates = weekendDatesInRange();
+    const selection = readSelection();
+    const dates = new Set(kind === "clear" || selection?.mode !== "custom" ? [] : selection.dates);
+    const weekday = kind === "sat" ? 6 : kind === "sun" ? 0 : null;
+    if (weekday !== null) weekendDates.forEach((iso) => { if (parseDate(iso).getDay() === weekday) dates.add(iso); });
+    writeSelection({ mode: "custom", dates: Array.from(dates).sort() });
+    render();
+  }
+
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (target?.matches?.('#jobForm [name="weekend_mode"]')) {
+      // Only "Clear All" reports a radio going unchecked (it unchecks them all
+      // and blanks the hidden input). Redraw afterwards so the right option is
+      // selected whichever order it clears the fields in.
+      if (target.checked) setMode(target.value);
+      else setTimeout(render, 0);
+      return;
+    }
+    if (target?.matches?.("#jobWeekendDates [data-weekend-date]")) setDatePicked(target.dataset.weekendDate, target.checked);
+  });
+
+  document.addEventListener("click", (event) => {
+    const quick = event.target.closest?.("#jobWeekendPicker [data-weekend-quick]");
+    if (quick) { event.preventDefault(); quickPick(quick.dataset.weekendQuick); }
+  });
+
+  // New dates mean a different set of weekends to pick from. "Clear All" also
+  // lands here: it blanks the hidden input and fires input events on it.
+  document.addEventListener("input", (event) => {
+    if (event.target?.matches?.('#jobForm [name="start_date"], #jobForm [name="end_date"], #jobForm [name="weekend_days"]')) render();
+  });
+
+  document.addEventListener("reset", (event) => {
+    if (event.target?.id !== "jobForm") return;
+    writeSelection(null);
+    setTimeout(render, 0); // after the browser has reset the radios
+  }, true);
+
+  // Editing a job: show its saved choice. Every edit path (job rows, the Open
+  // Jobs table, Job Details) goes through window.loadJobIntoForm.
+  const previousLoadJobIntoForm = typeof window.loadJobIntoForm === "function" ? window.loadJobIntoForm : null;
+  if (previousLoadJobIntoForm) {
+    window.loadJobIntoForm = function loadJobIntoFormWithWeekendDays(job) {
+      const result = previousLoadJobIntoForm.apply(this, arguments);
+      writeSelection(parse(job?.weekend_days));
+      render();
+      return result;
+    };
+  }
+
+  // Back to "create" mode (used by Create Job for Cost Tracker, which does not
+  // reset the whole form) starts from weekdays only as well.
+  const previousResetJobFormMode = typeof window.resetJobFormMode === "function" ? window.resetJobFormMode : null;
+  if (previousResetJobFormMode) {
+    window.resetJobFormMode = function resetJobFormModeWithWeekendDays() {
+      const result = previousResetJobFormMode.apply(this, arguments);
+      writeSelection(null);
+      render();
+      return result;
+    };
+  }
+
+  /* --- Saving before the weekend_days column exists --------------------------
+     Saving a column the table does not have fails the whole save, so retry
+     without it. Total Days is then stored as weekdays only, because that is
+     what every job table will count without a saved weekend_days, and the
+     toast afterwards says what was dropped. */
+  let weekendColumnMissing = false;
+  let weekendDaysDropped = false;
+
+  const previousSaveJob = typeof window.saveJobToSupabase === "function" ? window.saveJobToSupabase : null;
+  if (previousSaveJob) {
+    window.saveJobToSupabase = async function saveJobWithWeekendDaysFallback(payload, editingId) {
+      if (!payload || !("weekend_days" in payload)) return previousSaveJob.apply(this, arguments);
+      if (!weekendColumnMissing) {
+        try {
+          return await previousSaveJob.call(this, payload, editingId);
+        } catch (error) {
+          if (!/weekend_days/i.test(String(error?.message || error))) throw error;
+          weekendColumnMissing = true;
+          console.warn("jobs.weekend_days is missing in Supabase; saving jobs without weekend days.", error);
+        }
+      }
+      const { weekend_days: weekendDays, ...withoutWeekendDays } = payload;
+      if (weekendDays) {
+        weekendDaysDropped = true;
+        withoutWeekendDays.total_job_days = window.calculateJobDays(withoutWeekendDays.start_date, withoutWeekendDays.end_date) || null;
+      }
+      return previousSaveJob.call(this, withoutWeekendDays, editingId);
+    };
+  }
+
+  const previousHandleCreateJob = typeof window.handleCreateJob === "function" ? window.handleCreateJob : null;
+  if (previousHandleCreateJob) {
+    window.handleCreateJob = async function handleCreateJobWithWeekendDaysNotice() {
+      weekendDaysDropped = false;
+      const result = await previousHandleCreateJob.apply(this, arguments);
+      if (weekendDaysDropped) {
+        toast("Job saved, but without its weekend days: the Supabase jobs table needs a weekend_days column first. Total Days was saved as weekdays only.", true);
+      }
+      return result;
+    };
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", render, { once: true });
+  } else {
+    render();
+  }
+})();
+
+/* ==========================================================================
+   TIMESHEETS: WEEKLY PDF UPLOADS
+   --------------------------------------------------------------------------
+   "Upload Timesheet PDF" (and the Upload PDF button on each week and job
+   folder) opens a popup that files one or more PDFs under a week, and
+   optionally a job. Files go to the "job-documents" storage bucket like every
+   other upload, each with a documents row whose external_id is
+   "timesheet-week:<monday>:<storage path>" — that tag is what files it under
+   its week in the Saved Timesheets folders (installTimesheetJobFoldersAndEditingPatch).
+   A PDF uploaded for a job also shows in that job's Job Details timesheets.
+   ========================================================================== */
+(function timesheetWeeklyPdfUploads() {
+  const BUCKET = "job-documents";
+  const MAX_INLINE_BYTES = 10 * 1024 * 1024; // same cap as the Job Details upload fallback
+
+  function qs(selector, root) { return (root || document).querySelector(selector); }
+
+  function esc(value) {
+    return typeof escapeHtml === "function"
+      ? escapeHtml(value)
+      : String(value == null ? "" : value).replace(/[&<>"']/g, (c) => (
+          { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+        ));
+  }
+
+  function toast(message, isError) {
+    try { if (typeof showToast === "function") showToast(message, Boolean(isError)); } catch {}
+  }
+
+  function weeks() { return window.PIMP_timesheetWeeks || null; }
+
+  function overlay() { return qs("#timesheetUploadModalOverlay"); }
+
+  function todayIso() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
+
+  function populateJobs(selectedJobId) {
+    const select = qs("#timesheetUploadJob");
+    if (!select) return;
+    const jobs = (state?.data?.jobs || []).slice().sort((a, b) =>
+      String(a.job_number || "").localeCompare(String(b.job_number || ""), undefined, { numeric: true }));
+    select.innerHTML = '<option value="">No specific job</option>' + jobs.map((job) =>
+      `<option value="${esc(job.id)}">${esc(`${job.job_number || "No #"} — ${job.job_name || "Untitled Job"}`)}</option>`).join("");
+    const keep = jobs.some((job) => String(job.id) === String(selectedJobId || ""));
+    select.value = keep ? String(selectedJobId) : "";
+  }
+
+  function updateWeekHint() {
+    const hint = qs("#timesheetUploadWeekHint");
+    if (!hint) return;
+    const weekStart = weeks()?.weekStartOf(qs("#timesheetUploadWeek")?.value);
+    hint.textContent = weekStart ? `Files under the week of ${weeks().weekLabel(weekStart)}.` : "Pick any day in the week.";
+  }
+
+  function openUpload({ weekStart = "", jobId = "" } = {}) {
+    const form = qs("#timesheetUploadForm");
+    const box = overlay();
+    if (!form || !box) return;
+    form.reset();
+    qs("#timesheetUploadWeek").value = weekStart || todayIso();
+    populateJobs(jobId);
+    updateWeekHint();
+    box.classList.remove("hidden");
+    box.setAttribute("aria-hidden", "false");
+    document.body.classList.add("job-modal-open");
+    setTimeout(() => { try { qs("#timesheetUploadFile")?.focus({ preventScroll: true }); } catch {} }, 30);
+  }
+
+  function closeUpload() {
+    const box = overlay();
+    if (!box || box.classList.contains("hidden")) return;
+    box.classList.add("hidden");
+    box.setAttribute("aria-hidden", "true");
+    if (!qs(".job-modal-overlay:not(.hidden)")) document.body.classList.remove("job-modal-open");
+  }
+
+  function isPdf(file) {
+    return /pdf/i.test(file?.type || "") || /\.pdf$/i.test(file?.name || "");
+  }
+
+  function cleanFileName(name) {
+    return String(name || "timesheet.pdf").replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(-120) || "timesheet.pdf";
+  }
+
+  function readAsBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || "").split(",").pop());
+      reader.onerror = () => reject(reader.error || new Error("Could not read the PDF."));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /* documents rows differ between Supabase projects: document_type may be an
+     enum or check constraint, uploaded_by may reference a users table, and
+     some descriptive columns may be missing — so try the fullest row first and
+     fall back, as the Job Details upload does. That upload's shared saver is
+     not reused because it re-derives the type from the file name, which would
+     file e.g. "Pecos_bid_week.pdf" as a Cost Tracker. */
+  const RETRYABLE = /enum|check constraint|foreign key|uploaded_by|column|schema cache|could not find/i;
+  const OPTIONAL_COLUMNS = ["uploaded_by", "original_file_name", "mime_type", "file_size"];
+
+  async function insertDocumentRow(row) {
+    const full = { ...row, uploaded_by: state?.session?.user?.id || null };
+    const withoutUploader = { ...full };
+    delete withoutUploader.uploaded_by;
+    const lean = Object.fromEntries(Object.entries(full).filter(([column]) => !OPTIONAL_COLUMNS.includes(column)));
+    let lastError = null;
+    for (const documentType of ["Timesheet", "timesheet", "Job File", "job_file"]) {
+      for (const shape of [full, withoutUploader, lean]) {
+        const attempt = { ...shape, document_type: documentType };
+        const { data, error } = await state.supabase.from("documents").insert(attempt).select().single();
+        if (!error) return { ...attempt, ...(data || {}) };
+        lastError = error;
+        if (!RETRYABLE.test(String(error.message || ""))) throw error;
+      }
+    }
+    throw lastError || new Error("The documents table did not accept the upload.");
+  }
+
+  async function uploadOne(file, weekStart, jobId) {
+    const path = `timesheet-weeks/${weekStart}/${jobId || "no-job"}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${cleanFileName(file.name)}`;
+    const row = {
+      job_id: jobId || null,
+      file_name: file.name,
+      original_file_name: file.name,
+      file_status: "uploaded",
+      external_source: "timesheet-week-upload",
+      external_id: `${weeks().WEEK_UPLOAD_TAG}${weekStart}:${path}`,
+      last_synced_at: new Date().toISOString(),
+      mime_type: file.type || "application/pdf",
+      file_size: file.size || 0
+    };
+
+    let storageError = null;
+    try {
+      const { error } = await state.supabase.storage.from(BUCKET).upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: row.mime_type
+      });
+      if (error) throw error;
+    } catch (error) {
+      storageError = error;
+    }
+
+    if (!storageError) {
+      try {
+        return await insertDocumentRow({ ...row, storage_bucket: BUCKET, storage_path: path });
+      } catch (error) {
+        // No record means nothing could ever open the file; don't strand it.
+        try { await state.supabase.storage.from(BUCKET).remove([path]); } catch {}
+        throw error;
+      }
+    }
+
+    // Storage refused the file (bucket or policy not set up): keep the PDF in
+    // the row itself instead, as the Job Details upload does for small files.
+    console.warn("Timesheet PDF storage upload failed; saving it in the documents row instead:", storageError);
+    if ((file.size || 0) > MAX_INLINE_BYTES) {
+      throw new Error(`File storage refused the upload (${storageError?.message || storageError}), and "${file.name}" is too large to save without it.`);
+    }
+    return insertDocumentRow({
+      ...row,
+      external_source: "timesheet-week-inline-upload",
+      file_data_base64: await readAsBase64(file),
+      file_data_mime_type: row.mime_type,
+      file_data_size: row.file_size,
+      storage_error_message: String(storageError?.message || storageError || "Storage upload failed")
+    });
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!state?.supabase || !state?.session) {
+      toast("Sign in before uploading timesheets.", true);
+      return;
+    }
+    const helpers = weeks();
+    const weekStart = helpers?.weekStartOf(qs("#timesheetUploadWeek")?.value) || "";
+    const jobId = qs("#timesheetUploadJob")?.value || "";
+    const files = Array.from(qs("#timesheetUploadFile")?.files || []);
+    if (!weekStart) { toast("Pick the week these timesheets belong to.", true); return; }
+    if (!files.length) { toast("Choose a timesheet PDF to upload.", true); return; }
+    const notPdf = files.filter((file) => !isPdf(file));
+    if (notPdf.length) {
+      toast(`Only PDF files can be uploaded here. Not a PDF: ${notPdf.map((file) => file.name).join(", ")}`, true);
+      return;
+    }
+
+    const button = qs("#timesheetUploadSubmitBtn");
+    const buttonText = button?.textContent || "Upload";
+    if (button) button.disabled = true;
+    let uploaded = 0;
+    try {
+      for (const file of files) {
+        if (button) button.textContent = files.length > 1 ? `Uploading ${uploaded + 1} of ${files.length}…` : "Uploading…";
+        const doc = await uploadOne(file, weekStart, jobId);
+        if (typeof mergeStateRow === "function") mergeStateRow("documents", doc);
+        uploaded += 1;
+      }
+      closeUpload();
+      toast(`${uploaded === 1 ? "Timesheet PDF" : `${uploaded} timesheet PDFs`} uploaded to the week of ${helpers.weekLabel(weekStart)}.`);
+    } catch (error) {
+      console.error("Timesheet PDF upload failed:", error);
+      const done = uploaded ? `${uploaded} of ${files.length} uploaded, then one failed` : "Upload failed";
+      toast(`${done}: ${error?.message || error}`, true);
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = buttonText;
+      }
+      if (uploaded) {
+        helpers.openWeekFolders(weekStart, jobId);
+        try { if (typeof refreshWebsiteLists === "function") refreshWebsiteLists(); else window.renderTimesheets?.(); } catch {}
+        try { if (jobId) window.__pimpRefreshOpenJobDetails?.(jobId); } catch {}
+      }
+    }
+  }
+
+  document.addEventListener("submit", (event) => {
+    if (event.target?.id === "timesheetUploadForm") handleSubmit(event);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest?.("#uploadTimesheetPdfBtn")) {
+      event.preventDefault();
+      openUpload();
+      return;
+    }
+    const folderButton = event.target.closest?.("[data-upload-timesheet-week]");
+    if (folderButton) {
+      event.preventDefault();
+      openUpload({ weekStart: folderButton.dataset.uploadTimesheetWeek, jobId: folderButton.dataset.uploadTimesheetJob || "" });
+      return;
+    }
+    if (event.target.closest?.("#closeTimesheetUploadBtn, #cancelTimesheetUploadBtn") || event.target === overlay()) closeUpload();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeUpload();
+  });
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.id === "timesheetUploadWeek") updateWeekHint();
   });
 })();
