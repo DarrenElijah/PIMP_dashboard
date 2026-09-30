@@ -27575,6 +27575,8 @@ ${docs.length ? `
   async function loadAllDataSafely(options = {}) {
     if (!state?.supabase || !state?.session) return;
     const silent = Boolean(options.silent);
+    // Normally applied when the client is created; this covers any other client.
+    try { window.PIMP_withSlimSavedCopies?.(state.supabase); } catch {}
 
     // options.only ("expenses" | ["jobs","clients"] | table name) narrows the
     // refetch to the named tables. Post-mutation reloads use this so saving a
@@ -27624,6 +27626,107 @@ ${docs.length ? `
     if (!event.target?.closest?.("#refreshBtn")) return;
     window.setTimeout(() => window.loadAllData({ manual: true }), 0);
   }, true);
+})();
+
+/* ========================================================================
+   SAVED COPIES WITHOUT THE EMBEDDED LOGO
+   ------------------------------------------------------------------------
+   Invoice and timesheet copies (html_snapshot) embed the ~500 KB logo as a
+   data URL, and a timesheet saves one copy per crew member, so saving a
+   six-person timesheet sent about 3 MB and downloaded it again. Copies are
+   now saved with src="NEW_logo.png" in place of the data URL, and the data
+   URL is put back into every copy read from Supabase (including the rows a
+   save returns), so previews, printing and PDFs get the same HTML as before.
+   Copies saved earlier keep their embedded logo and work as they did.
+   ======================================================================== */
+(function installSavedCopiesWithoutEmbeddedLogo() {
+  const PATCH_FLAG = "__pimpSavedCopiesWithoutEmbeddedLogo";
+  if (window[PATCH_FLAG]) return;
+  window[PATCH_FLAG] = true;
+
+  const SAVED_LOGO_SRC = "NEW_logo.png";
+  const SAVED_LOGO_ATTRIBUTE = /src=(["'])NEW_logo\.png\1/g;
+
+  function logoDataUrl() {
+    const value = window.PIMP_LOGO_DATA_URL;
+    return typeof value === "string" && value.startsWith("data:") ? value : "";
+  }
+
+  function slimRow(row) {
+    const logo = logoDataUrl();
+    if (!logo || !row || typeof row !== "object" || typeof row.html_snapshot !== "string" || !row.html_snapshot.includes(logo)) return row;
+    return { ...row, html_snapshot: row.html_snapshot.split(logo).join(SAVED_LOGO_SRC) };
+  }
+
+  function slimValues(values) {
+    return Array.isArray(values) ? values.map(slimRow) : slimRow(values);
+  }
+
+  function restoreRow(row) {
+    const logo = logoDataUrl();
+    if (!logo || !row || typeof row !== "object" || typeof row.html_snapshot !== "string" || !row.html_snapshot.includes(SAVED_LOGO_SRC)) return;
+    row.html_snapshot = row.html_snapshot.replace(SAVED_LOGO_ATTRIBUTE, (_match, quote) => `src=${quote}${logo}${quote}`);
+  }
+
+  function restoreResponse(response) {
+    const data = response && typeof response === "object" ? response.data : null;
+    if (Array.isArray(data)) data.forEach(restoreRow);
+    else if (data) restoreRow(data);
+    return response;
+  }
+
+  // Query builders are thenables; chained filters and .select()/.single()
+  // return the same builder, so one wrapped then() covers the whole chain.
+  function restoreWhenDone(builder) {
+    if (!builder || typeof builder.then !== "function" || builder.__pimpRestoresSavedLogo) return builder;
+    const originalThen = builder.then;
+    builder.then = function thenWithSavedLogoRestored(onFulfilled, onRejected) {
+      return originalThen.call(this, (response) => {
+        const restored = restoreResponse(response);
+        return typeof onFulfilled === "function" ? onFulfilled(restored) : restored;
+      }, onRejected);
+    };
+    builder.__pimpRestoresSavedLogo = true;
+    return builder;
+  }
+
+  function withSlimSavedCopies(client) {
+    if (!client || typeof client.from !== "function" || client.__pimpSlimSavedCopies) return client;
+    const originalFrom = client.from;
+    client.from = function fromWithSlimSavedCopies() {
+      const query = originalFrom.apply(this, arguments);
+      if (!query || typeof query !== "object") return query;
+      ["insert", "upsert", "update"].forEach((method) => {
+        const original = query[method];
+        if (typeof original !== "function") return;
+        query[method] = function (values, ...rest) {
+          return restoreWhenDone(original.call(this, slimValues(values), ...rest));
+        };
+      });
+      const originalSelect = query.select;
+      if (typeof originalSelect === "function") {
+        query.select = function () {
+          return restoreWhenDone(originalSelect.apply(this, arguments));
+        };
+      }
+      return query;
+    };
+    client.__pimpSlimSavedCopies = true;
+    return client;
+  }
+
+  window.PIMP_withSlimSavedCopies = withSlimSavedCopies;
+
+  // The one Supabase client is created by initSupabase() at startup.
+  if (typeof initSupabase === "function") {
+    const previousInitSupabase = initSupabase;
+    initSupabase = function initSupabaseWithSlimSavedCopies() {
+      const result = previousInitSupabase.apply(this, arguments);
+      try { withSlimSavedCopies(state?.supabase); } catch (error) { console.warn("Saved-copy logo patch failed:", error); }
+      return result;
+    };
+  }
+  try { withSlimSavedCopies(state?.supabase); } catch {}
 })();
 
 /* ========================================================================
@@ -32346,13 +32449,16 @@ function on(selector, eventName, handler) {
     const placeholder = select.querySelector('option[value=""]');
     if (!placeholder) return;
 
+    // Write only when the label differs: this runs from a MutationObserver on
+    // the rows, and rewriting the same text counts as a change, which retriggered
+    // it forever and froze the page on any row with an unmatched name.
     if (!select.value && savedName) {
       if (placeholder.dataset.pimpOriginalLabel === undefined) {
         placeholder.dataset.pimpOriginalLabel = placeholder.textContent || "";
       }
-      placeholder.textContent = savedName;
+      if (placeholder.textContent !== savedName) placeholder.textContent = savedName;
     } else if (placeholder.dataset.pimpOriginalLabel !== undefined) {
-      placeholder.textContent = placeholder.dataset.pimpOriginalLabel;
+      if (placeholder.textContent !== placeholder.dataset.pimpOriginalLabel) placeholder.textContent = placeholder.dataset.pimpOriginalLabel;
       delete placeholder.dataset.pimpOriginalLabel;
     }
   }
@@ -34341,4 +34447,478 @@ function on(selector, eventName, handler) {
   document.addEventListener("input", (event) => {
     if (event.target?.id === "timesheetUploadWeek") updateWeekHint();
   });
+})();
+
+/* ==========================================================================
+   COST TRACKER MATERIAL LIST
+   --------------------------------------------------------------------------
+   "Material list" in the MATERIALS AND ADDITIONAL header opens a window with
+   the company's material prices. Picking amounts turns each material into a
+   Materials row: the description records the amount and unit price, Cost is
+   amount x price, and the usual 25% markup applies. Rows can still be typed
+   by hand with "+ row".
+
+   Reopening the window shows what is already on the tracker (the rows it
+   added, recognised by "<name> — <amount> ..."), so amounts can be changed,
+   or set to 0 to remove that row. Rows typed by hand are never touched.
+
+   Prices: edit MATERIAL_PRICE_LIST below (price is per unit).
+   ========================================================================== */
+(function costTrackerMaterialList() {
+  if (window.__pimpCostTrackerMaterialList) return;
+  window.__pimpCostTrackerMaterialList = true;
+
+  // Shown in this order; PIR is used least, so it comes last.
+  const MATERIAL_GROUPS = [
+    { id: "insulation", label: "Insulation" },
+    { id: "tubewrap", label: "Tube Wrap" },
+    { id: "jacketing", label: "Jacketing & Weatherproofing" },
+    { id: "elbows", label: "Aluminum Elbows" },
+    { id: "banding", label: "Banding, Tape & Rope" },
+    { id: "hardware", label: "Fasteners & Hardware" },
+    { id: "sealants", label: "Sealants" },
+    { id: "pir", label: "2# PIR Pipe Insulation" }
+  ];
+
+  const MATERIAL_PRICE_LIST = [
+    { id: "ceramic-fiber-1in-roll", group: "insulation", name: "Ceramic Fiber #8 / 1\"", price: 93, unit: "roll", pack: "50 SF roll · 1\" × 24\" × 25'" },
+    { id: "ceramic-fiber-2in-roll", group: "insulation", name: "Ceramic Fiber #8 / 2\"", price: 186, unit: "roll", pack: "50 SF roll · 2\" × 48\" × 12.5'" },
+    { id: "ceramic-fiber-2in-sf", group: "insulation", name: "2\" Ceramic Fiber 8# (inner layer)", price: 3.5, unit: "SF", pack: "Comes in 50 SF rolls (2' × 25')" },
+    { id: "mineral-wool-fsk-2in", group: "insulation", name: "2\" Mineral Wool, FSK Cover (inner layer)", price: 2.88, unit: "SF", pack: "Comes in 60 SF rolls (3' × 20')" },
+    { id: "mass-loaded-vinyl", group: "insulation", name: "Mass Loaded Vinyl (2#/SF)", price: 3.6, unit: "SF", pack: "Comes in 100 SF rolls (4' × 25')" },
+
+    { id: "tube-wrap-1", group: "tubewrap", name: "1\" Tube Wrap", price: 11.5, unit: "ft" },
+    { id: "tube-wrap-4", group: "tubewrap", name: "4\" Tube Wrap", price: 16, unit: "ft" },
+    { id: "tube-wrap-6", group: "tubewrap", name: "6\" Tube Wrap", price: 20, unit: "ft" },
+    { id: "tube-wrap-10", group: "tubewrap", name: "10\" Tube Wrap", price: 27, unit: "ft" },
+
+    { id: "stucco-aluminum-roll", group: "jacketing", name: "Stucco Embossed Aluminum Roll", price: 320, unit: "roll", pack: ".016\" × 36\" × 100'" },
+    { id: "aluminum-psmb-032", group: "jacketing", name: "0.032\" Aluminum w/ PSMB (weatherproofing)", price: 2.4, unit: "SF", pack: "Comes in 150 SF rolls (3' × 50')" },
+    { id: "silicone-grey-cloth", group: "jacketing", name: "Silicone Grey Cloth 1700", price: 800, unit: "roll" },
+
+    { id: "al-elbow-9", group: "elbows", name: "2 Piece Aluminum Elbow #9", price: 13.659, unit: "each" },
+    { id: "al-elbow-16", group: "elbows", name: "2 Piece Aluminum Elbow #16", price: 16.328, unit: "each" },
+    { id: "al-elbow-21", group: "elbows", name: "2 Piece Aluminum Elbow #21", price: 21.805, unit: "each" },
+
+    { id: "banding-half-020", group: "banding", name: "Banding 1/2\" x 0.020\"", price: 147, unit: "roll", pack: "28 lb roll (93 ft)" },
+    { id: "ss-banding-three-quarter", group: "banding", name: "SS Banding 3/4\" T-304", price: 5.4, unit: "lb", pack: "Comes in 42 lb rolls (84 ft)" },
+    { id: "filament-tape", group: "banding", name: "Filament Tape 3/4\"", price: 120, unit: "box", pack: "Box of 48 rolls" },
+    { id: "nylon-rope", group: "banding", name: "Nylon Rope 3/8\" x 500'", price: 196, unit: "roll" },
+
+    { id: "speed-washer", group: "hardware", name: "Speed Washer 14GA 2-1/2\"", price: 450, unit: "box", pack: "Box of 1,000" },
+    { id: "self-tap-screws", group: "hardware", name: "T304 #8 x 1/2\" Self-Tap Screws w/ Neoprene Washers", price: 75, unit: "box", pack: "Box of 100" },
+    { id: "hog-rings", group: "hardware", name: "Hog Rings 3/4\" 304", price: 225, unit: "box", pack: "Box of 1,000" },
+    { id: "toggle-latch", group: "hardware", name: "Toggle Latch Model IWR802", price: 450, unit: "box", pack: "Box of 100" },
+    { id: "wing-seals", group: "hardware", name: "SS T304 Wing Seals 1/2\"", price: 65, unit: "box", pack: "Box of 1,000" },
+    { id: "velcro-straps", group: "hardware", name: "Velcro Straps", price: 4, unit: "each" },
+
+    { id: "silicone-caulk", group: "sealants", name: "Silicone Caulk Dow Corning RTV", price: 90, unit: "box", pack: "Box of 12" },
+
+    { id: "pir-pc-1-5", group: "pir", name: "2# PIR Insulation PC 1-1/2 x 1-1/2", price: 3.03, unit: "LF" },
+    { id: "pir-pc-2-5", group: "pir", name: "2# PIR Insulation PC 2-1/2 x 1-1/2", price: 4.23, unit: "LF" },
+    { id: "pir-pc-3-5", group: "pir", name: "2# PIR Insulation PC 3-1/2 x 1-1/2", price: 5.63, unit: "LF" },
+    { id: "pir-pc-6", group: "pir", name: "2# PIR Insulation PC 6 x 1-1/2", price: 10, unit: "LF" },
+    { id: "pir-16", group: "pir", name: "2# PIR Insulation 16 x 1-1/2", price: 26.93, unit: "LF" },
+    { id: "pir-24", group: "pir", name: "2# PIR Insulation 24 x 1-1/2", price: 46.13, unit: "LF" },
+    { id: "pir-lr90-16", group: "pir", name: "2# PIR Insulation LR90 16 x 1-1/2", price: 80.8, unit: "each", pack: "Long-radius 90° elbow" },
+    { id: "pir-lr90-24", group: "pir", name: "2# PIR Insulation LR90 24 x 1-1/2", price: 184.54, unit: "each", pack: "Long-radius 90° elbow" }
+  ];
+
+  // Whole units for things counted; any amount for things measured.
+  const UNITS = {
+    each: { label: "each", plural: "each", whole: true },
+    box: { label: "box", plural: "boxes", whole: true },
+    roll: { label: "roll", plural: "rolls", whole: true },
+    LF: { label: "LF", plural: "LF" },
+    SF: { label: "SF", plural: "SF" },
+    ft: { label: "ft", plural: "ft" },
+    lb: { label: "lb", plural: "lb" }
+  };
+  const DEFAULT_MARKUP = 25;
+  const MAX_AMOUNT = 100000;
+
+  window.PIMP_MATERIAL_PRICE_LIST = MATERIAL_PRICE_LIST;
+
+  const priceFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  const moneyFormat = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+  const amountFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+  const byId = new Map(MATERIAL_PRICE_LIST.map((item) => [item.id, item]));
+
+  const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
+  const cents = (value) => Math.round((Number(value) || 0) * 100) / 100;
+  const unitOf = (item) => UNITS[item.unit] || UNITS.each;
+  const lineCost = (item, amount) => cents(item.price * amount);
+
+  function toast(message, isError = false) {
+    try { if (typeof showToast === "function") showToast(message, isError); } catch {}
+  }
+
+  function amountText(item, amount) {
+    const text = amountFormat.format(amount);
+    if (item.unit === "each") return text;
+    const unit = unitOf(item);
+    return `${text} ${amount === 1 ? unit.label : unit.plural}`;
+  }
+
+  function unitPriceText(item) {
+    const price = priceFormat.format(item.price);
+    return item.unit === "each" ? `${price} each` : `${price}/${unitOf(item).label}`;
+  }
+
+  function rowDescription(item, amount) {
+    return `${item.name} — ${amountText(item, amount)} @ ${unitPriceText(item)}`;
+  }
+
+  function cleanAmount(item, value) {
+    let amount = Number(String(value ?? "").replace(/,/g, "").trim());
+    if (!Number.isFinite(amount) || amount <= 0) return 0;
+    amount = Math.min(amount, MAX_AMOUNT);
+    return unitOf(item).whole ? Math.round(amount) : Math.round(amount * 100) / 100;
+  }
+
+  /* --- The Materials rows of the open cost tracker ------------------------ */
+  function materialRows() {
+    return Array.from(document.querySelectorAll('#sheetMaterialsBody .sheet-cost-row[data-category="materials"]'));
+  }
+
+  function field(row, name) {
+    return row.querySelector(`[data-field="${name}"]`);
+  }
+
+  // A row this window added: "<name> — <amount> ...".
+  function listedMaterialInRow(row) {
+    const description = String(field(row, "description")?.value || "").trim();
+    for (const item of MATERIAL_PRICE_LIST) {
+      const prefix = `${item.name} — `;
+      if (!description.startsWith(prefix)) continue;
+      const amount = parseFloat(description.slice(prefix.length).replace(/,/g, ""));
+      if (Number.isFinite(amount) && amount > 0) return { item, amount };
+    }
+    return null;
+  }
+
+  // The template's empty "Materials" row is filled in rather than left above.
+  function isEmptyMaterialsRow(row) {
+    const description = String(field(row, "description")?.value || "").trim().toLowerCase();
+    const cost = Number(field(row, "cost")?.value || 0);
+    return (!description || description === "materials") && !cost;
+  }
+
+  function setRowValue(input, value) {
+    if (!input) return;
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function fillRow(row, item, amount) {
+    setRowValue(field(row, "description"), rowDescription(item, amount));
+    setRowValue(field(row, "cost"), String(lineCost(item, amount)));
+    const markup = field(row, "markup_percent");
+    if (markup && String(markup.value).trim() === "") setRowValue(markup, String(DEFAULT_MARKUP));
+  }
+
+  function recomputeTotals() {
+    try {
+      const recompute = typeof window.recomputeCostTrackerTotals === "function" ? window.recomputeCostTrackerTotals : (typeof recomputeCostTrackerTotals === "function" ? recomputeCostTrackerTotals : null);
+      if (recompute) recompute();
+    } catch (error) {
+      console.warn("Cost tracker totals did not recompute:", error);
+    }
+  }
+
+  /* --- The window ---------------------------------------------------------- */
+  let overlay = null;
+  let picks = new Map(); // item id -> amount
+  let startingPicks = new Map();
+  let showOnlyPicked = false;
+  let openedFrom = null;
+
+  function itemHtml(item) {
+    const unit = unitOf(item);
+    return `
+      <div class="mat-item" data-material-id="${esc(item.id)}">
+        <div class="mat-item-main">
+          <span class="mat-item-name">${esc(item.name)}</span>
+          ${item.pack ? `<span class="mat-item-pack">${esc(item.pack)}</span>` : ""}
+        </div>
+        <div class="mat-item-price">${esc(priceFormat.format(item.price))}<small>/ ${esc(unit.label)}</small></div>
+        <div class="mat-qty">
+          <button type="button" class="mat-qty-btn" data-material-step="-1" aria-label="Less ${esc(item.name)}">−</button>
+          <input type="number" min="0" step="${unit.whole ? "1" : "any"}" inputmode="decimal" placeholder="0" data-material-qty="${esc(item.id)}" aria-label="Amount of ${esc(item.name)}, in ${esc(unit.plural)}" />
+          <button type="button" class="mat-qty-btn" data-material-step="1" aria-label="More ${esc(item.name)}">+</button>
+          <span class="mat-qty-unit">${esc(unit.plural)}</span>
+        </div>
+        <div class="mat-item-total is-empty" data-material-total>—</div>
+      </div>`;
+  }
+
+  function buildOverlay() {
+    overlay = document.createElement("div");
+    overlay.id = "materialPickerOverlay";
+    overlay.className = "mat-picker-overlay hidden";
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <div class="mat-picker-card" role="dialog" aria-modal="true" aria-labelledby="materialPickerTitle">
+        <header class="mat-picker-header">
+          <div>
+            <p class="eyebrow">Cost Tracker · Materials</p>
+            <h3 id="materialPickerTitle">Material list</h3>
+            <p class="mat-picker-subtitle">Enter how much the job needs. Each material is added to Materials with its cost and the usual 25% markup. You can still type your own rows with + row.</p>
+          </div>
+          <button class="icon-btn mat-picker-close" type="button" data-material-picker-close aria-label="Close the material list">×</button>
+        </header>
+        <div class="mat-picker-toolbar">
+          <label class="mat-picker-search">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <input id="materialPickerSearch" type="search" placeholder="Search materials, sizes or units" autocomplete="off" aria-label="Search materials" />
+          </label>
+          <div class="mat-picker-filters" role="group" aria-label="Show">
+            <button type="button" class="mat-chip is-active" data-material-filter="all" aria-pressed="true">All materials</button>
+            <button type="button" class="mat-chip" data-material-filter="picked" aria-pressed="false">Picked <span class="mat-chip-count" data-material-picked-count>0</span></button>
+          </div>
+        </div>
+        <div class="mat-picker-columns" aria-hidden="true"><span>Material</span><span>Price</span><span>Amount</span><span>Cost</span></div>
+        <div class="mat-picker-list" id="materialPickerList">
+          ${MATERIAL_GROUPS.map((group) => {
+            const items = MATERIAL_PRICE_LIST.filter((item) => item.group === group.id);
+            return items.length ? `<section class="mat-group" data-material-group="${esc(group.id)}"><h4 class="mat-group-title">${esc(group.label)}</h4>${items.map(itemHtml).join("")}</section>` : "";
+          }).join("")}
+          <p class="mat-picker-empty hidden" data-material-empty>No materials match your search.</p>
+        </div>
+        <footer class="mat-picker-footer">
+          <div class="mat-picker-summary" aria-live="polite">
+            <strong data-material-summary-title>No materials picked yet</strong>
+            <span data-material-summary-detail>Pick an amount to add a material.</span>
+          </div>
+          <div class="mat-picker-actions">
+            <button class="btn ghost" type="button" data-material-picker-close>Cancel</button>
+            <button class="btn primary" type="button" id="materialPickerApplyBtn" disabled>Add to cost tracker</button>
+          </div>
+        </footer>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target.closest("[data-material-picker-close]")) { closePicker(); return; }
+      const step = event.target.closest("[data-material-step]");
+      if (step) {
+        const itemEl = step.closest("[data-material-id]");
+        const item = byId.get(itemEl?.dataset.materialId);
+        if (!item) return;
+        const next = Math.max(0, (picks.get(item.id) || 0) + Number(step.dataset.materialStep));
+        setAmount(item, next, { updateInput: true });
+        return;
+      }
+      const filter = event.target.closest("[data-material-filter]");
+      if (filter) {
+        showOnlyPicked = filter.dataset.materialFilter === "picked";
+        overlay.querySelectorAll("[data-material-filter]").forEach((chip) => {
+          const active = chip === filter;
+          chip.classList.toggle("is-active", active);
+          chip.setAttribute("aria-pressed", String(active));
+        });
+        applyFilter();
+        return;
+      }
+      if (event.target.closest("#materialPickerApplyBtn")) applyPicks();
+    });
+
+    overlay.addEventListener("input", (event) => {
+      const input = event.target.closest("[data-material-qty]");
+      if (input) {
+        const item = byId.get(input.dataset.materialQty);
+        if (item) setAmount(item, cleanAmount(item, input.value), { updateInput: false });
+        return;
+      }
+      if (event.target.id === "materialPickerSearch") applyFilter();
+    });
+
+    // Tidy what was typed (e.g. 2.4 boxes -> 2) once the field is left.
+    overlay.addEventListener("change", (event) => {
+      const input = event.target.closest("[data-material-qty]");
+      const item = input && byId.get(input.dataset.materialQty);
+      if (item) setAmount(item, cleanAmount(item, input.value), { updateInput: true });
+    });
+
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.target.closest("#materialPickerSearch, [data-material-qty]")) event.preventDefault();
+    });
+  }
+
+  function itemElement(id) {
+    return overlay.querySelector(`[data-material-id="${CSS.escape(id)}"]`);
+  }
+
+  function setAmount(item, amount, { updateInput }) {
+    const clean = cleanAmount(item, amount);
+    if (clean > 0) picks.set(item.id, clean);
+    else picks.delete(item.id);
+    const el = itemElement(item.id);
+    if (el) {
+      el.classList.toggle("is-picked", clean > 0);
+      const input = el.querySelector("[data-material-qty]");
+      if (updateInput && input) input.value = clean > 0 ? String(clean) : "";
+      const total = el.querySelector("[data-material-total]");
+      total.textContent = clean > 0 ? moneyFormat.format(lineCost(item, clean)) : "—";
+      total.classList.toggle("is-empty", !(clean > 0));
+    }
+    updateSummary();
+    if (showOnlyPicked) applyFilter();
+  }
+
+  function pendingChanges() {
+    let added = 0;
+    let changed = 0;
+    let removed = 0;
+    MATERIAL_PRICE_LIST.forEach((item) => {
+      const now = picks.get(item.id) || 0;
+      const before = startingPicks.get(item.id) || 0;
+      if (now && !before) added += 1;
+      else if (!now && before) removed += 1;
+      else if (now !== before) changed += 1;
+    });
+    return { added, changed, removed, any: added + changed + removed > 0 };
+  }
+
+  function updateSummary() {
+    const picked = MATERIAL_PRICE_LIST.filter((item) => picks.get(item.id));
+    const cost = cents(picked.reduce((sum, item) => sum + lineCost(item, picks.get(item.id)), 0));
+    const changes = pendingChanges();
+    overlay.querySelector("[data-material-picked-count]").textContent = String(picked.length);
+    overlay.querySelector("[data-material-summary-title]").textContent = picked.length
+      ? `${picked.length} material${picked.length === 1 ? "" : "s"} · ${moneyFormat.format(cost)}`
+      : "No materials picked yet";
+    const parts = [];
+    if (changes.added) parts.push(`${changes.added} to add`);
+    if (changes.changed) parts.push(`${changes.changed} to change`);
+    if (changes.removed) parts.push(`${changes.removed} to remove`);
+    overlay.querySelector("[data-material-summary-detail]").textContent = parts.length
+      ? `Cost before markup · ${parts.join(", ")}`
+      : picked.length ? "Cost before markup · already on this tracker" : "Pick an amount to add a material.";
+    const apply = overlay.querySelector("#materialPickerApplyBtn");
+    apply.disabled = !changes.any;
+    apply.textContent = startingPicks.size ? "Update materials" : "Add to cost tracker";
+  }
+
+  function applyFilter() {
+    const term = String(overlay.querySelector("#materialPickerSearch").value || "").trim().toLowerCase();
+    const words = term.split(/\s+/).filter(Boolean);
+    let shown = 0;
+    overlay.querySelectorAll(".mat-group").forEach((groupEl) => {
+      const group = MATERIAL_GROUPS.find((g) => g.id === groupEl.dataset.materialGroup);
+      let groupShown = 0;
+      groupEl.querySelectorAll(".mat-item").forEach((el) => {
+        const item = byId.get(el.dataset.materialId);
+        const haystack = `${item.name} ${item.pack || ""} ${item.unit} ${unitOf(item).plural} ${group?.label || ""}`.toLowerCase();
+        const visible = (!showOnlyPicked || picks.get(item.id)) && words.every((word) => haystack.includes(word));
+        el.classList.toggle("hidden", !visible);
+        if (visible) groupShown += 1;
+      });
+      groupEl.classList.toggle("hidden", !groupShown);
+      shown += groupShown;
+    });
+    const empty = overlay.querySelector("[data-material-empty]");
+    empty.textContent = showOnlyPicked && !term ? "Nothing picked yet. Switch to All materials to choose some." : "No materials match your search.";
+    empty.classList.toggle("hidden", shown > 0);
+  }
+
+  function openPicker(trigger) {
+    if (!overlay) buildOverlay();
+    openedFrom = trigger || document.activeElement;
+    // What this window added earlier is shown with its amounts.
+    startingPicks = new Map();
+    materialRows().forEach((row) => {
+      const found = listedMaterialInRow(row);
+      if (found && !startingPicks.has(found.item.id)) startingPicks.set(found.item.id, found.amount);
+    });
+    picks = new Map(startingPicks);
+    showOnlyPicked = false;
+    overlay.querySelectorAll("[data-material-filter]").forEach((chip) => {
+      const active = chip.dataset.materialFilter === "all";
+      chip.classList.toggle("is-active", active);
+      chip.setAttribute("aria-pressed", String(active));
+    });
+    overlay.querySelector("#materialPickerSearch").value = "";
+    MATERIAL_PRICE_LIST.forEach((item) => setAmount(item, picks.get(item.id) || 0, { updateInput: true }));
+    applyFilter();
+    updateSummary();
+    overlay.classList.remove("hidden");
+    overlay.setAttribute("aria-hidden", "false");
+    document.body.classList.add("material-picker-open");
+    overlay.querySelector("#materialPickerList").scrollTop = 0;
+    setTimeout(() => overlay.querySelector("#materialPickerSearch")?.focus(), 30);
+  }
+
+  function closePicker() {
+    if (!overlay || overlay.classList.contains("hidden")) return;
+    overlay.classList.add("hidden");
+    overlay.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("material-picker-open");
+    try { if (openedFrom?.isConnected) openedFrom.focus(); } catch {}
+  }
+
+  function applyPicks() {
+    const rows = materialRows();
+    const rowFor = new Map();
+    rows.forEach((row) => {
+      const found = listedMaterialInRow(row);
+      if (found && !rowFor.has(found.item.id)) rowFor.set(found.item.id, row);
+    });
+    let emptyRow = rows.find((row) => !listedMaterialInRow(row) && isEmptyMaterialsRow(row)) || null;
+    let added = 0;
+    let changed = 0;
+    let removed = 0;
+
+    MATERIAL_PRICE_LIST.forEach((item) => {
+      const amount = picks.get(item.id) || 0;
+      const before = startingPicks.get(item.id) || 0;
+      const row = rowFor.get(item.id);
+      if (row) {
+        if (!amount) { row.remove(); removed += 1; }
+        else if (amount !== before) { fillRow(row, item, amount); changed += 1; }
+        return;
+      }
+      if (!amount) return;
+      if (emptyRow) {
+        fillRow(emptyRow, item, amount);
+        emptyRow = null;
+      } else if (typeof addSheetCostRow === "function") {
+        addSheetCostRow("materials", { description: rowDescription(item, amount), cost: lineCost(item, amount), markup_percent: DEFAULT_MARKUP });
+      }
+      added += 1;
+    });
+
+    recomputeTotals();
+    closePicker();
+    const parts = [];
+    if (added) parts.push(`${added} added`);
+    if (changed) parts.push(`${changed} changed`);
+    if (removed) parts.push(`${removed} removed`);
+    if (parts.length) toast(`Materials updated: ${parts.join(", ")}.`);
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.("#openMaterialPickerBtn");
+    if (!button) return;
+    event.preventDefault();
+    openPicker(button);
+  });
+
+  // The description column is narrow; hovering shows the whole text.
+  document.addEventListener("mouseover", (event) => {
+    const input = event.target.closest?.('#sheetMaterialsBody [data-field="description"]');
+    if (input && input.value && input.title !== input.value) input.title = input.value;
+  });
+
+  // Escape closes only this window (window capture runs before the cost
+  // tracker's own Escape handling).
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !overlay || overlay.classList.contains("hidden")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closePicker();
+  }, true);
+
+  window.PIMP_openMaterialList = openPicker;
 })();

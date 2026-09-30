@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
 
-  <link rel="stylesheet" href="styles.css?v=20260929-dashboard-load-fixes" />
+  <link rel="stylesheet" href="styles.css?v=20260930-material-list" />
 
   <!--
     Performance: Supabase is the only library needed for the app to start, so it
@@ -348,7 +348,7 @@
                     <table class="sheet-table materials-table">
                       <colgroup><col class="right-desc-col"><col class="right-cost-col"><col class="right-markup-col"><col class="right-total-col"><col class="action-col"></colgroup>
                       <thead>
-                        <tr class="section-row centered"><th colspan="5">MATERIALS AND ADDITIONAL <button class="sheet-add-btn" data-sheet-add="materials" type="button">+ row</button></th></tr>
+                        <tr class="section-row centered"><th colspan="5">MATERIALS AND ADDITIONAL <button class="sheet-add-btn" data-sheet-add="materials" type="button">+ row</button><button class="sheet-add-btn material-list-btn" id="openMaterialPickerBtn" type="button" title="Pick materials from the price list">Material list</button></th></tr>
                         <tr><th>Description of Items</th><th>Cost</th><th class="red-head">Markup %</th><th>Total</th><th></th></tr>
                       </thead>
                       <tbody id="sheetMaterialsBody"></tbody>
@@ -1096,6 +1096,6 @@ Account # __________</textarea>
   </dialog>
 
 
-  <script defer src="app.js?v=20260929-faster-startup"></script>
+  <script defer src="app.js?v=20260930-material-list-pir-last"></script>
 </body>
 </html>
