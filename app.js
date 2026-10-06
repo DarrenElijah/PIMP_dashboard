@@ -4441,7 +4441,7 @@ EIN # __________`;
 }
 
 function defaultWiringBlock() {
-  return `Bank Name
+  return `Bank of America
 ABA # __________
 Pro Insulation MP
 Account # __________`;
@@ -6718,7 +6718,7 @@ function printDocumentCss() {
     try {
       if (typeof defaultWiringBlock === "function") return defaultWiringBlock();
     } catch {}
-    return "Bank Name\nABA # __________\nPro Insulation MP\nAccount # __________";
+    return "Bank of America\nABA # __________\nPro Insulation MP\nAccount # __________";
   }
 
   function makeInvoiceNumber(jobNumber = "") {
@@ -15865,7 +15865,7 @@ This removes it from the job documents list.`)) return;
     else writeValue(form, "company_block", "Pro Insulation MP\nP O Box 502\nBurleson, TX 76097\nPhone: 903-327-2243\nEIN # __________");
 
     if (typeof defaultWiringBlock === "function") writeValue(form, "wiring_block", defaultWiringBlock());
-    else writeValue(form, "wiring_block", "Bank Name\nABA # __________\nPro Insulation MP\nAccount # __________");
+    else writeValue(form, "wiring_block", "Bank of America\nABA # __________\nPro Insulation MP\nAccount # __________");
 
     ["subtotal", "tax", "total", "balance_due"].forEach((name) => writeValue(form, name, "0"));
   }
@@ -29295,7 +29295,7 @@ ${docs.length ? `
   window[PATCH_FLAG] = true;
 
   const COMPANY_BLOCK = `Pro Insulation MP\n3901 Creekside Ct\nBurleson, TX 76028\nPhone: 903-327-2243\nEIN # 83-3949910`;
-  const BANK_BLOCK = `Bank Name\nABA # 11100025\nPro Insulation MP\nAccount # 488139186721`;
+  const BANK_BLOCK = `Bank of America\nABA # 11100025\nPro Insulation MP\nAccount # 488139186721`;
 
   const qs = (selector, root = document) => {
     try { return root.querySelector(selector); } catch { return null; }
