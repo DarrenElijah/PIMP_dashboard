@@ -34468,63 +34468,76 @@ function on(selector, eventName, handler) {
   if (window.__pimpCostTrackerMaterialList) return;
   window.__pimpCostTrackerMaterialList = true;
 
-  // Shown in this order; PIR is used least, so it comes last.
+  // Shown in this order. The materials used most come first; PIR is used
+  // least, so it comes last.
+  // `short` names the section in the jump bar above the list.
   const MATERIAL_GROUPS = [
-    { id: "insulation", label: "Insulation" },
-    { id: "tubewrap", label: "Tube Wrap" },
-    { id: "jacketing", label: "Jacketing & Weatherproofing" },
-    { id: "elbows", label: "Aluminum Elbows" },
-    { id: "banding", label: "Banding, Tape & Rope" },
-    { id: "hardware", label: "Fasteners & Hardware" },
-    { id: "sealants", label: "Sealants" },
-    { id: "pir", label: "2# PIR Pipe Insulation" }
+    { id: "common", label: "Most Used", short: "Most Used" },
+    { id: "insulation", label: "Insulation", short: "Insulation" },
+    { id: "tubewrap", label: "Tube Wrap", short: "Tube Wrap" },
+    { id: "jacketing", label: "Jacketing & Wire Mesh", short: "Jacketing" },
+    { id: "elbows", label: "Aluminum Elbows", short: "Elbows" },
+    { id: "banding", label: "Banding, Tape & Rope", short: "Banding" },
+    { id: "hardware", label: "Fasteners & Hardware", short: "Fasteners" },
+    { id: "sealants", label: "Sealants", short: "Sealants" },
+    { id: "pir", label: "2# PIR Pipe Insulation", short: "PIR" }
   ];
 
+  // Names follow "<material> <size> <spec>"; packaging goes in `pack`.
+  // `was` lists earlier names, so rows saved under them are still recognised.
+  // `step` lets an item be split (0.25 = quarter rolls).
   const MATERIAL_PRICE_LIST = [
-    { id: "ceramic-fiber-1in-roll", group: "insulation", name: "Ceramic Fiber #8 / 1\"", price: 93, unit: "roll", pack: "50 SF roll · 1\" × 24\" × 25'" },
-    { id: "ceramic-fiber-2in-roll", group: "insulation", name: "Ceramic Fiber #8 / 2\"", price: 186, unit: "roll", pack: "50 SF roll · 2\" × 48\" × 12.5'" },
-    { id: "ceramic-fiber-2in-sf", group: "insulation", name: "2\" Ceramic Fiber 8# (inner layer)", price: 3.5, unit: "SF", pack: "Comes in 50 SF rolls (2' × 25')" },
-    { id: "mineral-wool-fsk-2in", group: "insulation", name: "2\" Mineral Wool, FSK Cover (inner layer)", price: 2.88, unit: "SF", pack: "Comes in 60 SF rolls (3' × 20')" },
-    { id: "mass-loaded-vinyl", group: "insulation", name: "Mass Loaded Vinyl (2#/SF)", price: 3.6, unit: "SF", pack: "Comes in 100 SF rolls (4' × 25')" },
+    { id: "ceramic-fiber-1in-roll", group: "common", name: "Ceramic Fiber 1\" 8#", was: ["Ceramic Fiber #8 / 1\""], price: 93, unit: "roll", pack: "50 SF roll · 1\" × 24\" × 25'" },
+    { id: "silicone-grey-cloth", group: "common", name: "Silicone Cloth Grey 1700", was: ["Silicone Grey Cloth 1700", "Silicone Cloth Grey 17oz"], price: 800, unit: "roll", step: 0.25, pack: "17oz · 60\" × 150' roll · split in 1/4 rolls" },
+    { id: "velcro-straps", group: "common", name: "Velcro Straps", price: 4, unit: "each" },
 
-    { id: "tube-wrap-1", group: "tubewrap", name: "1\" Tube Wrap", price: 11.5, unit: "ft" },
-    { id: "tube-wrap-4", group: "tubewrap", name: "4\" Tube Wrap", price: 16, unit: "ft" },
-    { id: "tube-wrap-6", group: "tubewrap", name: "6\" Tube Wrap", price: 20, unit: "ft" },
-    { id: "tube-wrap-10", group: "tubewrap", name: "10\" Tube Wrap", price: 27, unit: "ft" },
+    { id: "ceramic-fiber-2in-roll", group: "insulation", name: "Ceramic Fiber 2\" 8#", was: ["Ceramic Fiber #8 / 2\""], price: 186, unit: "roll", pack: "50 SF roll · 2\" × 48\" × 12.5'" },
+    { id: "ceramic-fiber-2in-sf", group: "insulation", name: "Ceramic Fiber 2\" 8# Inner Layer", was: ["2\" Ceramic Fiber 8# (inner layer)"], price: 3.5, unit: "SF", pack: "Comes in 50 SF rolls (2' × 25')" },
+    { id: "mineral-wool-fsk-2in", group: "insulation", name: "Mineral Wool 2\" FSK Inner Layer", was: ["2\" Mineral Wool, FSK Cover (inner layer)"], price: 2.88, unit: "SF", pack: "FSK cover · comes in 60 SF rolls (3' × 20')" },
+    { id: "mass-loaded-vinyl", group: "insulation", name: "Mass Loaded Vinyl 2#/SF", was: ["Mass Loaded Vinyl (2#/SF)"], price: 3.6, unit: "SF", pack: "Comes in 100 SF rolls (4' × 25')" },
+    { id: "cal-sil-block-1-5", group: "insulation", name: "Cal Sil Block 1-1/2\" 3V", price: 7.94, unit: "each", pack: "1-1/2\" × 12\" × 36\" block · 3V scored" },
 
-    { id: "stucco-aluminum-roll", group: "jacketing", name: "Stucco Embossed Aluminum Roll", price: 320, unit: "roll", pack: ".016\" × 36\" × 100'" },
-    { id: "aluminum-psmb-032", group: "jacketing", name: "0.032\" Aluminum w/ PSMB (weatherproofing)", price: 2.4, unit: "SF", pack: "Comes in 150 SF rolls (3' × 50')" },
-    { id: "silicone-grey-cloth", group: "jacketing", name: "Silicone Grey Cloth 1700", price: 800, unit: "roll" },
+    { id: "tube-wrap-1", group: "tubewrap", name: "Tube Wrap 1\"", was: ["1\" Tube Wrap"], price: 11.5, unit: "ft" },
+    { id: "tube-wrap-4", group: "tubewrap", name: "Tube Wrap 4\"", was: ["4\" Tube Wrap"], price: 16, unit: "ft" },
+    { id: "tube-wrap-6", group: "tubewrap", name: "Tube Wrap 6\"", was: ["6\" Tube Wrap"], price: 20, unit: "ft" },
+    { id: "tube-wrap-10", group: "tubewrap", name: "Tube Wrap 10\"", was: ["10\" Tube Wrap"], price: 27, unit: "ft" },
 
-    { id: "al-elbow-9", group: "elbows", name: "2 Piece Aluminum Elbow #9", price: 13.659, unit: "each" },
-    { id: "al-elbow-16", group: "elbows", name: "2 Piece Aluminum Elbow #16", price: 16.328, unit: "each" },
-    { id: "al-elbow-21", group: "elbows", name: "2 Piece Aluminum Elbow #21", price: 21.805, unit: "each" },
+    { id: "stucco-aluminum-roll", group: "jacketing", name: "Aluminum Stucco .016\"", was: ["Stucco Embossed Aluminum Roll"], price: 320, unit: "roll", pack: "Stucco embossed · 36\" × 100' roll" },
+    { id: "aluminum-psmb-032", group: "jacketing", name: "Aluminum PSMB .032\"", was: ["0.032\" Aluminum w/ PSMB (weatherproofing)"], price: 2.4, unit: "SF", pack: "Weatherproofing · comes in 150 SF rolls (3' × 50')" },
+    { id: "knitted-wire-mesh", group: "jacketing", name: "Knitted Wire Mesh T304", price: 480, unit: "roll", pack: "50 lb roll" },
 
-    { id: "banding-half-020", group: "banding", name: "Banding 1/2\" x 0.020\"", price: 147, unit: "roll", pack: "28 lb roll (93 ft)" },
-    { id: "ss-banding-three-quarter", group: "banding", name: "SS Banding 3/4\" T-304", price: 5.4, unit: "lb", pack: "Comes in 42 lb rolls (84 ft)" },
+    { id: "al-elbow-9", group: "elbows", name: "Aluminum Elbow #9", was: ["2 Piece Aluminum Elbow #9"], price: 13.659, unit: "each", pack: "2-piece" },
+    { id: "al-elbow-16", group: "elbows", name: "Aluminum Elbow #16", was: ["2 Piece Aluminum Elbow #16"], price: 16.328, unit: "each", pack: "2-piece" },
+    { id: "al-elbow-21", group: "elbows", name: "Aluminum Elbow #21", was: ["2 Piece Aluminum Elbow #21"], price: 21.805, unit: "each", pack: "2-piece" },
+
+    { id: "banding-half-020", group: "banding", name: "Banding 1/2\" x .020\"", was: ["Banding 1/2\" x 0.020\""], price: 147, unit: "roll", pack: "28 lb roll (93 ft)" },
+    { id: "ss-banding-three-quarter", group: "banding", name: "SS Banding 3/4\" T304", was: ["SS Banding 3/4\" T-304"], price: 5.4, unit: "lb", pack: "Comes in 42 lb rolls (84 ft)" },
     { id: "filament-tape", group: "banding", name: "Filament Tape 3/4\"", price: 120, unit: "box", pack: "Box of 48 rolls" },
-    { id: "nylon-rope", group: "banding", name: "Nylon Rope 3/8\" x 500'", price: 196, unit: "roll" },
+    { id: "black-rope", group: "banding", name: "Black Rope 1/8\"", price: 55, unit: "roll", pack: "500' roll" },
 
-    { id: "speed-washer", group: "hardware", name: "Speed Washer 14GA 2-1/2\"", price: 450, unit: "box", pack: "Box of 1,000" },
-    { id: "self-tap-screws", group: "hardware", name: "T304 #8 x 1/2\" Self-Tap Screws w/ Neoprene Washers", price: 75, unit: "box", pack: "Box of 100" },
-    { id: "hog-rings", group: "hardware", name: "Hog Rings 3/4\" 304", price: 225, unit: "box", pack: "Box of 1,000" },
-    { id: "toggle-latch", group: "hardware", name: "Toggle Latch Model IWR802", price: 450, unit: "box", pack: "Box of 100" },
-    { id: "wing-seals", group: "hardware", name: "SS T304 Wing Seals 1/2\"", price: 65, unit: "box", pack: "Box of 1,000" },
-    { id: "velcro-straps", group: "hardware", name: "Velcro Straps", price: 4, unit: "each" },
+    { id: "speed-washer", group: "hardware", name: "Speed Washers 2-1/2\" 14GA", was: ["Speed Washer 14GA 2-1/2\""], price: 450, unit: "box", pack: "Box of 1,000" },
+    { id: "self-tap-screws", group: "hardware", name: "Self-Tap Screws #8 x 1/2\" T304", was: ["T304 #8 x 1/2\" Self-Tap Screws w/ Neoprene Washers"], price: 75, unit: "box", pack: "Box of 100 · neoprene washers" },
+    { id: "hog-rings", group: "hardware", name: "Hog Rings 3/4\" T304", was: ["Hog Rings 3/4\" 304"], price: 225, unit: "box", pack: "Box of 1,000" },
+    { id: "hog-rings-16ga", group: "hardware", name: "Hog Rings 3/4\" 16GA SS", price: 125, unit: "box" },
+    { id: "lacing-anchors", group: "hardware", name: "Lacing Anchors 4-1/2\" 14GA SS", price: 367, unit: "box" },
+    { id: "toggle-latch", group: "hardware", name: "Toggle Latches IWR802", was: ["Toggle Latch Model IWR802"], price: 450, unit: "box", pack: "Box of 100" },
+    { id: "wing-seals", group: "hardware", name: "Wing Seals 1/2\" T304", was: ["SS T304 Wing Seals 1/2\""], price: 65, unit: "box", pack: "Box of 1,000" },
+    { id: "nylon-rope", group: "hardware", name: "Nylon Rope 3/8\"", was: ["Nylon Rope 3/8\" x 500'"], price: 196, unit: "roll", pack: "500' roll" },
 
-    { id: "silicone-caulk", group: "sealants", name: "Silicone Caulk Dow Corning RTV", price: 90, unit: "box", pack: "Box of 12" },
+    { id: "silicone-caulk", group: "sealants", name: "Silicone Caulk RTV", was: ["Silicone Caulk Dow Corning RTV"], price: 90, unit: "box", pack: "Dow Corning · box of 12" },
 
-    { id: "pir-pc-1-5", group: "pir", name: "2# PIR Insulation PC 1-1/2 x 1-1/2", price: 3.03, unit: "LF" },
-    { id: "pir-pc-2-5", group: "pir", name: "2# PIR Insulation PC 2-1/2 x 1-1/2", price: 4.23, unit: "LF" },
-    { id: "pir-pc-3-5", group: "pir", name: "2# PIR Insulation PC 3-1/2 x 1-1/2", price: 5.63, unit: "LF" },
-    { id: "pir-pc-6", group: "pir", name: "2# PIR Insulation PC 6 x 1-1/2", price: 10, unit: "LF" },
-    { id: "pir-16", group: "pir", name: "2# PIR Insulation 16 x 1-1/2", price: 26.93, unit: "LF" },
-    { id: "pir-24", group: "pir", name: "2# PIR Insulation 24 x 1-1/2", price: 46.13, unit: "LF" },
-    { id: "pir-lr90-16", group: "pir", name: "2# PIR Insulation LR90 16 x 1-1/2", price: 80.8, unit: "each", pack: "Long-radius 90° elbow" },
-    { id: "pir-lr90-24", group: "pir", name: "2# PIR Insulation LR90 24 x 1-1/2", price: 184.54, unit: "each", pack: "Long-radius 90° elbow" }
+    { id: "pir-pc-1-5", group: "pir", name: "2# PIR PC 1-1/2 x 1-1/2", was: ["2# PIR Insulation PC 1-1/2 x 1-1/2"], price: 3.03, unit: "LF" },
+    { id: "pir-pc-2-5", group: "pir", name: "2# PIR PC 2-1/2 x 1-1/2", was: ["2# PIR Insulation PC 2-1/2 x 1-1/2"], price: 4.23, unit: "LF" },
+    { id: "pir-pc-3-5", group: "pir", name: "2# PIR PC 3-1/2 x 1-1/2", was: ["2# PIR Insulation PC 3-1/2 x 1-1/2"], price: 5.63, unit: "LF" },
+    { id: "pir-pc-6", group: "pir", name: "2# PIR PC 6 x 1-1/2", was: ["2# PIR Insulation PC 6 x 1-1/2"], price: 10, unit: "LF" },
+    { id: "pir-16", group: "pir", name: "2# PIR 16 x 1-1/2", was: ["2# PIR Insulation 16 x 1-1/2"], price: 26.93, unit: "LF" },
+    { id: "pir-24", group: "pir", name: "2# PIR 24 x 1-1/2", was: ["2# PIR Insulation 24 x 1-1/2"], price: 46.13, unit: "LF" },
+    { id: "pir-lr90-16", group: "pir", name: "2# PIR LR90 16 x 1-1/2", was: ["2# PIR Insulation LR90 16 x 1-1/2"], price: 80.8, unit: "each", pack: "Long-radius 90° elbow" },
+    { id: "pir-lr90-24", group: "pir", name: "2# PIR LR90 24 x 1-1/2", was: ["2# PIR Insulation LR90 24 x 1-1/2"], price: 184.54, unit: "each", pack: "Long-radius 90° elbow" }
   ];
 
-  // Whole units for things counted; any amount for things measured.
+  // Whole units for things counted; any amount for things measured. An item's
+  // own `step` overrides both.
   const UNITS = {
     each: { label: "each", plural: "each", whole: true },
     box: { label: "box", plural: "boxes", whole: true },
@@ -34573,7 +34586,9 @@ function on(selector, eventName, handler) {
     let amount = Number(String(value ?? "").replace(/,/g, "").trim());
     if (!Number.isFinite(amount) || amount <= 0) return 0;
     amount = Math.min(amount, MAX_AMOUNT);
-    return unitOf(item).whole ? Math.round(amount) : Math.round(amount * 100) / 100;
+    if (item.step) amount = Math.round(amount / item.step) * item.step;
+    else if (unitOf(item).whole) return Math.round(amount);
+    return Math.round(amount * 100) / 100;
   }
 
   /* --- The Materials rows of the open cost tracker ------------------------ */
@@ -34585,14 +34600,17 @@ function on(selector, eventName, handler) {
     return row.querySelector(`[data-field="${name}"]`);
   }
 
-  // A row this window added: "<name> — <amount> ...".
+  // A row this window added: "<name> — <amount> ...", under the item's
+  // current name or one it had before.
   function listedMaterialInRow(row) {
     const description = String(field(row, "description")?.value || "").trim();
     for (const item of MATERIAL_PRICE_LIST) {
-      const prefix = `${item.name} — `;
-      if (!description.startsWith(prefix)) continue;
-      const amount = parseFloat(description.slice(prefix.length).replace(/,/g, ""));
-      if (Number.isFinite(amount) && amount > 0) return { item, amount };
+      for (const name of [item.name, ...(item.was || [])]) {
+        const prefix = `${name} — `;
+        if (!description.startsWith(prefix)) continue;
+        const amount = parseFloat(description.slice(prefix.length).replace(/,/g, ""));
+        if (Number.isFinite(amount) && amount > 0) return { item, amount };
+      }
     }
     return null;
   }
@@ -34633,7 +34651,12 @@ function on(selector, eventName, handler) {
   let startingPicks = new Map();
   let showOnlyPicked = false;
   let openedFrom = null;
+  // A section picked in the jump bar stays highlighted until the list is
+  // scrolled by hand (a short last section can never reach the top).
+  let jumpedTo = null;
 
+  // − and + are left out of Tab order so Tab and Enter go amount to amount;
+  // the arrow keys still step an amount.
   function itemHtml(item) {
     const unit = unitOf(item);
     return `
@@ -34644,13 +34667,30 @@ function on(selector, eventName, handler) {
         </div>
         <div class="mat-item-price">${esc(priceFormat.format(item.price))}<small>/ ${esc(unit.label)}</small></div>
         <div class="mat-qty">
-          <button type="button" class="mat-qty-btn" data-material-step="-1" aria-label="Less ${esc(item.name)}">−</button>
-          <input type="number" min="0" step="${unit.whole ? "1" : "any"}" inputmode="decimal" placeholder="0" data-material-qty="${esc(item.id)}" aria-label="Amount of ${esc(item.name)}, in ${esc(unit.plural)}" />
-          <button type="button" class="mat-qty-btn" data-material-step="1" aria-label="More ${esc(item.name)}">+</button>
+          <span class="mat-stepper">
+            <button type="button" class="mat-qty-btn" data-material-step="-1" tabindex="-1" aria-label="Less ${esc(item.name)}">−</button>
+            <input type="number" min="0" step="${item.step || (unit.whole ? "1" : "any")}" inputmode="decimal" placeholder="0" data-material-qty="${esc(item.id)}" aria-label="Amount of ${esc(item.name)}, in ${esc(unit.plural)}" />
+            <button type="button" class="mat-qty-btn" data-material-step="1" tabindex="-1" aria-label="More ${esc(item.name)}">+</button>
+          </span>
           <span class="mat-qty-unit">${esc(unit.plural)}</span>
         </div>
         <div class="mat-item-total is-empty" data-material-total>—</div>
       </div>`;
+  }
+
+  function groupHtml(group) {
+    const items = MATERIAL_PRICE_LIST.filter((item) => item.group === group.id);
+    if (!items.length) return "";
+    return `
+      <section class="mat-group${group.id === "common" ? " is-featured" : ""}" data-material-group="${esc(group.id)}" aria-label="${esc(group.label)}">
+        <div class="mat-group-head">
+          <h4 class="mat-group-title">${group.id === "common" ? `<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l2.3 4.7 5.2.8-3.8 3.6.9 5.1L10 14.3l-4.6 2.4.9-5.1-3.8-3.6 5.2-.8z" fill="currentColor"/></svg>` : ""}${esc(group.label)}</h4>
+          <span class="mat-col-label" aria-hidden="true">Price</span>
+          <span class="mat-col-label" aria-hidden="true">Amount</span>
+          <span class="mat-col-label" aria-hidden="true">Cost</span>
+        </div>
+        ${items.map(itemHtml).join("")}
+      </section>`;
   }
 
   function buildOverlay() {
@@ -34661,10 +34701,13 @@ function on(selector, eventName, handler) {
     overlay.innerHTML = `
       <div class="mat-picker-card" role="dialog" aria-modal="true" aria-labelledby="materialPickerTitle">
         <header class="mat-picker-header">
-          <div>
+          <span class="mat-picker-badge" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 2.8l8.2 4.6v9.2L12 21.2l-8.2-4.6V7.4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3.9 7.5L12 12l8.1-4.5M12 12v9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+          </span>
+          <div class="mat-picker-heading">
             <p class="eyebrow">Cost Tracker · Materials</p>
             <h3 id="materialPickerTitle">Material list</h3>
-            <p class="mat-picker-subtitle">Enter how much the job needs. Each material is added to Materials with its cost and the usual 25% markup. You can still type your own rows with + row.</p>
+            <p class="mat-picker-subtitle">Set amounts and add them to Materials with the usual 25% markup. Anything not listed can still be typed with + row.</p>
           </div>
           <button class="icon-btn mat-picker-close" type="button" data-material-picker-close aria-label="Close the material list">×</button>
         </header>
@@ -34674,16 +34717,16 @@ function on(selector, eventName, handler) {
             <input id="materialPickerSearch" type="search" placeholder="Search materials, sizes or units" autocomplete="off" aria-label="Search materials" />
           </label>
           <div class="mat-picker-filters" role="group" aria-label="Show">
-            <button type="button" class="mat-chip is-active" data-material-filter="all" aria-pressed="true">All materials</button>
+            <button type="button" class="mat-chip is-active" data-material-filter="all" aria-pressed="true">All<span class="mat-chip-long"> materials</span></button>
             <button type="button" class="mat-chip" data-material-filter="picked" aria-pressed="false">Picked <span class="mat-chip-count" data-material-picked-count>0</span></button>
           </div>
         </div>
-        <div class="mat-picker-columns" aria-hidden="true"><span>Material</span><span>Price</span><span>Amount</span><span>Cost</span></div>
+        <nav class="mat-picker-sections" aria-label="Jump to a section">
+          ${MATERIAL_GROUPS.filter((group) => MATERIAL_PRICE_LIST.some((item) => item.group === group.id)).map((group) => `
+            <button type="button" class="mat-section-link" data-material-jump="${esc(group.id)}">${esc(group.short || group.label)}<span class="mat-section-count hidden" data-material-section-count="${esc(group.id)}"></span></button>`).join("")}
+        </nav>
         <div class="mat-picker-list" id="materialPickerList">
-          ${MATERIAL_GROUPS.map((group) => {
-            const items = MATERIAL_PRICE_LIST.filter((item) => item.group === group.id);
-            return items.length ? `<section class="mat-group" data-material-group="${esc(group.id)}"><h4 class="mat-group-title">${esc(group.label)}</h4>${items.map(itemHtml).join("")}</section>` : "";
-          }).join("")}
+          ${MATERIAL_GROUPS.map(groupHtml).join("")}
           <p class="mat-picker-empty hidden" data-material-empty>No materials match your search.</p>
         </div>
         <footer class="mat-picker-footer">
@@ -34701,12 +34744,14 @@ function on(selector, eventName, handler) {
 
     overlay.addEventListener("click", (event) => {
       if (event.target.closest("[data-material-picker-close]")) { closePicker(); return; }
+      const jump = event.target.closest("[data-material-jump]");
+      if (jump) { jumpToSection(jump.dataset.materialJump); return; }
       const step = event.target.closest("[data-material-step]");
       if (step) {
         const itemEl = step.closest("[data-material-id]");
         const item = byId.get(itemEl?.dataset.materialId);
         if (!item) return;
-        const next = Math.max(0, (picks.get(item.id) || 0) + Number(step.dataset.materialStep));
+        const next = Math.max(0, (picks.get(item.id) || 0) + Number(step.dataset.materialStep) * (item.step || 1));
         setAmount(item, next, { updateInput: true });
         return;
       }
@@ -34741,9 +34786,81 @@ function on(selector, eventName, handler) {
       if (item) setAmount(item, cleanAmount(item, input.value), { updateInput: true });
     });
 
+    // Enter moves on: from the search to the first amount shown, and from one
+    // amount to the next, so a list can be typed in without the mouse.
     overlay.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && event.target.closest("#materialPickerSearch, [data-material-qty]")) event.preventDefault();
+      if (event.key !== "Enter" || !event.target.closest("#materialPickerSearch, [data-material-qty]")) return;
+      event.preventDefault();
+      const inputs = Array.from(overlay.querySelectorAll(".mat-item:not(.hidden) [data-material-qty]"));
+      const next = event.target.id === "materialPickerSearch" ? inputs[0] : inputs[inputs.indexOf(event.target) + 1];
+      if (next) next.focus();
     });
+
+    // A focused amount is selected, so typing replaces it.
+    overlay.addEventListener("focusin", (event) => {
+      const input = event.target.closest("[data-material-qty]");
+      if (input) { try { input.select(); } catch {} }
+    });
+
+    const list = overlay.querySelector("#materialPickerList");
+    let spyFrame = 0;
+    list.addEventListener("scroll", () => {
+      if (spyFrame) return;
+      spyFrame = requestAnimationFrame(() => { spyFrame = 0; updateCurrentSection(); });
+    }, { passive: true });
+    ["wheel", "touchmove", "pointerdown", "keydown"].forEach((type) => {
+      list.addEventListener(type, () => { jumpedTo = null; }, { passive: true });
+    });
+  }
+
+  function sectionElement(id) {
+    return overlay.querySelector(`.mat-group[data-material-group="${CSS.escape(id)}"]`);
+  }
+
+  function jumpToSection(id) {
+    const list = overlay.querySelector("#materialPickerList");
+    const groupEl = sectionElement(id);
+    if (!groupEl || groupEl.classList.contains("hidden")) return;
+    jumpedTo = id;
+    const gap = parseFloat(getComputedStyle(list).paddingTop) || 0;
+    const top = Math.max(0, list.scrollTop + groupEl.getBoundingClientRect().top - list.getBoundingClientRect().top - gap);
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    if (typeof list.scrollTo === "function") list.scrollTo({ top, behavior: reduceMotion ? "auto" : "smooth" });
+    else list.scrollTop = top;
+    markCurrentSection(id);
+  }
+
+  // The section at the top of the list (or the last one, once scrolled to the
+  // end) is highlighted in the jump bar.
+  function updateCurrentSection() {
+    if (jumpedTo && !sectionElement(jumpedTo)?.classList.contains("hidden")) { markCurrentSection(jumpedTo); return; }
+    const list = overlay.querySelector("#materialPickerList");
+    const groups = Array.from(overlay.querySelectorAll(".mat-group:not(.hidden)"));
+    let current = groups[0] || null;
+    if (list.scrollTop <= 0) {
+      // At the top, the first section.
+    } else if (groups.length && list.scrollTop + list.clientHeight >= list.scrollHeight - 2) {
+      current = groups[groups.length - 1];
+    } else {
+      const listTop = list.getBoundingClientRect().top;
+      groups.forEach((groupEl) => { if (groupEl.getBoundingClientRect().top - listTop <= 56) current = groupEl; });
+    }
+    markCurrentSection(current?.dataset.materialGroup || "");
+  }
+
+  function markCurrentSection(id) {
+    const nav = overlay.querySelector(".mat-picker-sections");
+    nav.querySelectorAll("[data-material-jump]").forEach((link) => {
+      const active = link.dataset.materialJump === id;
+      if (link.classList.contains("is-current") !== active) link.classList.toggle("is-current", active);
+      if (active) link.setAttribute("aria-current", "true");
+      else link.removeAttribute("aria-current");
+    });
+    // Keep the highlighted name in view when the bar scrolls sideways (phones).
+    const link = id ? nav.querySelector(`[data-material-jump="${CSS.escape(id)}"]`) : null;
+    if (!link || nav.scrollWidth <= nav.clientWidth) return;
+    if (link.offsetLeft < nav.scrollLeft) nav.scrollLeft = link.offsetLeft - 12;
+    else if (link.offsetLeft + link.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = link.offsetLeft + link.offsetWidth - nav.clientWidth + 12;
   }
 
   function itemElement(id) {
@@ -34799,6 +34916,13 @@ function on(selector, eventName, handler) {
     const apply = overlay.querySelector("#materialPickerApplyBtn");
     apply.disabled = !changes.any;
     apply.textContent = startingPicks.size ? "Update materials" : "Add to cost tracker";
+    // How many are picked in each section, on its name in the jump bar.
+    overlay.querySelectorAll("[data-material-section-count]").forEach((badge) => {
+      const count = picked.filter((item) => item.group === badge.dataset.materialSectionCount).length;
+      const text = count ? String(count) : "";
+      if (badge.textContent !== text) badge.textContent = text;
+      badge.classList.toggle("hidden", !count);
+    });
   }
 
   function applyFilter() {
@@ -34810,17 +34934,20 @@ function on(selector, eventName, handler) {
       let groupShown = 0;
       groupEl.querySelectorAll(".mat-item").forEach((el) => {
         const item = byId.get(el.dataset.materialId);
-        const haystack = `${item.name} ${item.pack || ""} ${item.unit} ${unitOf(item).plural} ${group?.label || ""}`.toLowerCase();
+        const haystack = `${item.name} ${(item.was || []).join(" ")} ${item.pack || ""} ${item.unit} ${unitOf(item).plural} ${group?.label || ""}`.toLowerCase();
         const visible = (!showOnlyPicked || picks.get(item.id)) && words.every((word) => haystack.includes(word));
         el.classList.toggle("hidden", !visible);
         if (visible) groupShown += 1;
       });
       groupEl.classList.toggle("hidden", !groupShown);
+      overlay.querySelector(`[data-material-jump="${CSS.escape(groupEl.dataset.materialGroup)}"]`)?.classList.toggle("hidden", !groupShown);
       shown += groupShown;
     });
     const empty = overlay.querySelector("[data-material-empty]");
     empty.textContent = showOnlyPicked && !term ? "Nothing picked yet. Switch to All materials to choose some." : "No materials match your search.";
     empty.classList.toggle("hidden", shown > 0);
+    overlay.querySelector(".mat-picker-sections").classList.toggle("hidden", !shown);
+    updateCurrentSection();
   }
 
   function openPicker(trigger) {
@@ -34840,14 +34967,18 @@ function on(selector, eventName, handler) {
       chip.setAttribute("aria-pressed", String(active));
     });
     overlay.querySelector("#materialPickerSearch").value = "";
+    jumpedTo = null;
     MATERIAL_PRICE_LIST.forEach((item) => setAmount(item, picks.get(item.id) || 0, { updateInput: true }));
-    applyFilter();
-    updateSummary();
     overlay.classList.remove("hidden");
     overlay.setAttribute("aria-hidden", "false");
     document.body.classList.add("material-picker-open");
     overlay.querySelector("#materialPickerList").scrollTop = 0;
-    setTimeout(() => overlay.querySelector("#materialPickerSearch")?.focus(), 30);
+    overlay.querySelector(".mat-picker-sections").scrollLeft = 0;
+    applyFilter();
+    updateSummary();
+    // On a phone, focusing the search would open the keyboard over the list.
+    const touch = window.matchMedia?.("(pointer: coarse)")?.matches;
+    if (!touch) setTimeout(() => overlay.querySelector("#materialPickerSearch")?.focus(), 30);
   }
 
   function closePicker() {

@@ -13414,7 +13414,7 @@ input[type="search"] {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(15, 23, 42, 0.62);
+  background: rgba(15, 23, 42, 0.58);
   backdrop-filter: blur(6px);
 }
 
@@ -13423,8 +13423,8 @@ input[type="search"] {
 }
 
 .mat-picker-card {
-  width: min(940px, 100%);
-  max-height: min(880px, calc(100vh - 48px));
+  width: min(980px, 100%);
+  height: min(900px, calc(100vh - 48px));
   display: flex;
   flex-direction: column;
   background: var(--panel-solid);
@@ -13433,15 +13433,56 @@ input[type="search"] {
   box-shadow: 0 30px 90px rgba(2, 6, 23, 0.35);
   overflow: hidden;
   color: var(--ink);
+  animation: mat-picker-in 0.18s ease-out;
 }
 
+@keyframes mat-picker-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mat-picker-card { animation: none; }
+}
+
+/* Only the list scrolls; the bars around it keep their height. */
+.mat-picker-header,
+.mat-picker-toolbar,
+.mat-picker-sections,
+.mat-picker-footer {
+  flex: 0 0 auto;
+}
+
+/* --- Header --------------------------------------------------------------- */
 .mat-picker-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 20px 24px 14px;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px 16px 24px;
+  background: linear-gradient(180deg, var(--brand-soft), var(--panel-solid));
   border-bottom: 1px solid var(--line);
+}
+
+.mat-picker-badge {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--brand), var(--brand-dark));
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.28);
+}
+
+.mat-picker-badge svg {
+  width: 24px;
+  height: 24px;
+}
+
+.mat-picker-heading {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .mat-picker-header .eyebrow {
@@ -13449,27 +13490,31 @@ input[type="search"] {
 }
 
 .mat-picker-header h3 {
-  margin: 2px 0 6px;
-  font-size: 1.35rem;
+  margin: 1px 0 3px;
+  font-size: 1.3rem;
   font-weight: 900;
+  line-height: 1.2;
 }
 
 .mat-picker-subtitle {
   margin: 0;
-  max-width: 64ch;
   color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.45;
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
+.mat-picker-close {
+  align-self: flex-start;
+  flex: 0 0 auto;
+}
+
+/* --- Search and filters ----------------------------------------------------- */
 .mat-picker-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 14px;
-  padding: 12px 24px;
-  background: var(--panel-soft);
-  border-bottom: 1px solid var(--line);
+  gap: 10px 12px;
+  padding: 14px 24px 10px;
 }
 
 .mat-picker-search {
@@ -13477,14 +13522,16 @@ input[type="search"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 12px;
-  background: #fff;
+  padding: 0 14px;
+  background: var(--panel-soft);
   border: 1px solid var(--line-strong);
-  border-radius: 12px;
+  border-radius: 999px;
   color: var(--muted);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
 
 .mat-picker-search:focus-within {
+  background: #fff;
   border-color: var(--brand);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
@@ -13498,8 +13545,9 @@ input[type="search"] {
 /* The app styles every input; this one sits inside the search pill. */
 .mat-picker-search input {
   flex: 1;
+  width: auto !important;
   min-width: 0;
-  min-height: 40px !important;
+  min-height: 42px !important;
   padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -13512,7 +13560,11 @@ input[type="search"] {
 
 .mat-picker-filters {
   display: flex;
-  gap: 8px;
+  gap: 4px;
+  padding: 3px;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
 }
 
 .mat-chip {
@@ -13520,68 +13572,119 @@ input[type="search"] {
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: 999px;
-  background: #fff;
-  color: var(--ink);
+  background: transparent;
+  color: var(--muted);
   font: inherit;
-  font-size: 0.85rem;
-  font-weight: 700;
+  font-size: 0.84rem;
+  font-weight: 800;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mat-chip:hover {
+  color: var(--ink);
 }
 
 .mat-chip.is-active {
-  background: var(--brand);
-  border-color: var(--brand);
-  color: #fff;
+  background: #fff;
+  color: var(--brand-dark);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
 }
 
 .mat-chip-count {
   min-width: 20px;
-  padding: 0 6px;
+  padding: 1px 6px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.08);
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .mat-chip.is-active .mat-chip-count {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--brand);
+  color: #fff;
 }
 
-/* Material | Price | Amount | Cost */
-.mat-picker-columns,
-.mat-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 118px 198px 104px;
-  align-items: center;
-  gap: 12px;
-}
-
-.mat-picker-columns {
-  padding: 8px 38px 6px;
-  color: var(--muted);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+/* --- Jump bar ------------------------------------------------------------- */
+.mat-picker-sections {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  padding: 2px 24px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
   border-bottom: 1px solid var(--line);
 }
 
-.mat-picker-columns span:nth-child(2),
-.mat-picker-columns span:nth-child(4) {
-  text-align: right;
+.mat-picker-sections::-webkit-scrollbar {
+  display: none;
 }
 
-.mat-picker-columns span:nth-child(3) {
+.mat-picker-sections.hidden,
+.mat-section-link.hidden,
+.mat-section-count.hidden {
+  display: none !important;
+}
+
+.mat-section-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.mat-section-link:hover {
+  border-color: #bfdbfe;
+  color: var(--ink);
+}
+
+.mat-section-link.is-current {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.mat-section-link:focus-visible,
+.mat-chip:focus-visible,
+.mat-qty-btn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.mat-section-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 18px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
+/* --- The list ----------------------------------------------------------------- */
 .mat-picker-list {
   flex: 1 1 auto;
   min-height: 160px;
   overflow: auto;
-  padding: 4px 24px 18px;
+  padding: 14px 24px 20px;
+  background: var(--panel-soft);
   overscroll-behavior: contain;
 }
 
@@ -13591,37 +13694,113 @@ input[type="search"] {
   display: none !important;
 }
 
-.mat-group-title {
+/* One card per section. clip (not hidden) keeps the sticky heads working. */
+.mat-group {
+  margin-bottom: 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: clip;
+}
+
+.mat-group:last-of-type {
+  margin-bottom: 0;
+}
+
+/* Material | Price | Amount | Cost, shared by section heads and rows. */
+.mat-group-head,
+.mat-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 118px 196px 100px;
+  align-items: center;
+  column-gap: 14px;
+}
+
+.mat-group-head {
   position: sticky;
-  top: 0;
+  top: -14px;
   z-index: 1;
+  padding: 10px 16px 9px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--line);
+}
+
+.mat-group-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin: 0;
-  padding: 14px 2px 8px;
-  background: var(--panel-solid);
-  color: var(--brand-dark);
-  font-size: 0.74rem;
+  color: var(--ink);
+  font-size: 0.78rem;
   font-weight: 900;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
+.mat-group-title svg {
+  width: 15px;
+  height: 15px;
+  color: #f59e0b;
+}
+
+.mat-col-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.mat-col-label:nth-of-type(1),
+.mat-col-label:nth-of-type(3) {
+  text-align: right;
+}
+
+.mat-col-label:nth-of-type(2) {
+  padding-left: 2px;
+}
+
+.mat-group.is-featured {
+  border-color: #bfdbfe;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.08);
+}
+
+.mat-group.is-featured .mat-group-head {
+  background: var(--brand-soft);
+  border-bottom-color: #dbeafe;
+}
+
+.mat-group.is-featured .mat-group-title {
+  color: var(--brand-dark);
+}
+
+/* --- Rows ------------------------------------------------------------------- */
 .mat-item {
-  padding: 10px 14px;
-  margin-bottom: 8px;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  padding: 10px 16px;
+  border-top: 1px solid #edf2f7;
+  transition: background 0.15s ease;
+}
+
+.mat-group-head + .mat-item {
+  border-top: 0;
 }
 
 .mat-item:hover {
-  border-color: #bfdbfe;
+  background: #fafcff;
 }
 
 .mat-item.is-picked {
   background: var(--brand-soft);
-  border-color: #93c5fd;
-  box-shadow: inset 4px 0 0 var(--brand);
+}
+
+.mat-item.is-picked::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--brand);
 }
 
 .mat-item-main {
@@ -13632,6 +13811,7 @@ input[type="search"] {
 }
 
 .mat-item-name {
+  font-size: 0.94rem;
   font-weight: 800;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -13639,92 +13819,119 @@ input[type="search"] {
 
 .mat-item-pack {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.3;
 }
 
 .mat-item-price {
   text-align: right;
   font-weight: 800;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .mat-item-price small {
   margin-left: 3px;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
 }
 
 .mat-qty {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+/* − amount + as one control. */
+.mat-stepper {
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  height: 36px;
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 11px;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mat-stepper:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.mat-item.is-picked .mat-stepper {
+  border-color: #93c5fd;
 }
 
 .mat-qty-btn {
-  width: 32px;
-  height: 32px;
+  width: 34px;
   flex: 0 0 auto;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  background: #fff;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--brand-dark);
-  font-size: 1.15rem;
+  font-size: 1.1rem;
   font-weight: 800;
   line-height: 1;
   cursor: pointer;
+  transition: background 0.12s ease;
 }
 
 .mat-qty-btn:hover {
   background: var(--brand-soft);
-  border-color: #93c5fd;
 }
 
-.mat-qty input {
-  width: 68px;
-  min-height: 34px;
-  padding: 0 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 10px;
+.mat-qty-btn:active {
+  background: #dbeafe;
+}
+
+.mat-stepper input {
+  display: block;
+  width: 58px;
+  min-height: 0;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  border-inline: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
   background: #fff;
   color: var(--ink);
   font: inherit;
   font-weight: 800;
   text-align: center;
-}
-
-.mat-qty input::placeholder {
-  color: #cbd5e1;
-  font-weight: 700;
-}
-
-/* No browser spin arrows; the - and + buttons do that. */
-.mat-qty input {
+  font-variant-numeric: tabular-nums;
   -moz-appearance: textfield;
   appearance: textfield;
 }
 
-.mat-qty input::-webkit-outer-spin-button,
-.mat-qty input::-webkit-inner-spin-button {
+.mat-stepper input:focus {
+  outline: 0;
+  border-color: var(--line);
+  box-shadow: none;
+  background: #fff;
+}
+
+.mat-stepper input::placeholder {
+  color: #cbd5e1;
+  font-weight: 700;
+}
+
+/* No browser spin arrows; the − and + buttons do that. */
+.mat-stepper input::-webkit-outer-spin-button,
+.mat-stepper input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-.mat-qty input:focus {
-  outline: 0;
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.mat-item.is-picked .mat-qty input {
-  border-color: var(--brand);
-}
-
 .mat-qty-unit {
-  min-width: 40px;
+  min-width: 36px;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 700;
 }
 
@@ -13732,19 +13939,25 @@ input[type="search"] {
   text-align: right;
   font-weight: 900;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.mat-item.is-picked .mat-item-total {
+  color: var(--brand-dark);
 }
 
 .mat-item-total.is-empty {
-  color: var(--line-strong);
+  color: #cbd5e1;
   font-weight: 700;
 }
 
 .mat-picker-empty {
-  margin: 28px 0;
+  margin: 36px 0;
   color: var(--muted);
   text-align: center;
 }
 
+/* --- Footer ----------------------------------------------------------------- */
 .mat-picker-footer {
   display: flex;
   flex-wrap: wrap;
@@ -13752,19 +13965,21 @@ input[type="search"] {
   justify-content: space-between;
   gap: 12px 16px;
   padding: 14px 24px;
-  background: var(--panel-soft);
+  background: var(--panel-solid);
   border-top: 1px solid var(--line);
+  box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.05);
 }
 
 .mat-picker-summary strong {
   display: block;
-  font-size: 1.02rem;
+  font-size: 1.05rem;
   font-weight: 900;
+  font-variant-numeric: tabular-nums;
 }
 
 .mat-picker-summary span {
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: 0.84rem;
 }
 
 .mat-picker-actions {
@@ -13775,12 +13990,14 @@ input[type="search"] {
 .mat-picker-actions .btn[disabled] {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 body.material-picker-open {
   overflow: hidden;
 }
 
+/* --- Phones ----------------------------------------------------------------- */
 @media (max-width: 760px) {
   .mat-picker-overlay {
     padding: 0;
@@ -13789,54 +14006,116 @@ body.material-picker-open {
 
   .mat-picker-card {
     width: 100%;
-    max-height: none;
     height: 100%;
+    max-height: none;
+    border: 0;
     border-radius: 0;
   }
 
-  .mat-picker-header,
-  .mat-picker-toolbar,
-  .mat-picker-footer {
-    padding-inline: 16px;
+  .mat-picker-header {
+    padding: 14px 12px 12px 16px;
   }
 
-  .mat-picker-list {
-    padding-inline: 16px;
+  .mat-picker-badge {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
   }
 
-  .mat-picker-columns {
+  .mat-picker-badge svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .mat-picker-subtitle {
     display: none;
   }
 
+  .mat-picker-toolbar {
+    flex-wrap: nowrap;
+    padding: 12px 16px 8px;
+  }
+
+  .mat-picker-search {
+    flex: 1 1 auto;
+  }
+
+  .mat-chip {
+    padding: 7px 11px;
+  }
+
+  /* "All materials" -> "All", so the search keeps its room. */
+  .mat-chip-long {
+    display: none;
+  }
+
+  .mat-picker-sections {
+    padding: 2px 16px 10px;
+  }
+
+  .mat-picker-list {
+    padding: 12px 12px 16px;
+  }
+
+  .mat-group-head {
+    top: -12px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 9px 14px 8px;
+  }
+
+  .mat-col-label {
+    display: none;
+  }
+
+  /* Name and amount on top; price and cost underneath. */
   .mat-item {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "main main"
-      "price total"
-      "qty qty";
-    gap: 8px 12px;
+      "main qty"
+      "price total";
+    row-gap: 6px;
+    padding: 11px 14px;
   }
 
   .mat-item-main { grid-area: main; }
-  .mat-item-price { grid-area: price; text-align: left; }
+  .mat-item-price { grid-area: price; text-align: left; font-size: 0.88rem; }
+  .mat-qty { grid-area: qty; justify-content: flex-end; }
   .mat-item-total { grid-area: total; }
-  .mat-qty { grid-area: qty; justify-content: flex-start; }
 
-  .mat-qty-btn {
-    width: 40px;
+  .mat-qty-unit {
+    display: none;
+  }
+
+  .mat-stepper {
     height: 40px;
   }
 
-  .mat-qty input {
-    width: 84px;
-    min-height: 40px;
+  .mat-qty-btn {
+    width: 40px;
+  }
+
+  .mat-stepper input {
+    width: 54px;
+  }
+
+  .mat-picker-footer {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .mat-picker-actions {
     width: 100%;
   }
 
+  /* The app makes every .btn full width on phones; here Cancel stays small
+     and the main button takes the rest. */
   .mat-picker-actions .btn {
-    flex: 1;
+    flex: 0 0 auto;
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .mat-picker-actions .btn.primary {
+    flex: 1 1 0;
+    min-width: 0;
   }
 }
