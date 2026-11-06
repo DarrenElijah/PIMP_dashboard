@@ -13905,8 +13905,6 @@ input[type="search"] {
   font-weight: 800;
   text-align: center;
   font-variant-numeric: tabular-nums;
-  -moz-appearance: textfield;
-  appearance: textfield;
 }
 
 .mat-stepper input:focus {
@@ -13919,13 +13917,6 @@ input[type="search"] {
 .mat-stepper input::placeholder {
   color: #cbd5e1;
   font-weight: 700;
-}
-
-/* No browser spin arrows; the − and + buttons do that. */
-.mat-stepper input::-webkit-outer-spin-button,
-.mat-stepper input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
 }
 
 .mat-qty-unit {

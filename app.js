@@ -34462,7 +34462,8 @@ function on(selector, eventName, handler) {
    added, recognised by "<name> — <amount> ..."), so amounts can be changed,
    or set to 0 to remove that row. Rows typed by hand are never touched.
 
-   Prices: edit MATERIAL_PRICE_LIST below (price is per unit).
+   Prices: edit MATERIAL_PRICE_LIST below (price is per unit, before tax;
+   MATERIAL_TAX_RATE is added to every price).
    ========================================================================== */
 (function costTrackerMaterialList() {
   if (window.__pimpCostTrackerMaterialList) return;
@@ -34477,7 +34478,7 @@ function on(selector, eventName, handler) {
     { id: "tubewrap", label: "Tube Wrap", short: "Tube Wrap" },
     { id: "jacketing", label: "Jacketing & Wire Mesh", short: "Jacketing" },
     { id: "elbows", label: "Aluminum Elbows", short: "Elbows" },
-    { id: "banding", label: "Banding, Tape & Rope", short: "Banding" },
+    { id: "banding", label: "Banding & Tape", short: "Banding" },
     { id: "hardware", label: "Fasteners & Hardware", short: "Fasteners" },
     { id: "sealants", label: "Sealants", short: "Sealants" },
     { id: "pir", label: "2# PIR Pipe Insulation", short: "PIR" }
@@ -34489,10 +34490,11 @@ function on(selector, eventName, handler) {
   const MATERIAL_PRICE_LIST = [
     { id: "ceramic-fiber-1in-roll", group: "common", name: "Ceramic Fiber 1\" 8#", was: ["Ceramic Fiber #8 / 1\""], price: 93, unit: "roll", pack: "50 SF roll · 1\" × 24\" × 25'" },
     { id: "silicone-grey-cloth", group: "common", name: "Silicone Cloth Grey 1700", was: ["Silicone Grey Cloth 1700", "Silicone Cloth Grey 17oz"], price: 800, unit: "roll", step: 0.25, pack: "17oz · 60\" × 150' roll · split in 1/4 rolls" },
+    { id: "nylon-rope-1-8", group: "common", name: "Nylon Rope 1/8\"", was: ["Black Rope 1/8\""], price: 55, unit: "roll", pack: "500' roll" },
     { id: "velcro-straps", group: "common", name: "Velcro Straps", price: 4, unit: "each" },
+    { id: "washers", group: "common", name: "Washers 2-1/2\" 14GA", was: ["Speed Washer 14GA 2-1/2\"", "Speed Washers 2-1/2\" 14GA"], price: 188, unit: "box", pack: "Box of 1,000" },
 
     { id: "ceramic-fiber-2in-roll", group: "insulation", name: "Ceramic Fiber 2\" 8#", was: ["Ceramic Fiber #8 / 2\""], price: 186, unit: "roll", pack: "50 SF roll · 2\" × 48\" × 12.5'" },
-    { id: "ceramic-fiber-2in-sf", group: "insulation", name: "Ceramic Fiber 2\" 8# Inner Layer", was: ["2\" Ceramic Fiber 8# (inner layer)"], price: 3.5, unit: "SF", pack: "Comes in 50 SF rolls (2' × 25')" },
     { id: "mineral-wool-fsk-2in", group: "insulation", name: "Mineral Wool 2\" FSK Inner Layer", was: ["2\" Mineral Wool, FSK Cover (inner layer)"], price: 2.88, unit: "SF", pack: "FSK cover · comes in 60 SF rolls (3' × 20')" },
     { id: "mass-loaded-vinyl", group: "insulation", name: "Mass Loaded Vinyl 2#/SF", was: ["Mass Loaded Vinyl (2#/SF)"], price: 3.6, unit: "SF", pack: "Comes in 100 SF rolls (4' × 25')" },
     { id: "cal-sil-block-1-5", group: "insulation", name: "Cal Sil Block 1-1/2\" 3V", price: 7.94, unit: "each", pack: "1-1/2\" × 12\" × 36\" block · 3V scored" },
@@ -34504,7 +34506,7 @@ function on(selector, eventName, handler) {
 
     { id: "stucco-aluminum-roll", group: "jacketing", name: "Aluminum Stucco .016\"", was: ["Stucco Embossed Aluminum Roll"], price: 320, unit: "roll", pack: "Stucco embossed · 36\" × 100' roll" },
     { id: "aluminum-psmb-032", group: "jacketing", name: "Aluminum PSMB .032\"", was: ["0.032\" Aluminum w/ PSMB (weatherproofing)"], price: 2.4, unit: "SF", pack: "Weatherproofing · comes in 150 SF rolls (3' × 50')" },
-    { id: "knitted-wire-mesh", group: "jacketing", name: "Knitted Wire Mesh T304", price: 480, unit: "roll", pack: "50 lb roll" },
+    { id: "wire-mesh", group: "jacketing", name: "Wire Mesh T304", was: ["Knitted Wire Mesh T304"], price: 480, unit: "roll", pack: "Knitted · 50 lb roll" },
 
     { id: "al-elbow-9", group: "elbows", name: "Aluminum Elbow #9", was: ["2 Piece Aluminum Elbow #9"], price: 13.659, unit: "each", pack: "2-piece" },
     { id: "al-elbow-16", group: "elbows", name: "Aluminum Elbow #16", was: ["2 Piece Aluminum Elbow #16"], price: 16.328, unit: "each", pack: "2-piece" },
@@ -34513,12 +34515,9 @@ function on(selector, eventName, handler) {
     { id: "banding-half-020", group: "banding", name: "Banding 1/2\" x .020\"", was: ["Banding 1/2\" x 0.020\""], price: 147, unit: "roll", pack: "28 lb roll (93 ft)" },
     { id: "ss-banding-three-quarter", group: "banding", name: "SS Banding 3/4\" T304", was: ["SS Banding 3/4\" T-304"], price: 5.4, unit: "lb", pack: "Comes in 42 lb rolls (84 ft)" },
     { id: "filament-tape", group: "banding", name: "Filament Tape 3/4\"", price: 120, unit: "box", pack: "Box of 48 rolls" },
-    { id: "black-rope", group: "banding", name: "Black Rope 1/8\"", price: 55, unit: "roll", pack: "500' roll" },
 
-    { id: "speed-washer", group: "hardware", name: "Speed Washers 2-1/2\" 14GA", was: ["Speed Washer 14GA 2-1/2\""], price: 450, unit: "box", pack: "Box of 1,000" },
     { id: "self-tap-screws", group: "hardware", name: "Self-Tap Screws #8 x 1/2\" T304", was: ["T304 #8 x 1/2\" Self-Tap Screws w/ Neoprene Washers"], price: 75, unit: "box", pack: "Box of 100 · neoprene washers" },
-    { id: "hog-rings", group: "hardware", name: "Hog Rings 3/4\" T304", was: ["Hog Rings 3/4\" 304"], price: 225, unit: "box", pack: "Box of 1,000" },
-    { id: "hog-rings-16ga", group: "hardware", name: "Hog Rings 3/4\" 16GA SS", price: 125, unit: "box" },
+    { id: "hog-rings", group: "hardware", name: "Hog Rings 3/4\" 16GA SS", was: ["Hog Rings 3/4\" 304", "Hog Rings 3/4\" T304"], price: 125, unit: "box", pack: "Box of 1,000" },
     { id: "lacing-anchors", group: "hardware", name: "Lacing Anchors 4-1/2\" 14GA SS", price: 367, unit: "box" },
     { id: "toggle-latch", group: "hardware", name: "Toggle Latches IWR802", was: ["Toggle Latch Model IWR802"], price: 450, unit: "box", pack: "Box of 100" },
     { id: "wing-seals", group: "hardware", name: "Wing Seals 1/2\" T304", was: ["SS T304 Wing Seals 1/2\""], price: 65, unit: "box", pack: "Box of 1,000" },
@@ -34549,6 +34548,10 @@ function on(selector, eventName, handler) {
   };
   const DEFAULT_MARKUP = 25;
   const MAX_AMOUNT = 100000;
+  // MATERIAL_PRICE_LIST prices are before tax. Every price shown, written into
+  // a row and charged has this tax added (kept to a tenth of a cent).
+  const MATERIAL_TAX_RATE = 0.08;
+  const TAX_PERCENT_TEXT = `${Math.round(MATERIAL_TAX_RATE * 10000) / 100}%`;
 
   window.PIMP_MATERIAL_PRICE_LIST = MATERIAL_PRICE_LIST;
 
@@ -34560,7 +34563,8 @@ function on(selector, eventName, handler) {
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
   const cents = (value) => Math.round((Number(value) || 0) * 100) / 100;
   const unitOf = (item) => UNITS[item.unit] || UNITS.each;
-  const lineCost = (item, amount) => cents(item.price * amount);
+  const priceWithTax = (item) => Math.round(item.price * (1 + MATERIAL_TAX_RATE) * 1000) / 1000;
+  const lineCost = (item, amount) => cents(priceWithTax(item) * amount);
 
   function toast(message, isError = false) {
     try { if (typeof showToast === "function") showToast(message, isError); } catch {}
@@ -34574,7 +34578,7 @@ function on(selector, eventName, handler) {
   }
 
   function unitPriceText(item) {
-    const price = priceFormat.format(item.price);
+    const price = priceFormat.format(priceWithTax(item));
     return item.unit === "each" ? `${price} each` : `${price}/${unitOf(item).label}`;
   }
 
@@ -34656,7 +34660,8 @@ function on(selector, eventName, handler) {
   let jumpedTo = null;
 
   // − and + are left out of Tab order so Tab and Enter go amount to amount;
-  // the arrow keys still step an amount.
+  // the arrow keys still step an amount. The amount is a text box, not a
+  // number box: a focused number box changes when the list is scrolled.
   function itemHtml(item) {
     const unit = unitOf(item);
     return `
@@ -34665,11 +34670,11 @@ function on(selector, eventName, handler) {
           <span class="mat-item-name">${esc(item.name)}</span>
           ${item.pack ? `<span class="mat-item-pack">${esc(item.pack)}</span>` : ""}
         </div>
-        <div class="mat-item-price">${esc(priceFormat.format(item.price))}<small>/ ${esc(unit.label)}</small></div>
+        <div class="mat-item-price">${esc(priceFormat.format(priceWithTax(item)))}<small>/ ${esc(unit.label)}</small></div>
         <div class="mat-qty">
           <span class="mat-stepper">
             <button type="button" class="mat-qty-btn" data-material-step="-1" tabindex="-1" aria-label="Less ${esc(item.name)}">−</button>
-            <input type="number" min="0" step="${item.step || (unit.whole ? "1" : "any")}" inputmode="decimal" placeholder="0" data-material-qty="${esc(item.id)}" aria-label="Amount of ${esc(item.name)}, in ${esc(unit.plural)}" />
+            <input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="next" placeholder="0" data-material-qty="${esc(item.id)}" aria-label="Amount of ${esc(item.name)}, in ${esc(unit.plural)}" />
             <button type="button" class="mat-qty-btn" data-material-step="1" tabindex="-1" aria-label="More ${esc(item.name)}">+</button>
           </span>
           <span class="mat-qty-unit">${esc(unit.plural)}</span>
@@ -34707,7 +34712,7 @@ function on(selector, eventName, handler) {
           <div class="mat-picker-heading">
             <p class="eyebrow">Cost Tracker · Materials</p>
             <h3 id="materialPickerTitle">Material list</h3>
-            <p class="mat-picker-subtitle">Set amounts and add them to Materials with the usual 25% markup. Anything not listed can still be typed with + row.</p>
+            <p class="mat-picker-subtitle">Prices include ${esc(TAX_PERCENT_TEXT)} tax. Set amounts and add them to Materials with the usual 25% markup. Anything not listed can still be typed with + row.</p>
           </div>
           <button class="icon-btn mat-picker-close" type="button" data-material-picker-close aria-label="Close the material list">×</button>
         </header>
@@ -34751,8 +34756,7 @@ function on(selector, eventName, handler) {
         const itemEl = step.closest("[data-material-id]");
         const item = byId.get(itemEl?.dataset.materialId);
         if (!item) return;
-        const next = Math.max(0, (picks.get(item.id) || 0) + Number(step.dataset.materialStep) * (item.step || 1));
-        setAmount(item, next, { updateInput: true });
+        stepAmount(item, Number(step.dataset.materialStep));
         return;
       }
       const filter = event.target.closest("[data-material-filter]");
@@ -34772,6 +34776,8 @@ function on(selector, eventName, handler) {
     overlay.addEventListener("input", (event) => {
       const input = event.target.closest("[data-material-qty]");
       if (input) {
+        // Only numbers go in an amount.
+        if (/[^\d.,]/.test(input.value)) input.value = input.value.replace(/[^\d.,]/g, "");
         const item = byId.get(input.dataset.materialQty);
         if (item) setAmount(item, cleanAmount(item, input.value), { updateInput: false });
         return;
@@ -34789,6 +34795,14 @@ function on(selector, eventName, handler) {
     // Enter moves on: from the search to the first amount shown, and from one
     // amount to the next, so a list can be typed in without the mouse.
     overlay.addEventListener("keydown", (event) => {
+      const amount = event.target.closest("[data-material-qty]");
+      if (amount && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+        const item = byId.get(amount.dataset.materialQty);
+        if (!item) return;
+        event.preventDefault();
+        stepAmount(item, event.key === "ArrowUp" ? 1 : -1);
+        return;
+      }
       if (event.key !== "Enter" || !event.target.closest("#materialPickerSearch, [data-material-qty]")) return;
       event.preventDefault();
       const inputs = Array.from(overlay.querySelectorAll(".mat-item:not(.hidden) [data-material-qty]"));
@@ -34863,6 +34877,11 @@ function on(selector, eventName, handler) {
     else if (link.offsetLeft + link.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollLeft = link.offsetLeft + link.offsetWidth - nav.clientWidth + 12;
   }
 
+  // − / + and the arrow keys: one step (a quarter roll for split items).
+  function stepAmount(item, direction) {
+    setAmount(item, Math.max(0, (picks.get(item.id) || 0) + direction * (item.step || 1)), { updateInput: true });
+  }
+
   function itemElement(id) {
     return overlay.querySelector(`[data-material-id="${CSS.escape(id)}"]`);
   }
@@ -34911,8 +34930,8 @@ function on(selector, eventName, handler) {
     if (changes.changed) parts.push(`${changes.changed} to change`);
     if (changes.removed) parts.push(`${changes.removed} to remove`);
     overlay.querySelector("[data-material-summary-detail]").textContent = parts.length
-      ? `Cost before markup · ${parts.join(", ")}`
-      : picked.length ? "Cost before markup · already on this tracker" : "Pick an amount to add a material.";
+      ? `Cost with ${TAX_PERCENT_TEXT} tax, before markup · ${parts.join(", ")}`
+      : picked.length ? `Cost with ${TAX_PERCENT_TEXT} tax, before markup · already on this tracker` : "Pick an amount to add a material.";
     const apply = overlay.querySelector("#materialPickerApplyBtn");
     apply.disabled = !changes.any;
     apply.textContent = startingPicks.size ? "Update materials" : "Add to cost tracker";
